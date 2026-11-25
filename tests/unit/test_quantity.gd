@@ -1,6 +1,22 @@
 extends GutTest
 
 
+func test_outward_fraction_can_split_decimal_alignment_without_losing_direction() -> void:
+	var divisor := Quantity.from_count(101)
+	var floor_count := 99_009_900_990_099_009
+	var positive := Quantity.outward_ratio(Quantity.from_count(10), divisor, 18)
+	var negative := Quantity.outward_ratio(Quantity.from_count(-10), divisor, 18)
+	assert_eq(positive[0].native_at_scale(18), floor_count)
+	assert_eq(positive[1].native_at_scale(18), floor_count + 1)
+	assert_eq(negative[0].native_at_scale(18), -(floor_count + 1))
+	assert_eq(negative[1].native_at_scale(18), -floor_count)
+	var wide := Quantity.outward_ratio(Quantity.from_count(1000), divisor, 18)
+	assert_true(wide[1].uses_limbs)
+	assert_eq(wide[0].magnitude_text(), "990099009900990099")
+	assert_eq(wide[0].scale, 17)
+	assert_eq(wide[1].magnitude_text(), "9900990099009900991")
+
+
 func test_ordinary_counts_normalize_and_use_native_arithmetic() -> void:
 	var one := Quantity.from_count(1_000_000, 6)
 	var minus := Quantity.from_count(-215, 2)

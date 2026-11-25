@@ -7,38 +7,102 @@ class Measurements:
 	var cursor_bytes := 0
 	var error_bytes := 0
 	var max_static_memory := 0.0
+	var frame_intervals := PackedInt64Array()
 
 	func summary() -> Dictionary:
-		durations.sort()
-		var size := durations.size()
-		return {"histories": size, "represented_compact_postings": compact_count,
+		var result := {"histories": durations.size(), "represented_compact_postings": compact_count,
 			"interval_pool_postings": interval_count, "peak_cursor_bytes": cursor_bytes,
 			"peak_error_checkpoint_bytes": error_bytes, "sampled_global_static_memory_bytes": max_static_memory,
-			"native_us_per_history": {"p50": durations[ceili(size * 0.50) - 1],
-				"p95": durations[ceili(size * 0.95) - 1], "p99": durations[ceili(size * 0.99) - 1],
-				"max": durations[-1]}}
+			"native_us_per_history": _percentiles(durations)}
+		if not frame_intervals.is_empty():
+			result["rendered_frame_intervals"] = frame_intervals.size()
+			result["rendered_inter_frame_us"] = _percentiles(frame_intervals)
+		return result
+
+	static func _percentiles(samples: PackedInt64Array) -> Dictionary:
+		samples.sort()
+		var size := samples.size()
+		return {"p50": samples[ceili(size * 0.50) - 1], "p95": samples[ceili(size * 0.95) - 1],
+			"p99": samples[ceili(size * 0.99) - 1], "max": samples[-1]}
+
+
+class WorkloadView:
+	extends Node2D
+
+	var step: int
+
+	func _draw() -> void:
+		draw_rect(Rect2(0, 0, 960, 540), Color(0.86, 0.82, 0.72))
+		for index: int in 128:
+			var center := Vector2(30 + (index * 67 + step * 3) % 900, 24 + index * 83 % 460)
+			draw_circle(center, 7, Color(0.23, 0.29, 0.29))
+		draw_string(ThemeDB.fallback_font, Vector2(24, 516), "WP04 numeric workload • %d" % step)
+
+
+var _rows: Array
+var _output: FileAccess
+var _results: Array[Dictionary] = []
+var _measured := Measurements.new()
+var _display: WorkloadView
+var _previous_frame: int
+
 
 func _initialize() -> void:
 	var arguments := OS.get_cmdline_user_args()
-	if arguments.size() != 2:
+	var rendered := arguments.size() == 3 and arguments[2] == "rendered"
+	if arguments.size() != 2 and not rendered:
 		quit(2)
 		return
 	var rows: Variant = JSON.parse_string(FileAccess.get_file_as_string(arguments[0]))
-	var output := FileAccess.open(arguments[1], FileAccess.WRITE)
-	if not rows is Array or rows.is_empty() or output == null:
+	_output = FileAccess.open(arguments[1], FileAccess.WRITE)
+	if not rows is Array or rows.is_empty() or _output == null:
 		quit(2)
 		return
-	var results: Array[Dictionary] = []
-	var measured := Measurements.new()
-	for row: Dictionary in rows:
-		var result := _run(row, measured)
-		if result.is_empty():
+	_rows = rows
+	if rendered:
+		root.size = Vector2i(960, 540)
+		Engine.max_fps = 60
+		_display = WorkloadView.new()
+		root.add_child(_display)
+		process_frame.connect(_render_frame)
+		return
+	for row: Dictionary in _rows:
+		if not _record(row):
 			quit(1)
 			return
-		results.append(result)
-	output.store_string(JSON.stringify({"rows": results, "measurement": measured.summary()}))
-	output.close()
-	print("WP04_MIXED_LAYERS ", results.size())
+	_finish()
+
+
+func _render_frame() -> void:
+	var now := Time.get_ticks_usec()
+	var index := _results.size()
+	if index >= 30:
+		_measured.frame_intervals.append(now - _previous_frame)
+	_previous_frame = now
+	if not _record(_rows[index]):
+		process_frame.disconnect(_render_frame)
+		quit(1)
+		return
+	_display.step = index + 1
+	_display.queue_redraw()
+	if _results.size() == _rows.size():
+		process_frame.disconnect(_render_frame)
+		await RenderingServer.frame_post_draw
+		_finish()
+
+
+func _record(row: Dictionary) -> bool:
+	var result := _run(row, _measured)
+	if result.is_empty():
+		return false
+	_results.append(result)
+	return true
+
+
+func _finish() -> void:
+	_output.store_string(JSON.stringify({"rows": _results, "measurement": _measured.summary()}))
+	_output.close()
+	print("WP04_MIXED_LAYERS ", _results.size())
 	quit(0)
 
 
@@ -91,13 +155,20 @@ func _run(row: Dictionary, measured: Measurements) -> Dictionary:
 			hp.amount, bool(row["excess"]))
 	if healed == null:
 		return {}
+	var reserve := QuantityLayerLedger.Pool.new(Quantity.from_count(5), QuantityErrorBounds.new())
+	var cap := reserve.amount.add(Quantity.from_count(int(row["reserve_room_tenths"]), 1))
+	var converted := QuantityLayerLedger.recovery_to_reserve(QuantityFraction.from_amount(heal_offer),
+			heal_offer, final.hp.after, hp.amount, reserve, cap)
+	if converted == null:
+		return {}
 	elapsed += Time.get_ticks_usec() - before_final
 	measured.durations.append(elapsed)
 	measured.max_static_memory = maxf(measured.max_static_memory, Performance.get_monitor(Performance.MEMORY_STATIC))
 	var projected: Array[String] = []
 	for value: Quantity in [final.layers[0].spent, final.layers[1].spent, final.hp.spent, final.hp.after.amount,
 			final.overkill, final.incoming, final.eligible_hostile_hp, healed.hp_restored, healed.hp.amount,
-			healed.eligible_excess.amount, healed.discarded, origins[0], origins[1], origins[2]]:
+			healed.eligible_excess.amount, healed.discarded, origins[0], origins[1], origins[2],
+			converted.reserve_stored, converted.reserve_after.amount, converted.discarded]:
 		var image := _wire(value)
 		if image.is_empty():
 			return {}

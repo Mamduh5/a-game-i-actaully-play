@@ -32,6 +32,8 @@ class RecoveryDraft:
 	var discarded: Quantity
 	var offered: Quantity
 	var adjustment: Quantity
+	var reserve_after: Pool
+	var reserve_stored: Quantity
 
 
 static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Array[Pool],
@@ -39,13 +41,22 @@ static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Arra
 	if raw == null or nominal == null or nominal.sign_value < 0:
 		return null
 	var result := DamageDraft.new()
-	var raw_left := raw
+	var zero := Quantity.from_count(0)
+	var raw_left := raw if nominal.sign_value != 0 or raw.numerator.sign_value != 0 else null
 	var incoming_error: QuantityErrorBounds
 	var represented_left := nominal
-	var represented_spent := Quantity.from_count(0)
+	var represented_spent := zero
 	for pool: Pool in ordered_layers:
+		if raw_left == null:
+			var untouched := _untouched(pool, zero)
+			if untouched == null:
+				return null
+			result.layers.append(untouched)
+			continue
 		var bounds := _effective_bounds(pool, incoming_error)
-		var posting := _resolve(pool, bounds, raw_left, represented_left)
+		if bounds == null:
+			return null
+		var posting := QuantityThresholdDebit.resolve(pool.amount, bounds, raw_left, represented_left)
 		if posting == null:
 			return null
 		result.layers.append(_debit(posting, hostile))
@@ -55,7 +66,7 @@ static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Arra
 		represented_left = posting.overkill
 		incoming_error = null
 		if represented_left.sign_value == 0:
-			raw_left = QuantityFraction.from_amount(represented_left)
+			raw_left = null
 		else:
 			var exact_residual := bounds.exact_after(pool.amount, raw_left)
 			if exact_residual != null:
@@ -70,18 +81,28 @@ static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Arra
 					return null
 				incoming_error = residual_error.opposite()
 				raw_left = QuantityFraction.from_amount(represented_left)
-	var hit := _resolve(hp, _effective_bounds(hp, incoming_error), raw_left, represented_left)
-	if hit == null:
+				if raw_left == null:
+					return null
+	if raw_left == null:
+		result.hp = _untouched(hp, zero)
+		result.overkill = zero
+		result.incoming = represented_spent
+	else:
+		var bounds := _effective_bounds(hp, incoming_error)
+		if bounds == null:
+			return null
+		var hit := QuantityThresholdDebit.resolve(hp.amount, bounds, raw_left, represented_left)
+		if hit == null:
+			return null
+		result.hp = _debit(hit, false)
+		result.lethal = hit.debit.sign_value > 0 and hit.remaining.sign_value == 0
+		result.overkill = hit.overkill
+		result.incoming = represented_spent.add(hit.incoming)
+	if result.hp == null or result.incoming == null:
 		return null
-	result.hp = _debit(hit, false)
-	result.lethal = hit.debit.sign_value > 0 and hit.remaining.sign_value == 0
-	result.eligible_hostile_hp = hit.debit if hostile else Quantity.from_count(0)
-	result.overkill = hit.overkill
+	result.eligible_hostile_hp = result.hp.spent if hostile else zero
 	# Every threshold correction is attributable to this new origin. Existing receipts
 	# are immutable and never recomputed after a later target exhausts its pool.
-	result.incoming = represented_spent.add(hit.incoming)
-	if result.incoming == null:
-		return null
 	result.adjustment = result.incoming.subtract(nominal)
 	return result if result.adjustment != null else null
 
@@ -132,26 +153,55 @@ static func recovery(raw: QuantityFraction, nominal: Quantity, hp: Pool,
 	return result
 
 
+## Recovery and its one-to-one reserve conversion belong to the same origin.
+## A correction at the reserve boundary is included in this draft's offer.
+static func recovery_to_reserve(raw: QuantityFraction, nominal: Quantity, hp: Pool,
+		maximum: Quantity, reserve: Pool, reserve_cap: Quantity) -> RecoveryDraft:
+	if (reserve == null or reserve.amount == null or reserve.error == null or reserve_cap == null
+			or reserve.amount.sign_value < 0 or reserve.amount.compare(reserve_cap) > 0):
+		return null
+	var result := recovery(raw, nominal, hp, maximum, true)
+	if result == null:
+		return null
+	var excess := result.eligible_excess
+	var zero := Quantity.from_count(0)
+	result.reserve_stored = zero
+	result.reserve_after = reserve
+	if excess.amount.sign_value == 0:
+		return result
+
+	var room := reserve_cap.subtract(reserve.amount)
+	var room_error := reserve.error.opposite().minus(excess.error)
+	var deposit := QuantityThresholdDebit.resolve(room, room_error, QuantityFraction.from_amount(excess.amount),
+			excess.amount)
+	if deposit == null:
+		return null
+	var balance := reserve_cap.subtract(deposit.remaining)
+	var offer := result.hp_restored.add(deposit.incoming)
+	if balance == null or offer == null:
+		return null
+	result.reserve_after = Pool.new(balance, deposit.error.opposite())
+	result.reserve_stored = deposit.debit
+	result.eligible_excess = Pool.new(zero, QuantityErrorBounds.new())
+	result.discarded = deposit.overkill
+	result.offered = offer
+	result.adjustment = offer.subtract(nominal)
+	return result if result.adjustment != null else null
+
+
 static func _effective_bounds(pool: Pool, incoming_error: QuantityErrorBounds) -> QuantityErrorBounds:
-	if pool == null or pool.error == null:
+	if pool == null or pool.amount == null or pool.amount.sign_value < 0 or pool.error == null:
 		return null
 	return pool.error if incoming_error == null else pool.error.minus(incoming_error)
 
 
-static func _resolve(pool: Pool, bounds: QuantityErrorBounds, raw: QuantityFraction,
-		nominal: Quantity) -> QuantityThresholdDebit.Draft:
-	if pool == null or pool.amount == null or bounds == null or raw == null or pool.amount.sign_value < 0:
+static func _untouched(pool: Pool, zero: Quantity) -> Debit:
+	if _effective_bounds(pool, null) == null:
 		return null
-	if raw.numerator.sign_value == 0 and nominal.sign_value == 0:
-		var untouched := QuantityThresholdDebit.Draft.new()
-		untouched.incoming = nominal
-		untouched.debit = nominal
-		untouched.remaining = pool.amount
-		untouched.overkill = nominal
-		untouched.adjustment = nominal
-		untouched.error = bounds
-		return untouched
-	return QuantityThresholdDebit.resolve(pool.amount, bounds, raw, nominal)
+	var result := Debit.new()
+	result.spent = zero
+	result.after = Pool.new(pool.amount, pool.error)
+	return result
 
 
 static func _debit(posting: QuantityThresholdDebit.Draft, hostile: bool) -> Debit:

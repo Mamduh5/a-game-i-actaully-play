@@ -9,6 +9,8 @@ const REPLAY_LIMIT := 8
 const VERSION := 1
 const HEADER_SIZE := 3
 
+static var _zero_error := QuantityFraction.from_amount(Quantity.from_count(0))
+
 var _exact: QuantityFraction
 var _lower: Quantity
 var _upper: Quantity
@@ -17,7 +19,7 @@ var _suffix: Array[QuantityFraction] = []
 
 
 func _init(exact_image: QuantityFraction = null) -> void:
-	_exact = exact_image if exact_image != null else QuantityFraction.from_amount(Quantity.from_count(0))
+	_exact = exact_image if exact_image != null else _zero_error
 
 
 ## The caller supplies ideal and represented signed changes in the same orientation.

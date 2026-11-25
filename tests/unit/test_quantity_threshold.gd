@@ -194,6 +194,70 @@ func test_certified_heal_preserves_recovery_cap_and_positive_excess() -> void:
 	assert_eq(hp.amount.compare(Quantity.from_count(444445, 6)), 0)
 
 
+func test_mixed_rate_recovery_and_reserve_cap_share_one_attributed_offer() -> void:
+	var one := Quantity.from_count(1)
+	var hp := QuantityLayerLedger.Pool.new(one, QuantityErrorBounds.new())
+	for rate: QuantityFraction in [_fraction(2, 9), _fraction(3, 9)]:
+		var damage := QuantityThresholdDebit.resolve(hp.amount, hp.error, rate, _quantize(rate))
+		hp = QuantityLayerLedger.Pool.new(damage.remaining, damage.error)
+	hp.error = QuantityErrorBounds.restore(hp.error.snapshot())
+
+	var reserve := QuantityLayerLedger.Pool.new(one, QuantityErrorBounds.new())
+	var micro := Quantity.from_count(1, 6)
+	var cap := one.add(micro)
+	var fill := _fraction(5, 9).plus(QuantityFraction.from_amount(micro))
+	var quarter := _fraction(1, 4_000_000)
+	for sign_value: int in [-1, 0, 1]:
+		var raw := fill.plus(quarter if sign_value > 0 else quarter.opposite()) if sign_value != 0 else fill
+		var nominal := _quantize(raw)
+		var draft := QuantityLayerLedger.recovery_to_reserve(raw, nominal, hp, one, reserve, cap)
+		assert_not_null(draft)
+		if draft == null:
+			continue
+		assert_eq(draft.hp.amount.compare(one), 0)
+		assert_eq(draft.reserve_after.amount.compare(cap), mini(0, sign_value))
+		assert_eq(draft.discarded.sign_value, maxi(0, sign_value))
+		assert_eq(draft.eligible_excess.amount.sign_value, 0)
+		assert_eq(draft.reserve_after.amount.subtract(reserve.amount).compare(draft.reserve_stored), 0)
+		assert_eq(draft.hp_restored.add(draft.reserve_stored).add(draft.discarded).compare(draft.offered), 0)
+		assert_eq(draft.offered.subtract(nominal).compare(draft.adjustment), 0)
+		assert_eq(draft.reserve_after.error.certify_after(draft.reserve_after.amount, QuantityFraction.from_amount(cap)),
+			QuantityErrorBounds.Sign.BELOW if sign_value < 0 else QuantityErrorBounds.Sign.EQUAL)
+	assert_eq(reserve.amount.compare(one), 0)
+	assert_eq(hp.amount.compare(Quantity.from_count(444445, 6)), 0)
+
+
+func test_expired_reserve_replay_requires_certification_before_conversion() -> void:
+	var cap := Quantity.from_count(2)
+	var one := Quantity.from_count(1)
+	var hp := QuantityLayerLedger.Pool.new(one, QuantityErrorBounds.new())
+	var reserve := QuantityLayerLedger.Pool.new(Quantity.from_count(0), QuantityErrorBounds.new())
+	var ideal := _fraction(0, 1)
+	for denominator: int in [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173]:
+		var raw := _fraction(10, denominator)
+		var posted := QuantityLayerLedger.recovery_to_reserve(raw, _quantize(raw), hp, one, reserve, cap)
+		assert_not_null(posted)
+		if posted == null:
+			return
+		reserve = posted.reserve_after
+		ideal = ideal.plus(raw)
+	assert_false(reserve.error.is_exact())
+	assert_eq(reserve.error.replay_size(), 0)
+	var checkpoint := reserve.error.snapshot()
+	reserve.error = QuantityErrorBounds.restore(checkpoint)
+	var equality := QuantityFraction.from_amount(cap).plus(ideal.opposite())
+	assert_null(QuantityLayerLedger.recovery_to_reserve(equality, _quantize(equality), hp, one, reserve, cap))
+	assert_eq(reserve.error.snapshot(), checkpoint)
+
+	var excess := equality.plus(_fraction(1, 1000))
+	var capped := QuantityLayerLedger.recovery_to_reserve(excess, _quantize(excess), hp, one, reserve, cap)
+	assert_not_null(capped)
+	if capped != null:
+		assert_eq(capped.reserve_after.amount.compare(cap), 0)
+		assert_true(capped.reserve_after.error.is_exact())
+		assert_eq(capped.discarded.sign_value, 1)
+
+
 func _fraction(numerator: int, divisor: int) -> QuantityFraction:
 	return QuantityFraction.create(Quantity.from_count(numerator), Quantity.from_count(divisor))
 

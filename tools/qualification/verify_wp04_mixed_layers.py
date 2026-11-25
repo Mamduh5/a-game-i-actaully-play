@@ -24,8 +24,8 @@ def scenarios(count):
         rates = rng.sample(sources, 15)
         # The first layer has exhausted replay by the last hit. Samples vary
         # how far the final debit reaches through the remaining pools.
-        yield {"rates": rates, "hp": 20, "attack": [95, 97, 105, 118, 130][index % 5],
-               "excess": bool(index % 2)}
+        yield {"rates": rates, "hp": 20, "attack": [95, 99, 105, 118, 130][index % 5],
+               "excess": bool(index % 2), "reserve_room_tenths": [3, 12, 30][index % 3]}
 
 
 def wire(count):
@@ -69,8 +69,22 @@ def reference(row):
     assert exact_a + exact_b + exact_hp + exact_overkill == row["attack"]
     restored = min(2 * GRID, hp_limit - hp_left) if hp_left else 0
     excess = 2 * GRID - restored if hp_left and row["excess"] else 0
+    # Independent one-to-one capped reserve conversion from the same heal.
+    reserve = 5 * GRID
+    room = row["reserve_room_tenths"] * (GRID // 10)
+    convertible = 2 * GRID - restored if hp_left else 0
+    stored, discarded, reserve_room = consume(convertible, room)
+    ideal_room = Fraction(room, GRID)
+    ideal_excess = max(0, 2 - (row["hp"] - exact_hp_left)) if exact_hp_left else 0
+    ideal_stored, ideal_discarded, ideal_reserve_room = consume(ideal_excess, ideal_room)
+    for posted, exact in zip((stored, discarded, reserve_room),
+                             (ideal_stored, ideal_discarded, ideal_reserve_room), strict=True):
+        assert (posted > 0) == (exact > 0)
+        assert abs(Fraction(posted, GRID) - exact) <= len(row["rates"]) * half_quantum
+    assert restored + stored + discarded + (2 * GRID if hp_left == 0 else 0) == 2 * GRID
     fields = (a, b, hp, hp_left, overkill, attack, hp, restored, hp_left + restored, excess,
-              2 * GRID - restored - excess, *origin_totals)
+              2 * GRID - restored - excess, *origin_totals, stored, reserve + stored,
+              2 * GRID - restored - stored)
     return {"receipts": receipts, "amounts": [wire(amount) for amount in fields], "lethal": hp_left == 0,
             "depleted": [a_left == 0, b_left == 0], "first_interval_expired": True}
 
@@ -81,18 +95,24 @@ def main():
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--histories", type=int, default=96)
+    parser.add_argument("--rendered", action="store_true")
     args = parser.parse_args()
-    if args.histories < 1:
-        parser.error("--histories must be positive")
+    if args.histories < (31 if args.rendered else 1):
+        parser.error("provide at least 31 histories for a rendered run, or at least one for headless")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     rows = list(scenarios(args.histories))
     source, native, log = (output / name for name in ("vectors.json", "native.json", "native.log"))
     source.write_text(json.dumps(rows), encoding="utf-8")
+    command = [args.engine.resolve()]
+    if not args.rendered:
+        command.append("--headless")
+    command += ["--path", args.project.resolve(), "--script",
+                "res://tools/qualification/wp04_mixed_layers_probe.gd", "--", source, native]
+    if args.rendered:
+        command.append("rendered")
     with log.open("wb") as destination:
-        subprocess.run([args.engine.resolve(), "--headless", "--path", args.project.resolve(), "--script",
-                        "res://tools/qualification/wp04_mixed_layers_probe.gd", "--", source, native],
-                       stdout=destination, stderr=subprocess.STDOUT, check=True, timeout=180,
+        subprocess.run(command, stdout=destination, stderr=subprocess.STDOUT, check=True, timeout=180,
                        creationflags=subprocess.CREATE_NO_WINDOW)
     if "ERROR:" in log.read_text(encoding="utf-8", errors="replace"):
         raise ValueError("Native mixed-rate probe reported an error")

@@ -115,6 +115,11 @@ static func round_ratio(numerator: Quantity, denominator: Quantity, target: int)
 
 ## Conservative adjacent grid values for an exact ratio.
 static func outward_ratio(numerator: Quantity, denominator: Quantity, target: int) -> Array[Quantity]:
+	if (target >= 0 and target < INT_POWERS.size() and numerator._scale == 0 and denominator._scale == 0
+			and not numerator.uses_limbs and not denominator.uses_limbs and denominator._sign > 0):
+		var compact := _outward_native(numerator, denominator._native, target)
+		if not compact.is_empty():
+			return compact
 	var nearest := round_ratio(numerator, denominator, target)
 	if nearest == null:
 		return []
@@ -131,6 +136,40 @@ static func outward_ratio(numerator: Quantity, denominator: Quantity, target: in
 	if order > 0:
 		return [adjacent, nearest]
 	return [nearest, adjacent]
+
+
+## Long division in at most two decimal chunks. Small-rate numerators can
+## exceed int64 when scaled all at once, even though the result fits.
+static func _outward_native(numerator: Quantity, divisor: int, target: int) -> Array[Quantity]:
+	@warning_ignore("integer_division")
+	var whole := numerator._native / divisor
+	var remainder := numerator._native % divisor
+	var places := target
+	while places > 0:
+		var next := mini(places, 9)
+		var radix := INT_POWERS[next]
+		@warning_ignore("integer_division")
+		var limit := INT_MAX / radix
+		if whole > limit or remainder > limit:
+			return []
+		var shifted := remainder * radix
+		@warning_ignore("integer_division")
+		var digit := shifted / divisor
+		whole *= radix
+		if whole > INT_MAX - digit:
+			return []
+		whole += digit
+		remainder = shifted % divisor
+		places -= next
+	var lower := from_count(numerator._sign * whole, target)
+	if remainder == 0:
+		return [lower, lower]
+	if whole == INT_MAX:
+		return []
+	var upper := from_count(numerator._sign * (whole + 1), target)
+	if numerator._sign >= 0:
+		return [lower, upper]
+	return [upper, lower]
 
 
 ## Truncated integer quotient and remainder. The remainder follows the dividend's sign.
