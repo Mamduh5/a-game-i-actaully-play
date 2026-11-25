@@ -2,7 +2,7 @@ class_name GuestReplica
 extends RefCounted
 ## Guest-only view state. Rendering samples never enter the authority command path.
 
-enum Acceptance { APPLIED, STALE, NEED_BASELINE, INVALID }
+enum Acceptance { APPLIED, STALE, NEED_BASELINE, INVALID, WAITING_FOR_PARTS }
 
 var _epoch: int
 var _baseline: int
@@ -12,6 +12,7 @@ var _wanted_epoch: int
 var _wanted_baseline: int
 var _latest: RecipientView.Snapshot
 var _previous: RecipientView.Snapshot
+var _view_parts := ReplicationChunks.new()
 
 
 ## Call only after movement has accepted the reliable baseline for this scope.
@@ -34,9 +35,22 @@ func install_scope(realm: StringName, state: MovementSnapshot) -> bool:
 
 func receive_frame(frame: NativeSessionFrame) -> Acceptance:
 	var wire := ReplicationMessage.read(frame)
-	if wire == null or wire.kind != ReplicationMessage.Kind.VIEW:
+	if wire == null:
 		return Acceptance.INVALID
-	var sample := RecipientView.read(wire.body)
+	match wire.kind:
+		ReplicationMessage.Kind.VIEW:
+			return _receive_view(wire.body)
+		ReplicationMessage.Kind.SNAPSHOT_PART:
+			var assembly := _view_parts.accept(frame.generation, wire, ReplicationMessage.Kind.VIEW)
+			match assembly.result:
+				ReplicationChunks.Result.COMPLETE: return _receive_view(assembly.body)
+				ReplicationChunks.Result.WAITING: return Acceptance.WAITING_FOR_PARTS
+				ReplicationChunks.Result.STALE: return Acceptance.STALE
+	return Acceptance.INVALID
+
+
+func _receive_view(bytes: PackedByteArray) -> Acceptance:
+	var sample := RecipientView.read(bytes)
 	if sample == null:
 		return Acceptance.INVALID
 	if sample.epoch < _wanted_epoch or (sample.epoch == _wanted_epoch and sample.baseline < _wanted_baseline):

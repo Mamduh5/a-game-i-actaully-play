@@ -13,10 +13,18 @@ var blockers: Array[GuestMovement.Blocker] = []
 
 
 func pack() -> PackedByteArray:
+	return _encode(ReplicationMessage.MAX_BODY)
+
+
+func envelopes(transfer: int) -> Array[PackedByteArray]:
+	return ReplicationChunks.split(ReplicationMessage.Kind.BASELINE, transfer, _encode(ReplicationChunks.MAX_ASSEMBLED))
+
+
+func _encode(limit: int) -> PackedByteArray:
 	var name_bytes := String(realm).to_utf8_buffer()
 	var state_bytes := state.pack() if state != null else PackedByteArray()
 	var size := HEADER_SIZE + name_bytes.size() + state_bytes.size() + blockers.size() * EDGE_SIZE
-	if (not _valid_name(name_bytes) or state_bytes.is_empty() or size > ReplicationMessage.MAX_BODY):
+	if (not _valid_name(name_bytes) or state_bytes.is_empty() or size > limit):
 		return PackedByteArray()
 	var bytes := PackedByteArray()
 	bytes.resize(HEADER_SIZE)
@@ -39,7 +47,7 @@ func pack() -> PackedByteArray:
 
 
 static func read(bytes: PackedByteArray) -> MovementBaseline:
-	if bytes.size() < HEADER_SIZE + MovementSnapshot.SIZE or bytes.size() > ReplicationMessage.MAX_BODY or bytes[0] != VERSION:
+	if bytes.size() < HEADER_SIZE + MovementSnapshot.SIZE or bytes.size() > ReplicationChunks.MAX_ASSEMBLED or bytes[0] != VERSION:
 		return null
 	var state_start := HEADER_SIZE + int(bytes[1])
 	var edge_start := state_start + MovementSnapshot.SIZE

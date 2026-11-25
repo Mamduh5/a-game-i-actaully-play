@@ -246,6 +246,56 @@ func test_view_reader_rejects_imprecise_out_of_range_and_malformed_rows() -> voi
 	assert_null(RecipientView.read(JSON.stringify(decoded).to_utf8_buffer()))
 
 
+func test_large_disclosures_apply_atomically_and_reject_a_gap_or_an_older_transfer() -> void:
+	var guest := GuestMovement.new()
+	var baseline := MovementBaseline.new()
+	baseline.realm = &"core"
+	baseline.state = _state(1, 1, 1, 0, 0, 0.0)
+	for index: int in 400:
+		baseline.blockers.append(_wall(5.0 + index * 10))
+	assert_true(baseline.pack().is_empty())
+	var parts := baseline.envelopes(10)
+	assert_gt(parts.size(), 3)
+	assert_eq(guest.receive_frame(_reliable_frame(parts[0])), Acceptance.WAITING_FOR_PARTS)
+	assert_null(guest.position())
+	assert_eq(guest.receive_frame(_reliable_frame(parts[2])), Acceptance.INVALID)
+	assert_eq(guest.receive_frame(_reliable_frame(parts[1])), Acceptance.INVALID)
+	assert_null(guest.position())
+	var newer := baseline.envelopes(11)
+	for index: int in newer.size():
+		assert_eq(guest.receive_frame(_reliable_frame(newer[index])),
+			Acceptance.APPLIED if index == newer.size() - 1 else Acceptance.WAITING_FOR_PARTS)
+	assert_eq(guest.receive_frame(_reliable_frame(parts[0])), Acceptance.STALE)
+	assert_eq(guest.position().x, 0.0)
+	assert_false(guest.issue(_axis(1.0)).is_empty())
+	for step: int in 7:
+		assert_true(guest.advance())
+	assert_almost_eq(guest.position().x, 4.0, 0.000001)
+	var realm := RecipientView.Scope.new()
+	realm.seat = &"guest"
+	realm.realm = baseline.realm
+	var actors: Array[RecipientView.Actor] = []
+	for index: int in 400:
+		var id := StringName("disclosed_actor_%04d" % index)
+		realm.actors[id] = true
+		actors.append(_actor(id, realm.realm, index * 11.0))
+	actors.append(_actor(&"denied", realm.realm, 773451.0))
+	var view := RecipientView.pack(realm, 1, 1, 2, 1, "0", {}, actors, [], null, ReplicationChunks.MAX_ASSEMBLED)
+	assert_false(view.get_string_from_utf8().contains("773451"))
+	assert_true(view.size() > ReplicationMessage.MAX_BODY)
+	var segments := ReplicationChunks.split(ReplicationMessage.Kind.VIEW, 12, view)
+	var replica := GuestReplica.new()
+	var move_scope := guest.confirmed_scope()
+	assert_true(replica.install_scope(move_scope.realm, move_scope.state))
+	for index: int in segments.size() - 1:
+		assert_eq(replica.receive_frame(_reliable_frame(segments[index])), GuestReplica.Acceptance.WAITING_FOR_PARTS)
+		assert_true(replica.actor_ids().is_empty())
+	assert_eq(replica.receive_frame(_reliable_frame(segments[-1])), GuestReplica.Acceptance.APPLIED)
+	assert_eq(replica.actor_ids().size(), 400)
+	assert_null(replica.actor_pose("denied", 2))
+	assert_eq(replica.receive_frame(_reliable_frame(segments[-1])), GuestReplica.Acceptance.STALE)
+
+
 func test_projection_filters_before_serializing_actor_fog_and_timed_warning_rows() -> void:
 	var layout := WorldTopology.generate(22)
 	var world := WorldExploration.create(layout, [&"host", &"guest"])
@@ -304,6 +354,14 @@ static func _axis(x: float) -> PlayerCommand:
 
 static func _movement_wire(epoch: int, baseline: int) -> PackedByteArray:
 	return ReplicationMessage.pack(ReplicationMessage.Kind.MOVEMENT, MovementFrame.pack(epoch, baseline, 3, _axis(1.0)))
+
+
+static func _reliable_frame(payload: PackedByteArray) -> NativeSessionFrame:
+	var frame := NativeSessionFrame.new()
+	frame.kind = NativeSessionFrame.Kind.RELIABLE
+	frame.generation = 1
+	frame.payload = payload
+	return frame
 
 
 static func _view_frame(epoch: int, baseline: int, tick: int, realm: StringName,

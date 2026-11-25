@@ -43,7 +43,7 @@ class Snapshot:
 ## its own cue ID and never requires the actor's row or private identity.
 static func pack(scope: Scope, epoch: int, baseline: int, tick: int, shared_level: int, shared_xp: String,
 		party: Dictionary[StringName, StringName], actors: Array[Actor], warnings: Array[Warning],
-		exploration: WorldExploration) -> PackedByteArray:
+		exploration: WorldExploration, limit: int = ReplicationMessage.MAX_BODY) -> PackedByteArray:
 	if (scope == null or scope.seat.is_empty() or scope.realm.is_empty() or epoch <= 0 or baseline <= 0
 			or tick < 0 or tick > RunAuthority.MAX_TICK or shared_level < 0 or not _valid_xp(shared_xp)):
 		return PackedByteArray()
@@ -78,11 +78,11 @@ static func pack(scope: Scope, epoch: int, baseline: int, tick: int, shared_leve
 		"realm": String(scope.realm), "level": str(shared_level), "xp": shared_xp, "party": statuses,
 		"actors": visible, "warnings": cues, "explored": cells}
 	var bytes := JSON.stringify(permitted, "", true, true).to_utf8_buffer()
-	return bytes if bytes.size() <= ReplicationMessage.MAX_BODY else PackedByteArray()
+	return bytes if bytes.size() <= mini(limit, ReplicationChunks.MAX_ASSEMBLED) else PackedByteArray()
 
 
 static func read(bytes: PackedByteArray) -> Snapshot:
-	if bytes.is_empty() or bytes.size() > ReplicationMessage.MAX_BODY:
+	if bytes.is_empty() or bytes.size() > ReplicationChunks.MAX_ASSEMBLED:
 		return null
 	var decoded: Variant = JSON.parse_string(bytes.get_string_from_utf8())
 	if not decoded is Dictionary or decoded.size() != 11 or not _number(decoded.get("v")) or decoded["v"] != VERSION:

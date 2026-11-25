@@ -9,6 +9,8 @@ const SEAT := &"guest"
 const BODY := &"character"
 const RUN_EPOCH := 2
 const BASELINE := 2
+const EXTRA_ACTORS := 220
+const EXTRA_BLOCKERS := 280
 
 class ProbeAuthority extends RunAuthority:
 	var controls := PlayerControlState.new()
@@ -24,8 +26,17 @@ class ProbeAuthority extends RunAuthority:
 		moved = controls.step(geometry, BODY, 0, 1, 60.0, GuestMovement.SECONDS_PER_TICK) != null
 		return []
 
+class ObservedReplica extends GuestReplica:
+	var last_view: PackedByteArray
+
+	func _receive_view(bytes: PackedByteArray) -> GuestReplica.Acceptance:
+		var verdict := super._receive_view(bytes)
+		if verdict == GuestReplica.Acceptance.APPLIED:
+			last_view = bytes
+		return verdict
+
 var _movement := GuestMovement.new()
-var _replica := GuestReplica.new()
+var _replica := ObservedReplica.new()
 var _bridge := HostMovementBridge.new()
 var _authority := ProbeAuthority.new()
 var _peer: ENetPacketPeer
@@ -38,6 +49,7 @@ var _baseline_at: int
 var _move_at: int
 var _motion_ticks: int
 var _movement_sequence: int
+var _reliable_sequence: int
 var _ack_at: int
 var _leave_at: int
 var _caught_stale := false
@@ -46,6 +58,7 @@ var _saw_unlock := false
 var _saw_view := false
 var _avatar: Polygon2D
 var _result: Dictionary = {}
+var _large := OS.get_environment("AGIP_WP12_LARGE_VIEW") == "1"
 
 
 func _ready() -> void:
@@ -59,13 +72,18 @@ func _ready() -> void:
 		setup.catalog_revision = &"fixture"
 		setup.challenge_id = &"fixture"
 		setup.initial_realms = {SEAT: REALM}
-		var edge := RealmOutline.Edge.new()
-		edge.first = _wall().first
-		edge.last = _wall().last
 		if (not _authority.start(setup, &"host")
-				or not _authority.geometry.add_circle(BODY, 0, RealmSweep.Point.new(0.0, 0.0), 1.0, 2)
-				or not _authority.geometry.add_segment(&"wall", 0, edge, 1, true)):
+				or not _authority.geometry.add_circle(BODY, 0, RealmSweep.Point.new(0.0, 0.0), 1.0, 2)):
 			_finish(false)
+			return
+		var disclosed := _disclosed_blockers()
+		for index: int in disclosed.size():
+			var edge := RealmOutline.Edge.new()
+			edge.first = disclosed[index].first
+			edge.last = disclosed[index].last
+			if not _authority.geometry.add_segment(&"wall", index, edge, 1, true):
+				_finish(false)
+				return
 	elif _role == "guest" and DisplayServer.get_name() != "headless":
 		_make_stage()
 
@@ -141,9 +159,9 @@ func _publish() -> bool:
 			var reset := MovementBaseline.new()
 			reset.realm = REALM
 			reset.state = _state(1, 0.0)
-			reset.blockers = [_wall()]
+			reset.blockers = _disclosed_blockers()
 			_host_state = 3
-			return _send_host(Kinds.BASELINE, 1, reset.pack())
+			return _send_reliable_parts("baseline_parts", reset.envelopes(1))
 		4:
 			var state := _state(2, 1.0)
 			state.tick = 1
@@ -152,7 +170,8 @@ func _publish() -> bool:
 			_result["closed_movement_ack"] = state.acknowledged
 			_host_state = 5
 			_next_publish = Time.get_ticks_msec() + 91
-			return _send_host(Kinds.STATE, 2, state.pack()) and _send_host(Kinds.VIEW, 2, _view())
+			return (_send_host(Kinds.STATE, 2, state.pack())
+				and _send_reliable_parts("view_parts", ReplicationChunks.split(Kinds.VIEW, 2, _view(_large))))
 		5:
 			if not _authority.geometry.commit_circle_pose(BODY, 0, RealmSweep.Point.new(9.0, 0.0)):
 				return false
@@ -192,9 +211,12 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 	var wire := ReplicationMessage.read(frame)
 	if wire == null:
 		return false
-	if wire.kind == Kinds.VIEW:
-		return _observe_view(frame, wire.body)
+	var payload_kind: int = ReplicationChunks.payload_kind(wire) if wire.kind == Kinds.SNAPSHOT_PART else wire.kind
+	if payload_kind == Kinds.VIEW:
+		return _observe_view(frame)
 	var verdict := _movement.receive_frame(frame)
+	if verdict == Accepted.WAITING_FOR_PARTS:
+		return true
 	if verdict == Accepted.NEED_BASELINE and _baseline_at == 0:
 		_result["missing_baseline_detected"] = true
 		return _resync_sequence == 1 and _request_baseline()
@@ -204,8 +226,8 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 		return _caught_stale
 	if verdict != Accepted.APPLIED:
 		return false
-	if wire.kind == Kinds.BASELINE:
-		var scope := MovementBaseline.read(wire.body)
+	if payload_kind == Kinds.BASELINE:
+		var scope := _movement.confirmed_scope()
 		if scope == null or not _replica.install_scope(scope.realm, scope.state):
 			return false
 		_baseline_at = Time.get_ticks_msec()
@@ -280,20 +302,41 @@ func _send_host(kind: ReplicationMessage.Kind, sequence: int, bytes: PackedByteA
 	return _session.send(_connection, ReplicationMessage.transport_kind(kind), sequence, ReplicationMessage.pack(kind, bytes)) == OK
 
 
-func _observe_view(frame: NativeSessionFrame, bytes: PackedByteArray) -> bool:
-	if _replica.receive_frame(frame) != GuestReplica.Acceptance.APPLIED or _replica.actor_ids() != ["visible"]:
+func _send_reliable_parts(receipt_field: String, parts: Array[PackedByteArray]) -> bool:
+	_result[receipt_field] = parts.size()
+	for payload: PackedByteArray in parts:
+		_reliable_sequence += 1
+		if _session.send(_connection, RELIABLE, _reliable_sequence, payload) != OK:
+			return false
+	return not parts.is_empty()
+
+
+func _observe_view(frame: NativeSessionFrame) -> bool:
+	var verdict := _replica.receive_frame(frame)
+	if verdict == GuestReplica.Acceptance.WAITING_FOR_PARTS:
+		return not _saw_view and _replica.actor_ids().is_empty()
+	if verdict != GuestReplica.Acceptance.APPLIED:
+		return false
+	var ids := _replica.actor_ids()
+	if not "visible" in ids or ids.size() != (1 + EXTRA_ACTORS if _large else 1):
 		return false
 	var cue := _replica.warning_sample("eligible-cue")
 	if (cue == null or _replica.active_warning_ids(cue.activation - 1).has("eligible-cue")
 			or not _replica.active_warning_ids(cue.activation).has("eligible-cue")
 			or _replica.active_warning_ids(cue.impact + 1).has("eligible-cue")):
 		return false
-	var decoded: Variant = JSON.parse_string(bytes.get_string_from_utf8())
-	if not decoded is Dictionary or bytes.get_string_from_utf8().contains("773451"):
+	var bytes := _replica.last_view
+	var raw := bytes.get_string_from_utf8()
+	var decoded: Variant = JSON.parse_string(raw)
+	if not decoded is Dictionary or raw.contains("773451") or "remote" in ids or "hidden" in ids:
 		return false
 	_result["view_sha256"] = _digest(bytes)
 	_result["warning_lead_from_sample_tick"] = cue.impact - String(decoded["tick"]).to_int()
-	_result["filtered_view"] = decoded
+	if _large:
+		_result["disclosed_actor_count"] = ids.size()
+		_result["view_bytes"] = bytes.size()
+	else:
+		_result["filtered_view"] = decoded
 	_saw_view = true
 	if _avatar != null:
 		var marker := Line2D.new()
@@ -350,14 +393,22 @@ static func _state(serial: int, x: float) -> MovementSnapshot:
 	return state
 
 
-static func _wall() -> GuestMovement.Blocker:
+func _disclosed_blockers() -> Array[GuestMovement.Blocker]:
+	var disclosed: Array[GuestMovement.Blocker] = [_wall(5.0)]
+	if _large:
+		for index: int in EXTRA_BLOCKERS:
+			disclosed.append(_wall(20.0 + index * 10))
+	return disclosed
+
+
+static func _wall(x: float) -> GuestMovement.Blocker:
 	var blocker := GuestMovement.Blocker.new()
-	blocker.first = RealmSweep.Point.new(5.0, -20.0)
-	blocker.last = RealmSweep.Point.new(5.0, 20.0)
+	blocker.first = RealmSweep.Point.new(x, -20.0)
+	blocker.last = RealmSweep.Point.new(x, 20.0)
 	return blocker
 
 
-static func _view() -> PackedByteArray:
+static func _view(large: bool) -> PackedByteArray:
 	var scope := RecipientView.Scope.new()
 	scope.seat = SEAT
 	scope.realm = REALM
@@ -370,6 +421,14 @@ static func _view() -> PackedByteArray:
 		actor.realm = &"other" if id == &"remote" else REALM
 		actor.position = RealmSweep.Point.new(2.0 if id == &"visible" else 773451.0, 0.0)
 		actors.append(actor)
+	if large:
+		for index: int in EXTRA_ACTORS:
+			var actor := RecipientView.Actor.new()
+			actor.id = StringName("disclosed_actor_%04d" % index)
+			actor.realm = REALM
+			actor.position = RealmSweep.Point.new(index * 2.0, 2.0)
+			scope.actors[actor.id] = true
+			actors.append(actor)
 	var warning := RecipientView.Warning.new()
 	warning.id = &"eligible-cue"
 	warning.realm = REALM
@@ -378,7 +437,8 @@ static func _view() -> PackedByteArray:
 	warning.radius = 1.0
 	warning.activation = 20
 	warning.impact = 30
-	return RecipientView.pack(scope, RUN_EPOCH, BASELINE, 1, 1, "0", {SEAT: &"living"}, actors, [warning], null)
+	return RecipientView.pack(scope, RUN_EPOCH, BASELINE, 1, 1, "0", {SEAT: &"living"}, actors, [warning], null,
+		ReplicationChunks.MAX_ASSEMBLED)
 
 
 static func _digest(bytes: PackedByteArray) -> String:

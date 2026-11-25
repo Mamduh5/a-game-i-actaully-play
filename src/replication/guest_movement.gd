@@ -3,7 +3,7 @@ extends RefCounted
 ## Predicts the local circle against a detached set of disclosed blockers.
 ## Host snapshots always own the reset pose, speed and input frontier.
 
-enum Acceptance { APPLIED, STALE, NEED_BASELINE, INVALID }
+enum Acceptance { APPLIED, STALE, NEED_BASELINE, INVALID, WAITING_FOR_PARTS }
 
 const MAX_PREDICTION_STEPS := 64
 const SECONDS_PER_TICK := 1.0 / 60.0
@@ -32,6 +32,10 @@ class Playback:
 	var tick: int
 	var applied: int
 
+class Scope:
+	var realm: StringName
+	var state: MovementSnapshot
+
 var _realm: StringName
 var _confirmed: MovementSnapshot
 var _known: Array[Blocker] = []
@@ -42,6 +46,7 @@ var _needs_baseline := true
 var _wanted_epoch: int
 var _wanted_baseline: int
 var _display: RealmSweep.Point
+var _baseline_parts := ReplicationChunks.new()
 
 
 func install_baseline(realm: StringName, state: MovementSnapshot, disclosed: Array[Blocker]) -> Acceptance:
@@ -82,11 +87,21 @@ func receive_frame(frame: NativeSessionFrame) -> Acceptance:
 		return Acceptance.INVALID
 	match wire.kind:
 		ReplicationMessage.Kind.BASELINE:
-			var reset := MovementBaseline.read(wire.body)
-			return install_baseline(reset.realm, reset.state, reset.blockers) if reset != null else Acceptance.INVALID
+			return _receive_baseline(wire.body)
 		ReplicationMessage.Kind.STATE:
 			return receive(MovementSnapshot.read(wire.body))
+		ReplicationMessage.Kind.SNAPSHOT_PART:
+			var assembly := _baseline_parts.accept(frame.generation, wire, ReplicationMessage.Kind.BASELINE)
+			match assembly.result:
+				ReplicationChunks.Result.COMPLETE: return _receive_baseline(assembly.body)
+				ReplicationChunks.Result.WAITING: return Acceptance.WAITING_FOR_PARTS
+				ReplicationChunks.Result.STALE: return Acceptance.STALE
 	return Acceptance.INVALID
+
+
+func _receive_baseline(bytes: PackedByteArray) -> Acceptance:
+	var reset := MovementBaseline.read(bytes)
+	return install_baseline(reset.realm, reset.state, reset.blockers) if reset != null else Acceptance.INVALID
 
 
 func receive(state: MovementSnapshot) -> Acceptance:
@@ -160,6 +175,15 @@ func advance() -> bool:
 
 func position() -> RealmSweep.Point:
 	return _playback.geometry.circle_center(LOCAL_BODY, 0) if _playback != null else null
+
+
+func confirmed_scope() -> Scope:
+	if _confirmed == null:
+		return null
+	var scope := Scope.new()
+	scope.realm = _realm
+	scope.state = MovementSnapshot.read(_confirmed.pack())
+	return scope
 
 
 func needs_baseline() -> bool:

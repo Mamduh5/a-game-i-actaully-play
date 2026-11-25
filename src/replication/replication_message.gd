@@ -2,7 +2,7 @@ class_name ReplicationMessage
 extends RefCounted
 ## Explicit application messages over the qualified native session channels.
 
-enum Kind { MOVEMENT, BASELINE, STATE, RESYNC, VIEW }
+enum Kind { MOVEMENT, BASELINE, STATE, RESYNC, VIEW, SNAPSHOT_PART }
 
 const VERSION := 1
 const HEADER_SIZE := 2
@@ -21,7 +21,7 @@ static func pack(message_kind: Kind, bytes: PackedByteArray) -> PackedByteArray:
 static func read(frame: NativeSessionFrame) -> ReplicationMessage:
 	if frame == null or frame.payload.size() <= HEADER_SIZE or frame.payload.size() > NativeSessionFrame.MAX_PAYLOAD:
 		return null
-	if frame.payload[0] != VERSION or frame.payload[1] > Kind.VIEW:
+	if frame.payload[0] != VERSION or frame.payload[1] > Kind.SNAPSHOT_PART:
 		return null
 	var message_kind := frame.payload[1] as Kind
 	if frame.kind != transport_kind(message_kind):
@@ -36,6 +36,6 @@ static func transport_kind(message_kind: Kind) -> NativeSessionFrame.Kind:
 	match message_kind:
 		Kind.MOVEMENT, Kind.STATE:
 			return NativeSessionFrame.Kind.SEQUENCED
-		Kind.BASELINE, Kind.RESYNC, Kind.VIEW:
+		Kind.BASELINE, Kind.RESYNC, Kind.VIEW, Kind.SNAPSHOT_PART:
 			return NativeSessionFrame.Kind.RELIABLE
 	return NativeSessionFrame.Kind.ADMISSION
