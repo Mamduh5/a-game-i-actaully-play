@@ -1,0 +1,50 @@
+[gd_scene format=3 uid="uid://81wx1ask3sjm"]
+
+[ext_resource type="Script" uid="uid://brqql4o5uugps" path="res://dev/fixtures/harness_probe.gd" id="1_probe"]
+
+[node name="HarnessProbe" type="Control" unique_id=1493592664]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_probe")
+
+[node name="Backdrop" type="ColorRect" parent="." unique_id=998657613]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.86, 0.88, 0.9, 1)
+
+[node name="FixtureLabel" type="Label" parent="." unique_id=1056536288]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 16.0
+offset_right = 624.0
+offset_bottom = 42.0
+theme_override_colors/font_color = Color(0.5, 0.1, 0.1, 1)
+text = "DEVELOPMENT FIXTURE · harness probe"
+
+[node name="ProbeButton" type="Button" parent="." unique_id=1812743697]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 540.0
+offset_top = 320.0
+offset_right = 740.0
+offset_bottom = 380.0
+text = "Probe"
+
+[node name="StatusLabel" type="Label" parent="." unique_id=1715030101]
+unique_name_in_owner = true
+layout_mode = 0
+offset_left = 540.0
+offset_top = 400.0
+offset_right = 840.0
+offset_bottom = 426.0
+theme_override_colors/font_color = Color(0.16, 0.15, 0.14, 1)
+text = "Probe presses: 0"
