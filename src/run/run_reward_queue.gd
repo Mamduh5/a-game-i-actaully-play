@@ -88,6 +88,65 @@ func ranks() -> Dictionary[StringName, int]:
 	return _ranks.duplicate()
 
 
+func checkpoint() -> Dictionary:
+	var pending: Array[Array] = []
+	for offer: Offer in _open.values():
+		pending.append([offer.ordinal, offer.earned_at, offer.options.duplicate()])
+	return {"ordinal": _last_offer, "ranks": _ranks.duplicate(), "shown": _last_shown.duplicate(), "pending": pending}
+
+
+## Import into a fresh, already scoped queue. Only validated local recovery
+## can install selections and cards without replaying the player's inputs.
+func restore(image: Dictionary, expected_offers: int, closed_tick: int) -> bool:
+	if (_last_offer != 0 or _preparation == null or not image.get("ordinal") is int
+			or image["ordinal"] != expected_offers):
+		return false
+	var eligible := _preparation.eligible_powers()
+	var saved_ranks: Variant = image.get("ranks")
+	var shown: Variant = image.get("shown")
+	var pending: Variant = image.get("pending")
+	if (not _valid_ranks(saved_ranks, POWER_SLOTS, eligible) or not shown is Dictionary
+			or not pending is Array or pending.size() > expected_offers):
+		return false
+	for power: Variant in shown:
+		if (not power is StringName or not power in eligible or not shown[power] is int
+				or shown[power] < 1 or shown[power] > expected_offers):
+			return false
+	var offers: Dictionary[int, Offer] = {}
+	var previous_ordinal := 0
+	var previous_tick := 0
+	for row: Variant in pending:
+		if (not row is Array or row.size() != 3 or not row[0] is int or not row[1] is int
+				or row[0] <= previous_ordinal or row[0] > expected_offers or row[1] < previous_tick
+				or row[1] > closed_tick or not _valid_ranks(row[2], ORDINARY_OPTIONS, eligible)):
+			return false
+		for power: StringName in row[2]:
+			if int(shown.get(power, 0)) < row[0]:
+				return false
+		var offer := Offer.new()
+		offer.ordinal = row[0]
+		offer.earned_at = row[1]
+		offer.options.assign(row[2])
+		offers[offer.ordinal] = offer
+		previous_ordinal = offer.ordinal
+		previous_tick = offer.earned_at
+	_last_offer = expected_offers
+	_ranks.assign(saved_ranks)
+	_last_shown.assign(shown)
+	_open = offers
+	return true
+
+
+static func _valid_ranks(rows: Variant, limit: int, eligible: Array[StringName]) -> bool:
+	if not rows is Dictionary or rows.size() > limit:
+		return false
+	for power: Variant in rows:
+		if (not power is StringName or not power in eligible or not rows[power] is int
+				or rows[power] < 1 or rows[power] > MAX_RANK):
+			return false
+	return true
+
+
 func _eligible_cards() -> Array[StringName]:
 	var candidates: Array[StringName] = []
 	var prepared := _preparation.candidates()

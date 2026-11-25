@@ -118,17 +118,9 @@ func test_rank_progression_uses_ten_slots_and_stops_ordinary_options_at_the_indi
 
 func test_party_xp_carries_shares_levels_and_freezes_separate_seat_choices() -> void:
 	var prepared := _prepare(_slots(10))
-	var setup := RunSetup.new()
-	setup.role = RunSetup.Role.HOST
-	setup.run_id = &"fixture"
-	setup.authority_id = &"host"
-	setup.epoch = 1
-	setup.rules_revision = &"V42.6/R1"
-	setup.catalog_revision = prepared.catalog_revision
-	setup.challenge_id = &"normal"
-	setup.initial_realms = {&"host": &"core", &"guest": &"optional"}
-	assert_null(PartyProgression.begin(setup, {&"host": prepared}, RunRandom.new(3)))
-	var party := PartyProgression.begin(setup, {&"host": prepared, &"guest": prepared}, RunRandom.new(3))
+	var setup := _setup()
+	assert_null(PartyProgression.begin(setup, {&"host": prepared}))
+	var party := PartyProgression.begin(setup, {&"host": prepared, &"guest": prepared})
 	assert_eq(party.grant_xp(&"first", Quantity.from_count(99), 1), PartyProgression.Award.APPLIED)
 	assert_eq(party.level(), 1)
 	assert_null(party.offer(&"guest", 1))
@@ -150,10 +142,77 @@ func test_party_xp_carries_shares_levels_and_freezes_separate_seat_choices() -> 
 	assert_eq(party.offer(&"guest", 1).options, guest.options)
 
 
+func test_native_frontier_reopens_preparation_frozen_offers_selection_and_seeded_draws() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-run-progression")
+	var store := ProfileStore.new()
+	assert_eq(store.open("progression", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var setup := _setup()
+	var party := PartyProgression.begin(setup, {&"host": _prepare(_slots(10)),
+		&"guest": _prepare(_slots(), {&"P13": true})})
+	var prepared := ProfileMutation.new()
+	prepared.id = "fixture:prepare"
+	prepared.rules = String(setup.rules_revision)
+	prepared.catalog = String(setup.catalog_revision)
+	prepared.frontier = party.frontier(0)
+	assert_eq(store.commit(prepared).status, ProfileStore.CommitResult.COMMITTED)
+	var fresh := PartyProgression.reopen(setup, _catalog(), store.frontier(String(setup.run_id)))
+	assert_not_null(fresh)
+	assert_eq(fresh.level(), 1)
+	assert_null(fresh.offer(&"host", 1))
+	assert_eq(party.grant_xp(&"root", Quantity.from_count(215), 1), PartyProgression.Award.APPLIED)
+	var personal := party.offer(&"guest", 1)
+	assert_eq(party.select(&"host", 1, party.offer(&"host", 1).options.keys()[0]), Selection.APPLIED)
+	var earned := ProfileMutation.new()
+	earned.id = "fixture:earn-and-select"
+	earned.rules = prepared.rules
+	earned.catalog = prepared.catalog
+	earned.frontier = party.frontier(2)
+	assert_eq(store.commit(earned).status, ProfileStore.CommitResult.COMMITTED)
+	assert_true(store.close())
+	assert_eq(store.open("progression", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var saved := store.frontier(String(setup.run_id))
+	var resumed := PartyProgression.reopen(setup, _catalog(), saved)
+	assert_not_null(resumed)
+	if resumed == null:
+		assert_true(store.close())
+		return
+	assert_eq(resumed.frontier(2).image, earned.frontier.image)
+	assert_eq(resumed.level(), 3)
+	assert_eq(resumed.carried_xp().native_at_scale(0), 3)
+	assert_eq(resumed.offer(&"guest", 1).options.keys(), personal.options.keys())
+	assert_null(resumed.offer(&"host", 1))
+	assert_eq(resumed.grant_xp(&"root", Quantity.from_count(215), 3), PartyProgression.Award.DUPLICATE)
+	assert_eq(store.commit(earned).status, ProfileStore.CommitResult.DUPLICATE)
+	assert_eq(resumed.grant_xp(&"fresh", Quantity.from_count(145), 3), PartyProgression.Award.APPLIED)
+	assert_eq(party.grant_xp(&"fresh", Quantity.from_count(145), 3), PartyProgression.Award.APPLIED)
+	assert_eq(resumed.frontier(3).image, party.frontier(3).image)
+	var malformed: Dictionary = bytes_to_var(saved["image"])
+	malformed["level"] = 5
+	saved["image"] = var_to_bytes(malformed)
+	assert_null(PartyProgression.reopen(setup, _catalog(), saved))
+	assert_true(store.close())
+
+
 func test_xp_requirements_transition_by_level_with_whole_xp_ceiling() -> void:
 	for witness: Array in [[1, 100], [2, 112], [19, 3988], [20, 4432], [21, 5319], [22, 6383]]:
 		assert_eq(PartyProgression.xp_to_next(witness[0]).native_at_scale(0), witness[1])
 	assert_null(PartyProgression.xp_to_next(0))
+
+
+static func _setup() -> RunSetup:
+	var setup := RunSetup.new()
+	setup.role = RunSetup.Role.HOST
+	setup.run_id = &"fixture"
+	setup.authority_id = &"host"
+	setup.epoch = 1
+	setup.seed = 3
+	setup.rules_revision = &"V42.6/R1"
+	setup.catalog_revision = &"fixture_rewards"
+	setup.challenge_id = &"normal"
+	setup.initial_realms = {&"host": &"core", &"guest": &"optional"}
+	return setup
 
 
 static func _slots(names: int = 0) -> Array[StringName]:

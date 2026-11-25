@@ -19,6 +19,7 @@ var _weapon: StringName
 var _runes: Array[StringName] = []
 var _candidates: Array[StringName] = []
 var _eligible_powers: Array[StringName] = []
+var _unlocked: Array[StringName] = []
 
 
 static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: StringName,
@@ -42,6 +43,10 @@ static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: S
 	result._runes = rune_slots.duplicate()
 	result._candidates = candidate_slots.duplicate()
 	result._eligible_powers = eligible_powers
+	for id: StringName in unlocked:
+		if unlocked[id]:
+			result._unlocked.append(id)
+	result._unlocked.sort()
 	return result
 
 
@@ -66,6 +71,30 @@ func candidates() -> Array[StringName]:
 
 func eligible_powers() -> Array[StringName]:
 	return _eligible_powers.duplicate()
+
+
+func checkpoint() -> Array:
+	return [_hero, _weapon, runes(), candidates(), _unlocked.duplicate()]
+
+
+static func reopen(catalog: DefinitionCatalog, image: Variant) -> RunPreparation:
+	if (not image is Array or image.size() != 5 or not image[0] is StringName or not image[1] is StringName
+			or not image[2] is Array or not image[3] is Array or not image[4] is Array):
+		return null
+	for slots: Array in [image[2], image[3], image[4]]:
+		for id: Variant in slots:
+			if not id is StringName:
+				return null
+	var unlocked: Dictionary[StringName, bool] = {}
+	for id: StringName in image[4]:
+		if id.is_empty() or unlocked.has(id):
+			return null
+		unlocked[id] = true
+	var rune_slots: Array[StringName] = []
+	rune_slots.assign(image[2])
+	var candidate_slots: Array[StringName] = []
+	candidate_slots.assign(image[3])
+	return select(catalog, image[0], image[1], rune_slots, candidate_slots, unlocked)
 
 
 static func _valid_slots(slots: Array[StringName], eligible: Array[StringName]) -> bool:
