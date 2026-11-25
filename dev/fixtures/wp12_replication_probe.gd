@@ -11,6 +11,11 @@ const RUN_EPOCH := 2
 const BASELINE := 2
 const EXTRA_ACTORS := 220
 const EXTRA_BLOCKERS := 280
+const WARNING_TICK := 20
+const IMPACT_TICK := 30
+const LOW_BLOCKER := 1
+const AVATAR := 2
+const SEALED_BLOCKER := 4
 
 class ProbeAuthority extends RunAuthority:
 	var controls := PlayerControlState.new()
@@ -23,7 +28,8 @@ class ProbeAuthority extends RunAuthority:
 	func _resolve_tick(_tick: int, accepted: Array[RunIntent], _streams: RunRandom) -> Array[Dictionary]:
 		for intent: RunIntent in accepted:
 			controls.apply(intent.command)
-		moved = controls.step(geometry, BODY, 0, 1, 60.0, GuestMovement.SECONDS_PER_TICK) != null
+		moved = controls.step(geometry, BODY, 0, LOW_BLOCKER | SEALED_BLOCKER, 60.0,
+			GuestMovement.SECONDS_PER_TICK) != null
 		return []
 
 class ObservedReplica extends GuestReplica:
@@ -55,10 +61,13 @@ var _leave_at: int
 var _caught_stale := false
 var _saw_snap := false
 var _saw_unlock := false
+var _saw_impact := false
 var _saw_view := false
 var _avatar: Polygon2D
+var _cue: Line2D
 var _result: Dictionary = {}
 var _large := OS.get_environment("AGIP_WP12_LARGE_VIEW") == "1"
+var _sealed_vault := OS.get_environment("AGIP_WP12_SEALED_VAULT") == "1"
 
 
 func _ready() -> void:
@@ -73,7 +82,7 @@ func _ready() -> void:
 		setup.challenge_id = &"fixture"
 		setup.initial_realms = {SEAT: REALM}
 		if (not _authority.start(setup, &"host")
-				or not _authority.geometry.add_circle(BODY, 0, RealmSweep.Point.new(0.0, 0.0), 1.0, 2)):
+				or not _authority.geometry.add_circle(BODY, 0, RealmSweep.Point.new(0.0, 0.0), 1.0, AVATAR)):
 			_finish(false)
 			return
 		var disclosed := _disclosed_blockers()
@@ -81,7 +90,8 @@ func _ready() -> void:
 			var edge := RealmOutline.Edge.new()
 			edge.first = disclosed[index].first
 			edge.last = disclosed[index].last
-			if not _authority.geometry.add_segment(&"wall", index, edge, 1, true):
+			var category := SEALED_BLOCKER if _sealed_vault and index == 1 else LOW_BLOCKER
+			if not _authority.geometry.add_segment(&"wall", index, edge, category, true):
 				_finish(false)
 				return
 	elif _role == "guest" and DisplayServer.get_name() != "headless":
@@ -89,6 +99,15 @@ func _ready() -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	if _role == "host":
+		if _host_state >= 5 and _authority.next_tick() <= IMPACT_TICK:
+			if not _authority.close_tick():
+				_finish(false)
+			elif _authority.next_tick() == WARNING_TICK + 1 and not _send_threat_tick(6, WARNING_TICK):
+				_finish(false)
+			elif _authority.next_tick() == IMPACT_TICK + 1 and not _impact():
+				_finish(false)
+		return
 	if _role != "guest" or _motion_ticks >= 7 or _move_at > 0 or not is_processing():
 		return
 	if _baseline_at > 0 and _movement.advance():
@@ -173,10 +192,14 @@ func _publish() -> bool:
 			return (_send_host(Kinds.STATE, 2, state.pack())
 				and _send_reliable_parts("view_parts", ReplicationChunks.split(Kinds.VIEW, 2, _view(_large))))
 		5:
-			if not _authority.geometry.commit_circle_pose(BODY, 0, RealmSweep.Point.new(9.0, 0.0)):
+			var vault := _authority.geometry.displace_circle(BODY, 0, RealmSweep.Point.new(9.0, 0.0), SEALED_BLOCKER)
+			if vault == null or not _is_landing(vault.finish) or vault.stopped_by.size() != int(_sealed_vault):
 				return false
+			_result["vault_landing_x"] = vault.finish.x
+			_result["vault_sealed_contacts"] = vault.stopped_by.size()
+			_authority.controls.apply(PlayerCommand.new(PlayerCommand.MOVE_AXES))
 			var state := _state(3, _authority.geometry.circle_center(BODY, 0).x)
-			state.tick = 2
+			state.tick = _authority.next_tick() - 1
 			state.acknowledged = 1
 			state.permits_prediction = false
 			state.forced_correction = true
@@ -190,12 +213,43 @@ func _publish() -> bool:
 			_next_publish = Time.get_ticks_msec() + 37
 			return _send_host(Kinds.STATE, 4, stale.pack())
 		7:
-			var resumed := _state(5, 9.0)
-			resumed.tick = 3
+			var resumed := _state(5, _authority.geometry.circle_center(BODY, 0).x)
+			resumed.tick = _authority.next_tick() - 1
 			resumed.acknowledged = 1
 			_host_state = 8
 			return _send_host(Kinds.STATE, 5, resumed.pack())
 	return false
+
+
+func _impact() -> bool:
+	if _host_state != 8:
+		return false
+	var from := RealmSweep.Point.new(2.0, 0.0)
+	var to := RealmSweep.Point.new(3.0, 0.0)
+	var hit := _authority.geometry.certify_circle_sweep(REALM, from, to, 1.0, AVATAR)
+	if hit == null or not hit.unresolved.is_empty():
+		return false
+	# The fixture's previously obstructed position was inside the same threat.
+	var control := RealmGeometry.new(REALM)
+	if not control.add_circle(BODY, 0, RealmSweep.Point.new(4.0, 0.0), 1.0, AVATAR):
+		return false
+	var positive := control.certify_circle_sweep(REALM, from, to, 1.0, AVATAR)
+	if positive == null or positive.contacts.size() != 1 or not hit.contacts.is_empty():
+		return false
+	_result["authority_impact_tick"] = IMPACT_TICK
+	_result["authority_impact_unix_ms"] = _unix_ms()
+	_result["contact_at_obstructed_pose"] = true
+	_result["contact_after_forced_motion"] = false
+	return _send_threat_tick(7, IMPACT_TICK)
+
+
+func _send_threat_tick(serial: int, tick: int) -> bool:
+	if _host_state != 8:
+		return false
+	var settled := _state(serial, _authority.geometry.circle_center(BODY, 0).x)
+	settled.tick = tick
+	settled.acknowledged = 1
+	return _send_host(Kinds.STATE, serial, settled.pack())
 
 
 func _guest_ready(peer: ENetPacketPeer) -> bool:
@@ -221,7 +275,7 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 		_result["missing_baseline_detected"] = true
 		return _resync_sequence == 1 and _request_baseline()
 	if verdict == Accepted.STALE and _saw_snap:
-		_caught_stale = _movement.position().x == 9.0
+		_caught_stale = _is_landing(_movement.position())
 		_result["stale_epoch_preserved_pose"] = _caught_stale
 		return _caught_stale
 	if verdict != Accepted.APPLIED:
@@ -247,15 +301,30 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 		_result["pending_before_lock"] = _movement.pending_count()
 		return not withheld.is_empty()
 	if frame.sequence == 3:
-		_saw_snap = (_movement.draw_position(0.0).x == 9.0 and not _movement.advance()
+		_saw_snap = (_is_landing(_movement.draw_position(0.0)) and not _movement.advance()
 			and _movement.issue(PlayerCommand.new(PlayerCommand.MOVE_AXES)).is_empty())
 		_result["forced_snap_draw_x"] = _movement.draw_position(0.0).x
 		_result["pending_during_lock"] = _movement.pending_count()
 		return _saw_snap and _movement.pending_count() == 0
 	if frame.sequence == 5:
-		_saw_unlock = _movement.latest_packet().is_empty() and _movement.advance() and _movement.position().x == 9.0
+		_saw_unlock = _movement.latest_packet().is_empty() and _movement.advance() and _is_landing(_movement.position())
 		_result["unlock_preserved_pose"] = _saw_unlock
 		return _saw_unlock
+	if frame.sequence == 6:
+		if _movement.confirmed_scope().state.tick != WARNING_TICK or not _replica.active_warning_ids(WARNING_TICK).has("eligible-cue"):
+			return false
+		_result["observed_warning_tick"] = WARNING_TICK
+		_result["warning_activation_unix_ms"] = _unix_ms()
+		if _cue != null:
+			_cue.show()
+			_capture("active-cue.png")
+		return true
+	if frame.sequence == 7:
+		_saw_impact = _saw_unlock and _movement.confirmed_scope().state.tick == IMPACT_TICK
+		_result["observed_impact_tick"] = IMPACT_TICK if _saw_impact else 0
+		if _cue != null:
+			_cue.hide()
+		return _saw_impact
 	return false
 
 
@@ -273,7 +342,7 @@ func _run_guest() -> void:
 			_finish(false)
 			return
 		_capture("wall.png")
-	if _caught_stale and _saw_view and _saw_unlock and _leave_at == 0:
+	if _caught_stale and _saw_view and _saw_impact and _leave_at == 0:
 		_leave_at = now + 100
 		_capture("forced.png")
 	if _leave_at > 0 and now >= _leave_at:
@@ -331,6 +400,7 @@ func _observe_view(frame: NativeSessionFrame) -> bool:
 	if not decoded is Dictionary or raw.contains("773451") or "remote" in ids or "hidden" in ids:
 		return false
 	_result["view_sha256"] = _digest(bytes)
+	_result["warning_received_unix_ms"] = _unix_ms()
 	_result["warning_lead_from_sample_tick"] = cue.impact - String(decoded["tick"]).to_int()
 	if _large:
 		_result["disclosed_actor_count"] = ids.size()
@@ -339,12 +409,13 @@ func _observe_view(frame: NativeSessionFrame) -> bool:
 		_result["filtered_view"] = decoded
 	_saw_view = true
 	if _avatar != null:
-		var marker := Line2D.new()
-		marker.points = PackedVector2Array([Vector2(160.0 + cue.origin.x * 40.0, 310.0),
+		_cue = Line2D.new()
+		_cue.points = PackedVector2Array([Vector2(160.0 + cue.origin.x * 40.0, 310.0),
 			Vector2(160.0 + cue.end.x * 40.0, 310.0)])
-		marker.width = 8.0
-		marker.default_color = Color("ed5769")
-		add_child(marker)
+		_cue.width = 8.0
+		_cue.default_color = Color("ed5769")
+		_cue.hide()
+		add_child(_cue)
 	return true
 
 
@@ -357,11 +428,9 @@ func _finish(passed: bool) -> void:
 
 func _make_stage() -> void:
 	RenderingServer.set_default_clear_color(Color("182632"))
-	var wall := Line2D.new()
-	wall.points = PackedVector2Array([Vector2(360, 80), Vector2(360, 400)])
-	wall.width = 5.0
-	wall.default_color = Color("df9948")
-	add_child(wall)
+	_draw_wall(360, Color("df9948"))
+	if _sealed_vault:
+		_draw_wall(480, Color("95a6ad"))
 	_avatar = Polygon2D.new()
 	var outline := PackedVector2Array()
 	for index: int in 32:
@@ -372,6 +441,14 @@ func _make_stage() -> void:
 	add_child(_avatar)
 
 
+func _draw_wall(x: float, color: Color) -> void:
+	var wall := Line2D.new()
+	wall.points = PackedVector2Array([Vector2(x, 80), Vector2(x, 400)])
+	wall.width = 5.0
+	wall.default_color = color
+	add_child(wall)
+
+
 func _capture(filename: String) -> void:
 	var directory := OS.get_environment("AGIP_WP12_CAPTURE")
 	if _avatar == null or directory.is_empty():
@@ -379,6 +456,8 @@ func _capture(filename: String) -> void:
 	await RenderingServer.frame_post_draw
 	var result := get_viewport().get_texture().get_image().save_png(directory.path_join(filename))
 	_result[filename] = result == OK
+	if result == OK and filename == "active-cue.png":
+		_result["warning_rendered_unix_ms"] = _unix_ms()
 
 
 static func _state(serial: int, x: float) -> MovementSnapshot:
@@ -395,10 +474,17 @@ static func _state(serial: int, x: float) -> MovementSnapshot:
 
 func _disclosed_blockers() -> Array[GuestMovement.Blocker]:
 	var disclosed: Array[GuestMovement.Blocker] = [_wall(5.0)]
+	if _sealed_vault:
+		disclosed.append(_wall(8.0))
 	if _large:
 		for index: int in EXTRA_BLOCKERS:
 			disclosed.append(_wall(20.0 + index * 10))
 	return disclosed
+
+
+func _is_landing(point: RealmSweep.Point) -> bool:
+	var expected := 7.0 if _sealed_vault else 9.0
+	return point != null and absf(point.x - expected) < 0.000001
 
 
 static func _wall(x: float) -> GuestMovement.Blocker:
@@ -435,8 +521,8 @@ static func _view(large: bool) -> PackedByteArray:
 	warning.origin = RealmSweep.Point.new(2.0, 0.0)
 	warning.end = RealmSweep.Point.new(3.0, 0.0)
 	warning.radius = 1.0
-	warning.activation = 20
-	warning.impact = 30
+	warning.activation = WARNING_TICK
+	warning.impact = IMPACT_TICK
 	return RecipientView.pack(scope, RUN_EPOCH, BASELINE, 1, 1, "0", {SEAT: &"living"}, actors, [warning], null,
 		ReplicationChunks.MAX_ASSEMBLED)
 
@@ -446,3 +532,7 @@ static func _digest(bytes: PackedByteArray) -> String:
 	digest.start(HashingContext.HASH_SHA256)
 	digest.update(bytes)
 	return digest.finish().hex_encode()
+
+
+static func _unix_ms() -> int:
+	return int(Time.get_unix_time_from_system() * 1000.0)
