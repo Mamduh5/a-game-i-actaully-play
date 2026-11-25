@@ -185,5 +185,14 @@ func end_rates(mask: int) -> void:
 			_rates.erase(kind)
 
 
+func rate_phases() -> Dictionary[int, String]:
+	var phases: Dictionary[int, String] = {}
+	for kind: int in _rates:
+		var phase := _rates[kind].continuation_phase()
+		if not phase.is_empty():
+			phases[kind] = phase.hex_encode()
+	return phases
+
+
 static func _valid_pool(pool: QuantityLayerLedger.Pool) -> bool:
 	return pool != null and pool.amount != null and pool.amount.sign_value >= 0 and pool.error != null

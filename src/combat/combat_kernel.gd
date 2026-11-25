@@ -59,6 +59,7 @@ class Commitment:
 class Impact:
 	var action: CombatAction
 	var origin: CombatOrigin
+	var root_occurrence: String
 	var target: StringName
 	var target_life: int
 	var shape: int
@@ -71,6 +72,7 @@ class Impact:
 
 class Ancestry:
 	var key: String
+	var wave_state: String
 	var previous: Ancestry
 
 class Posting:
@@ -89,6 +91,8 @@ class Group:
 	var pending: Array[Impact] = []
 	var actors: Dictionary[StringName, CombatantState]
 	var touched: Dictionary[StringName, bool] = {}
+	var original_images: Dictionary[StringName, Array] = {}
+	var displaced_poses: Dictionary[StringName, Dictionary] = {}
 	var geometry: Dictionary[StringName, RealmGeometry] = {}
 	var revisions: Dictionary[StringName, int] = {}
 	var receipt: WaveResult
@@ -200,6 +204,7 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 	impact.action = held.action
 	impact.origin = held.action.origin.copy()
 	impact.origin.delivery_part = part
+	impact.root_occurrence = impact.origin.occurrence_key()
 	impact.target = actor.id
 	impact.target_life = target_life
 	impact.shape = contact.shape
@@ -372,6 +377,10 @@ func _displace(group: Group, postings: Array[Posting]) -> bool:
 		hit.displacement = geometry.displace_circle(target.id, hit.shape, finish, _blocker_masks[realm])
 		if hit.displacement == null:
 			return false
+		var settled := hit.displacement.finish
+		if settled.x != start.x or settled.y != start.y:
+			var poses: Dictionary = group.displaced_poses.get_or_add(target.id, {})
+			poses[hit.shape] = [settled.x, settled.y]
 	return true
 
 
@@ -418,19 +427,20 @@ func _queue_descendants(group: Group, postings: Array[Posting]) -> StringName:
 	for posting: Posting in postings:
 		var source: CombatantState = group.actors.get(posting.hit.source)
 		var target := group.actors[posting.hit.target]
-		if source == null or source.life != posting.hit.source_life or source.realm != target.realm:
-			continue
-		var failure := _gather_claims(group, claims, source, target, posting, false)
-		if not failure.is_empty():
-			return failure
-		failure = _gather_claims(group, claims, target, source, posting, true)
+		if source != null and (source.life != posting.hit.source_life or source.realm != target.realm):
+			source = null
+		if source != null:
+			var attacker_failure := _gather_claims(group, claims, source, target, posting, false)
+			if not attacker_failure.is_empty():
+				return attacker_failure
+		var failure := _gather_claims(group, claims, target, source, posting, true)
 		if not failure.is_empty():
 			return failure
 	for claim: ReactionClaim in claims:
 		var failure := _choose_descendant(group, claim)
 		if not failure.is_empty():
 			return failure
-	return &""
+	return &"causal_cycle" if _has_repeated_continuation(group) else &""
 
 
 func _gather_claims(group: Group, claims: Array[ReactionClaim], actor: CombatantState, counterpart: CombatantState,
@@ -540,14 +550,6 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 		return &""
 	var receipt := claim.posting.hit
 	var cause := claim.posting.impact
-	var budget := QuantityCodec.encode(balance).hex_encode() if balance != null else ""
-	var contact := [receipt.source, receipt.source_life, receipt.target, receipt.target_life, receipt.shape, claim.shape]
-	var equivalent := JSON.stringify([rule.id, contact, _life_image(claim.actor), _life_image(claim.target), budget], "", true)
-	var ancestor := cause.ancestry
-	while ancestor != null:
-		if equivalent == ancestor.key:
-			return &"causal_cycle"
-		ancestor = ancestor.previous
 	if rule.cost != null:
 		var remainder := balance.subtract(rule.cost)
 		if remainder == null:
@@ -567,6 +569,7 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 	var child := Impact.new()
 	child.action = action
 	child.origin = action.origin
+	child.root_occurrence = cause.root_occurrence
 	child.target = claim.target.id
 	child.target_life = claim.target.life
 	child.shape = claim.shape
@@ -574,22 +577,58 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 	child.parent = receipt.event
 	child.reaction = rule.id
 	child.ancestry = Ancestry.new()
-	child.ancestry.key = equivalent
 	child.ancestry.previous = cause.ancestry
 	if rule.inherit_parent_statuses and child.target == receipt.target:
 		child.uses_inherited_statuses = true
 		child.inherited_statuses = receipt.before_statuses.duplicate()
+	child.ancestry.key = JSON.stringify([child.action.source, child.action.source_life, child.reaction,
+		child.target, child.target_life, child.shape, child.hostile, child.root_occurrence,
+		child.uses_inherited_statuses, child.inherited_statuses], "", true)
 	group.pending.append(child)
 	return &""
+
+
+## Compare the next wave only after all its competing debits settle. A sibling
+## can change a pool, a pose or the next wave even when this branch is free.
+func _has_repeated_continuation(group: Group) -> bool:
+	if group.pending.is_empty():
+		return false
+	var parents: Array[int] = []
+	for impact: Impact in group.pending:
+		parents.append(impact.parent)
+	parents.sort()
+	var frontier: Array[Array] = []
+	for impact: Impact in group.pending:
+		frontier.append([impact.ancestry.key, parents.bsearch(impact.parent)])
+	var actors: Dictionary[StringName, Array] = {}
+	for id: StringName in group.touched:
+		if not group.original_images.has(id):
+			group.original_images[id] = _life_image(_actors[id])
+		var image := _life_image(group.actors[id])
+		if image != group.original_images[id]:
+			actors[id] = image
+	var state := JSON.stringify([actors, group.displaced_poses, frontier], "", true, true)
+	for impact: Impact in group.pending:
+		var continuation := impact.ancestry
+		continuation.wave_state = state
+		var ancestor := continuation.previous
+		while ancestor != null:
+			if continuation.key == ancestor.key and state == ancestor.wave_state:
+				return true
+			ancestor = ancestor.previous
+	return false
 
 
 static func _life_image(actor: CombatantState) -> Array:
 	var layers: Array[Array] = []
 	for barrier: CombatantState.Barrier in actor.barriers:
-		layers.append([barrier.id, QuantityCodec.encode(barrier.pool.amount).hex_encode(),
+		layers.append([barrier.id, barrier.mask, QuantityCodec.encode(barrier.pool.amount).hex_encode(),
 			barrier.pool.error.snapshot().hex_encode()])
-	return [actor.id, actor.life, QuantityCodec.encode(actor.hp.amount).hex_encode(),
-		actor.hp.error.snapshot().hex_encode(), layers, actor.statuses]
+	var resources: Dictionary[StringName, String] = {}
+	for id: StringName in actor.resources:
+		resources[id] = QuantityCodec.encode(actor.resources[id]).hex_encode()
+	return [actor.life, actor.realm, QuantityCodec.encode(actor.hp.amount).hex_encode(),
+		actor.hp.error.snapshot().hex_encode(), layers, actor.statuses, resources, actor.rate_phases()]
 
 
 static func _insert_claim(ordered: Array, impact: Impact) -> bool:

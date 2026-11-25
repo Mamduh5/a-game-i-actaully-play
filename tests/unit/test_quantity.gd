@@ -159,6 +159,22 @@ func test_thirds_post_cumulatively_and_restore_the_live_frontier() -> void:
 	_assert_amount(new_stream.next_debit(), "333333", 6, 1)
 
 
+func test_continuation_phase_preserves_nearest_even_parity_without_the_cumulative_count() -> void:
+	var exact := QuantityRateCursor.create(Quantity.from_count(1), Quantity.from_count(2))
+	exact.next_debit()
+	assert_true(exact.continuation_phase().is_empty())
+	var tied := QuantityRateCursor.create(Quantity.from_count(13), Quantity.from_count(128))
+	var initial := tied.continuation_phase()
+	_assert_amount(tied.next_debit(), "101562", 6, 1)
+	assert_ne(tied.continuation_phase(), initial)
+	_assert_amount(tied.next_debit(), "101563", 6, 1)
+	# The residual is zero again, but the posted count is odd.
+	assert_ne(tied.continuation_phase(), initial)
+	_assert_amount(tied.next_debit(), "101563", 6, 1)
+	_assert_amount(tied.next_debit(), "101562", 6, 1)
+	assert_eq(tied.continuation_phase(), initial)
+
+
 func _assert_amount(amount: Quantity, digits: String, decimal_scale: int, signum: int) -> void:
 	assert_not_null(amount)
 	if amount != null:

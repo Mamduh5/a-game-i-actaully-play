@@ -82,6 +82,33 @@ func snapshot() -> PackedByteArray:
 	return bytes
 
 
+## Only the rounding phase affects future debits for the same exact rate.
+## Whole-grid rates have no phase. For other rates, preserve the residual
+## and the parity needed by nearest-even rounding, without a cumulative count.
+func continuation_phase() -> PackedByteArray:
+	if _native_denominator > 0 and _scaled_numerator % _native_denominator == 0:
+		return PackedByteArray()
+	var initial := _projection(1)
+	var first := initial.multiply(_denominator) if initial != null else null
+	if first != null and first.compare(_numerator) == 0:
+		return PackedByteArray()
+	var ideal := _numerator.multiply(Quantity.from_count(_occurrences))
+	var represented := _posted.multiply(_denominator)
+	var residual := ideal.subtract(represented) if ideal != null and represented != null else null
+	var integer_count := _posted.count_at_scale(_grid)
+	if residual == null or integer_count == null:
+		# Keep the full cursor identity if the reduced phase cannot be encoded.
+		var full := PackedByteArray([1])
+		full.append_array(snapshot())
+		return full
+	var digits := integer_count.magnitude_text()
+	var parity := int(digits.right(1)) % 2
+	var phase := PackedByteArray([0, parity])
+	for amount: Quantity in [_numerator, _denominator, residual]:
+		phase.append_array(QuantityCodec.encode(amount))
+	return phase
+
+
 static func restore(bytes: PackedByteArray) -> QuantityRateCursor:
 	if bytes.size() < HEADER_SIZE or bytes[0] != VERSION:
 		return null
