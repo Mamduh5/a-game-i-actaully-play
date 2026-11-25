@@ -71,10 +71,57 @@ func test_host_binds_native_sender_and_uses_authoritative_admission_and_acknowle
 	assert_true(authority.close_tick())
 	assert_eq(authority.checkpoint()["sequences"][&"guest"], 3)
 	assert_eq(bridge.submit(authority, message), Admission.STALE_SEQUENCE)
-	bridge.unbind(1, 11)
+	bridge.unbind(1, 11, 7)
 	assert_eq(bridge.submit(authority, message), Admission.STALE_SEQUENCE)
-	bridge.unbind(1, 10)
+	bridge.unbind(1, 10, 7)
 	assert_eq(bridge.submit(authority, message), Admission.WRONG_SEAT)
+
+
+func test_bridge_preserves_watermark_through_live_reclaim_and_disconnect() -> void:
+	var bridge := HostMovementBridge.new()
+	assert_true(bridge.bind(1, 10, 7, &"fixture", 2, &"core", &"guest", 5))
+	assert_false(bridge.bind(1, 11, 7, &"fixture", 2, &"core", &"guest", 5))
+	assert_true(bridge.bind(1, 11, 7, &"fixture", 2, &"core", &"guest", 6))
+	bridge.unbind(1, 10, 7)
+	assert_true(bridge.bind(1, 11, 7, &"fixture", 2, &"core", &"guest", 7), "Obsolete loss cannot unbind the reclaim")
+	bridge.unbind(1, 11, 7)
+	assert_false(bridge.bind(1, 10, 7, &"fixture", 3, &"core", &"guest", 1))
+	assert_false(bridge.bind(1, 11, 7, &"fixture", 2, &"core", &"guest", 8))
+	assert_false(bridge.bind(1, 12, 6, &"fixture", 3, &"core", &"guest", 1))
+	assert_false(bridge.bind(1, 12, 7, &"fixture", 1, &"core", &"guest", 20))
+	assert_false(bridge.bind(1, 12, 7, &"fixture", 2, &"core", &"guest", 6))
+	assert_true(bridge.bind(1, 12, 7, &"fixture", 3, &"other", &"guest", 1))
+	assert_true(bridge.bind(1, 1, 8, &"fixture", 3, &"other", &"guest", 2), "New host generation restarts connection ordinals")
+	bridge.unbind(1, 1, 7)
+	assert_true(bridge.bind(1, 1, 8, &"fixture", 3, &"other", &"guest", 3), "Old host generation cannot deactivate a reused ordinal")
+
+
+func test_motion_lock_and_forced_correction_supersede_unacknowledged_movement() -> void:
+	for via_baseline: bool in [false, true]:
+		for locked: bool in [false, true]:
+			var guest := GuestMovement.new()
+			assert_eq(guest.install_baseline(&"core", _state(1, 1, 1, 0, 0, 0.0), []), Acceptance.APPLIED)
+			assert_false(guest.issue(_axis(1.0)).is_empty())
+			assert_true(guest.advance())
+			var baseline := 2 if via_baseline else 1
+			var correction := _state(1, baseline, 2, 1, 0, 9.0)
+			correction.permits_prediction = not locked
+			correction.forced_correction = not locked
+			if via_baseline:
+				assert_eq(guest.install_baseline(&"core", correction, []), Acceptance.APPLIED)
+			else:
+				assert_eq(guest.receive(correction), Acceptance.APPLIED)
+			assert_eq(guest.pending_count(), 0)
+			assert_true(guest.latest_packet().is_empty())
+			assert_eq(guest.draw_position(0.0).x, 9.0)
+			if locked:
+				assert_true(guest.issue(_axis(0.0)).is_empty(), "Key release during a motion lock")
+				assert_false(guest.advance())
+			assert_eq(guest.receive(_state(1, baseline, 3, 2, 0, 9.0)), Acceptance.APPLIED)
+			assert_true(guest.latest_packet().is_empty())
+			assert_true(guest.advance())
+			assert_eq(guest.position().x, 9.0)
+			assert_eq(MovementFrame.read(guest.issue(_axis(-1.0)).slice(ReplicationMessage.HEADER_SIZE)).sequence, 2)
 
 
 func test_prediction_repeats_complete_intent_and_replays_until_host_ack() -> void:

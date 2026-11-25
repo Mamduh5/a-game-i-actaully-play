@@ -41,6 +41,7 @@ var _ack_at: int
 var _leave_at: int
 var _caught_stale := false
 var _saw_snap := false
+var _saw_unlock := false
 var _saw_view := false
 var _avatar: Polygon2D
 var _result: Dictionary = {}
@@ -91,7 +92,7 @@ func _run_host() -> void:
 			_finish(false)
 			return
 	if batch.departures > 0:
-		if batch.departures != 1 or _host_state != 6:
+		if batch.departures != 1 or _host_state != 8:
 			_finish(false)
 			return
 		_result["host_owned_leave"] = true
@@ -165,7 +166,15 @@ func _publish() -> bool:
 		6:
 			var stale := _state(4, 999.0)
 			stale.epoch = RUN_EPOCH - 1
+			_host_state = 7
+			_next_publish = Time.get_ticks_msec() + 37
 			return _send_host(Kinds.STATE, 4, stale.pack())
+		7:
+			var resumed := _state(5, 9.0)
+			resumed.tick = 3
+			resumed.acknowledged = 1
+			_host_state = 8
+			return _send_host(Kinds.STATE, 5, resumed.pack())
 	return false
 
 
@@ -204,12 +213,23 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 		_ack_at = Time.get_ticks_msec()
 		_result["retry_to_ack_ms"] = _ack_at - _move_at
 		_result["pending_after_ack"] = _movement.pending_count()
-		return _move_at > 0 and _movement.pending_count() == 0
+		if _move_at <= 0 or _movement.pending_count() != 0:
+			return false
+		# Leave an input unacknowledged just before the fixture enters its
+		# authority-owned motion lock. This packet is deliberately withheld.
+		var withheld := _movement.issue(PlayerCommand.new(PlayerCommand.MOVE_AXES, -1.0))
+		_result["pending_before_lock"] = _movement.pending_count()
+		return not withheld.is_empty()
 	if frame.sequence == 3:
 		_saw_snap = (_movement.draw_position(0.0).x == 9.0 and not _movement.advance()
-			and _movement.issue(PlayerCommand.new(PlayerCommand.MOVE_AXES, -1.0)).is_empty())
+			and _movement.issue(PlayerCommand.new(PlayerCommand.MOVE_AXES)).is_empty())
 		_result["forced_snap_draw_x"] = _movement.draw_position(0.0).x
-		return _saw_snap
+		_result["pending_during_lock"] = _movement.pending_count()
+		return _saw_snap and _movement.pending_count() == 0
+	if frame.sequence == 5:
+		_saw_unlock = _movement.latest_packet().is_empty() and _movement.advance() and _movement.position().x == 9.0
+		_result["unlock_preserved_pose"] = _saw_unlock
+		return _saw_unlock
 	return false
 
 
@@ -227,7 +247,7 @@ func _run_guest() -> void:
 			_finish(false)
 			return
 		_capture("wall.png")
-	if _caught_stale and _saw_view and _leave_at == 0:
+	if _caught_stale and _saw_view and _saw_unlock and _leave_at == 0:
 		_leave_at = now + 100
 		_capture("forced.png")
 	if _leave_at > 0 and now >= _leave_at:

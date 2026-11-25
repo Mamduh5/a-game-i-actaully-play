@@ -46,7 +46,9 @@ def exchange(exe, evidence, secrets, fingerprint, rendered):
         guest_errors = receipt(guest_log)["diagnostics"]
         captured = not rendered or all(guest_result.get(name) and (evidence / name).is_file()
                                        for name in ("wall.png", "forced.png"))
-        return {"passed": not any(exits) and host_result["passed"] and guest_result["passed"] and captured
+        lock_cleared = (guest_result.get("pending_before_lock") == 1 and guest_result.get("pending_during_lock") == 0
+                        and guest_result.get("unlock_preserved_pose") is True)
+        return {"passed": not any(exits) and host_result["passed"] and guest_result["passed"] and captured and lock_cleared
                 and all(error["host_drain_site"] for error in host_errors) and not guest_errors,
                 "exits": exits, "rendered": rendered, "host": host_result, "guest": guest_result,
                 "host_diagnostics": host_errors, "guest_diagnostics": guest_errors}

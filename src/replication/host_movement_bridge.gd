@@ -3,6 +3,7 @@ extends RefCounted
 ## Maps the admitted native connection to a run seat and one permitted baseline.
 
 class Binding:
+	var active: bool
 	var connection: int
 	var generation: int
 	var run: StringName
@@ -21,10 +22,13 @@ func bind(native_seat: int, connection: int, generation: int, run: StringName, e
 			or realm.is_empty() or seat.is_empty() or baseline <= 0):
 		return false
 	var old: Binding = _seats.get(native_seat)
-	if old != null and (generation < old.generation or (generation == old.generation and connection != old.connection)
+	if old != null and (generation < old.generation
+			or (generation == old.generation and (connection < old.connection
+				or (connection == old.connection and not old.active)))
 			or epoch < old.epoch or (epoch == old.epoch and baseline <= old.baseline)):
 		return false
 	var scope := Binding.new()
+	scope.active = true
 	scope.connection = connection
 	scope.generation = generation
 	scope.run = run
@@ -36,17 +40,20 @@ func bind(native_seat: int, connection: int, generation: int, run: StringName, e
 	return true
 
 
-func unbind(native_seat: int, connection: int) -> void:
+## Keep the seat watermark after a connection leaves. A newer host session
+## may reuse its connection ordinal, so loss also identifies the generation.
+func unbind(native_seat: int, connection: int, generation: int) -> void:
 	var scope: Binding = _seats.get(native_seat)
-	if scope != null and scope.connection == connection:
-		_seats.erase(native_seat)
+	if scope != null and scope.connection == connection and scope.generation == generation:
+		scope.active = false
 
 
 func submit(authority: RunAuthority, received: NativeSessionHost.Command) -> RunAuthority.Admission:
 	if authority == null or received == null or received.frame == null:
 		return RunAuthority.Admission.INACTIVE
 	var scope: Binding = _seats.get(received.seat)
-	if scope == null or scope.connection != received.connection or scope.generation != received.frame.generation:
+	if (scope == null or not scope.active or scope.connection != received.connection
+			or scope.generation != received.frame.generation):
 		return RunAuthority.Admission.WRONG_SEAT
 	var wire := ReplicationMessage.read(received.frame)
 	if wire == null or wire.kind != ReplicationMessage.Kind.MOVEMENT:

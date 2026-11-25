@@ -62,7 +62,7 @@ func install_baseline(realm: StringName, state: MovementSnapshot, disclosed: Arr
 	var same_scope := _confirmed != null and state.epoch == _confirmed.epoch and realm == _realm
 	var pending: Array[Sample] = []
 	if same_scope:
-		pending = _unacknowledged(state.acknowledged)
+		pending = _retained_inputs(state)
 	var finish := _playback.tick if same_scope else state.tick
 	var draft := _rebuild(realm, state, known, pending, finish)
 	if draft == null:
@@ -106,7 +106,7 @@ func receive(state: MovementSnapshot) -> Acceptance:
 	if state.revision != _confirmed.revision or _needs_baseline:
 		_needs_baseline = true
 		return Acceptance.NEED_BASELINE
-	var pending := _unacknowledged(state.acknowledged)
+	var pending := _retained_inputs(state)
 	var draft := _rebuild(_realm, state, _known, pending, _playback.tick)
 	if draft == null:
 		_needs_baseline = true
@@ -195,10 +195,14 @@ func _install(state: MovementSnapshot, draft: Playback, snap: bool) -> void:
 			_display = pose
 
 
-func _unacknowledged(sequence: int) -> Array[Sample]:
+func _retained_inputs(state: MovementSnapshot) -> Array[Sample]:
 	var pending: Array[Sample] = []
+	# An authority-owned motion transition supersedes voluntary input even
+	# when the last input arrived too late to be acknowledged by the host.
+	if not state.permits_prediction or state.forced_correction:
+		return pending
 	for sample: Sample in _pending:
-		if sample.sequence > sequence:
+		if sample.sequence > state.acknowledged:
 			pending.append(sample)
 	return pending
 
