@@ -16,6 +16,9 @@ const IMPACT_TICK := 30
 const LOW_BLOCKER := 1
 const AVATAR := 2
 const SEALED_BLOCKER := 4
+const STREAM_SAMPLES := 96
+const STREAM_DELAYS_MS := [19, 57, 31, 68, 43]
+const STREAM_RETRY_MS := 105
 
 class ProbeAuthority extends RunAuthority:
 	var controls := PlayerControlState.new()
@@ -56,6 +59,14 @@ var _move_at: int
 var _motion_ticks: int
 var _movement_sequence: int
 var _reliable_sequence: int
+var _host_samples: int
+var _guest_samples: int
+var _dropped_samples: int
+var _retries: int
+var _stream_start: int
+var _input_sent_at: int
+var _next_input_at: int
+var _latencies: Array[int] = []
 var _ack_at: int
 var _leave_at: int
 var _caught_stale := false
@@ -68,10 +79,13 @@ var _cue: Line2D
 var _result: Dictionary = {}
 var _large := OS.get_environment("AGIP_WP12_LARGE_VIEW") == "1"
 var _sealed_vault := OS.get_environment("AGIP_WP12_SEALED_VAULT") == "1"
+var _sustained := OS.get_environment("AGIP_WP12_SUSTAINED") == "1"
 
 
 func _ready() -> void:
 	super._ready()
+	if _sustained:
+		_deadline += 10000
 	if _role == "host":
 		var setup := RunSetup.new()
 		setup.run_id = RUN
@@ -130,10 +144,11 @@ func _run_host() -> void:
 			_finish(false)
 			return
 	if batch.departures > 0:
-		if batch.departures != 1 or _host_state != 8:
+		if batch.departures != 1 or _host_state != 8 or (_sustained and _host_samples != STREAM_SAMPLES):
 			_finish(false)
 			return
 		_result["host_owned_leave"] = true
+		_result["closed_stream_samples"] = _host_samples
 		print("WP06_SESSION_PHASE host-draining")
 		_closing = true
 		_session.request_close()
@@ -157,6 +172,8 @@ func _host_receive(command: NativeSessionHost.Command) -> bool:
 			_host_state = 2
 			_next_publish = Time.get_ticks_msec() + 65
 			return true
+	if wire.kind == Kinds.MOVEMENT and _sustained and _host_state == 8 and _authority.next_tick() > IMPACT_TICK:
+		return _receive_stream_movement(command)
 	if wire.kind != Kinds.MOVEMENT or _host_state != 3:
 		return false
 	if _bridge.submit(_authority, command) != RunAuthority.Admission.QUEUED or not _authority.close_tick():
@@ -167,6 +184,18 @@ func _host_receive(command: NativeSessionHost.Command) -> bool:
 	_result["host_movement_x"] = pose.x
 	_host_state = 4
 	_next_publish = Time.get_ticks_msec() + 37
+	return true
+
+
+func _receive_stream_movement(command: NativeSessionHost.Command) -> bool:
+	var verdict := _bridge.submit(_authority, command)
+	if verdict == RunAuthority.Admission.STALE_SEQUENCE:
+		return true
+	if (verdict != RunAuthority.Admission.QUEUED or _next_publish != 0 or _host_samples >= STREAM_SAMPLES
+			or not _authority.close_tick()):
+		return false
+	_next_publish = Time.get_ticks_msec() + STREAM_DELAYS_MS[_host_samples % STREAM_DELAYS_MS.size()]
+	_host_samples += 1
 	return true
 
 
@@ -218,6 +247,12 @@ func _publish() -> bool:
 			resumed.acknowledged = 1
 			_host_state = 8
 			return _send_host(Kinds.STATE, 5, resumed.pack())
+		8:
+			var tick := _authority.next_tick() - 1
+			var stream_state := _state(7 + _host_samples, _authority.geometry.circle_center(BODY, 0).x)
+			stream_state.tick = tick
+			stream_state.acknowledged = _authority.checkpoint()["sequences"][SEAT]
+			return _send_host(Kinds.STATE, stream_state.serial, stream_state.pack())
 	return false
 
 
@@ -325,6 +360,8 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 		if _cue != null:
 			_cue.hide()
 		return _saw_impact
+	if _sustained and _saw_impact and frame.sequence >= 8:
+		return _observe_stream_ack(frame.sequence)
 	return false
 
 
@@ -342,7 +379,12 @@ func _run_guest() -> void:
 			_finish(false)
 			return
 		_capture("wall.png")
-	if _caught_stale and _saw_view and _saw_impact and _leave_at == 0:
+	if _sustained and _saw_impact and _guest_samples < STREAM_SAMPLES and now >= _next_input_at:
+		if not _send_stream_input(now):
+			_finish(false)
+			return
+	var stream_finished := not _sustained or _guest_samples == STREAM_SAMPLES
+	if _caught_stale and _saw_view and _saw_impact and stream_finished and _leave_at == 0:
 		_leave_at = now + 100
 		_capture("forced.png")
 	if _leave_at > 0 and now >= _leave_at:
@@ -352,6 +394,51 @@ func _run_guest() -> void:
 		print("WP06_SESSION_PHASE guest-requested-leave")
 		if _link.send(_peer, ADMISSION, EPOCH, 4, NativeAdmissionMessage.leave()) != OK:
 			_finish(false)
+
+
+func _send_stream_input(now: int) -> bool:
+	_next_input_at = now + STREAM_RETRY_MS
+	if _input_sent_at != 0:
+		_retries += 1
+	else:
+		_input_sent_at = now
+		if _stream_start == 0:
+			_stream_start = now
+		var direction := -1.0 if _guest_samples % 2 == 0 else 1.0
+		if _movement.issue(PlayerCommand.new(PlayerCommand.MOVE_AXES, direction)).is_empty() or not _movement.advance():
+			return false
+		if (_guest_samples + 1) % 7 == 0:
+			_dropped_samples += 1
+			return true
+	_movement_sequence += 1
+	return _link.send(_peer, SEQUENCED, EPOCH, _movement_sequence, _movement.latest_packet()) == OK
+
+
+func _observe_stream_ack(sequence: int) -> bool:
+	var scope := _movement.confirmed_scope()
+	var expected_x := 8.0 if _guest_samples % 2 == 0 else 9.0
+	# Sequence 2 was locally issued and retired when the motion lock began.
+	if (_input_sent_at == 0 or sequence != _guest_samples + 8 or scope.state.acknowledged != _guest_samples + 3
+			or _movement.pending_count() != 0 or _movement.position().x != expected_x):
+		_result["stream_ack_failure"] = [sequence, scope.state.acknowledged, _guest_samples, _movement.position().x]
+		return false
+	var now := Time.get_ticks_msec()
+	_latencies.append(now - _input_sent_at)
+	_input_sent_at = 0
+	_next_input_at = now + 5
+	_guest_samples += 1
+	if _guest_samples == STREAM_SAMPLES:
+		_latencies.sort()
+		_result["stream_duration_ms"] = now - _stream_start
+		_result["acknowledged_stream_samples"] = _guest_samples
+		_result["deliberately_dropped_stream_inputs"] = _dropped_samples
+		_result["stream_retry_count"] = _retries
+		_result["stream_ack_p50_ms"] = _latencies[ceili(_latencies.size() * 0.50) - 1]
+		_result["stream_ack_p95_ms"] = _latencies[ceili(_latencies.size() * 0.95) - 1]
+		_result["stream_ack_max_ms"] = _latencies[-1]
+		_result["stream_final_x"] = _movement.position().x
+		_result["stream_final_ack"] = scope.state.acknowledged
+	return true
 
 
 func _request_baseline() -> bool:

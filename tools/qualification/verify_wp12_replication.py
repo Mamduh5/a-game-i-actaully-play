@@ -21,7 +21,7 @@ def replication_receipt(log):
     raise RuntimeError(f"No WP12 receipt in {log}")
 
 
-def exchange(exe, evidence, secrets, fingerprint, rendered, large, sealed_vault):
+def exchange(exe, evidence, secrets, fingerprint, rendered, large, sealed_vault, sustained):
     host, guest = secrets / "host", secrets / "guest"
     port = ephemeral_port()
     offered, ready, copied = host / "offered", host / "ready", guest / "offered"
@@ -29,6 +29,7 @@ def exchange(exe, evidence, secrets, fingerprint, rendered, large, sealed_vault)
     host_env = peer_env(host / "session")
     host_env["AGIP_WP12_LARGE_VIEW"] = "1" if large else "0"
     host_env["AGIP_WP12_SEALED_VAULT"] = "1" if sealed_vault else "0"
+    host_env["AGIP_WP12_SUSTAINED"] = "1" if sustained else "0"
     server = launch([exe], host_log, host_env, "host", port,
                     host / "host.crt", host / "host.key", host / "guest.pub", offered, ready, "paired")
     client = None
@@ -38,6 +39,7 @@ def exchange(exe, evidence, secrets, fingerprint, rendered, large, sealed_vault)
         env = peer_env(guest / "session")
         env["AGIP_WP12_LARGE_VIEW"] = host_env["AGIP_WP12_LARGE_VIEW"]
         env["AGIP_WP12_SEALED_VAULT"] = host_env["AGIP_WP12_SEALED_VAULT"]
+        env["AGIP_WP12_SUSTAINED"] = host_env["AGIP_WP12_SUSTAINED"]
         env["AGIP_WP12_CAPTURE"] = str(evidence) if rendered else ""
         args = ["guest", str(port), str(guest), fingerprint, str(guest / "guest.key"), str(copied), "-", "paired"]
         if rendered:
@@ -45,7 +47,7 @@ def exchange(exe, evidence, secrets, fingerprint, rendered, large, sealed_vault)
                                        "--log-file", str(guest_log), "--", *args], env=env)
         else:
             client = launch([exe], guest_log, env, *args)
-        exits = [client.wait(timeout=12), server.wait(timeout=12)]
+        exits = [client.wait(timeout=18 if sustained else 12), server.wait(timeout=12)]
         host_result, guest_result = map(replication_receipt, (host_log, guest_log))
         host_errors = receipt(host_log)["diagnostics"]
         guest_errors = receipt(guest_log)["diagnostics"]
@@ -70,11 +72,18 @@ def exchange(exe, evidence, secrets, fingerprint, rendered, large, sealed_vault)
         landed = (abs(host_result.get("vault_landing_x", 0) - expected_x) < 0.000001
                   and abs(guest_result.get("forced_snap_draw_x", 0) - expected_x) < 0.000001
                   and host_result.get("vault_sealed_contacts") == int(sealed_vault))
+        stream_closed = (not sustained or (host_result.get("closed_stream_samples") == 96
+                         and guest_result.get("acknowledged_stream_samples") == 96
+                         and guest_result.get("deliberately_dropped_stream_inputs") == 13
+                         and guest_result.get("stream_retry_count", 0) >= 13
+                         and guest_result.get("stream_final_x") == 9
+                         and guest_result.get("stream_final_ack") == 98))
         return {"passed": not any(exits) and host_result["passed"] and guest_result["passed"] and captured and lock_cleared
-                and disclosure_complete and timed_threat and landed
+                and disclosure_complete and timed_threat and landed and stream_closed
                 and all(error["host_drain_site"] for error in host_errors) and not guest_errors,
                 "exits": exits, "rendered": rendered, "large": large, "host": host_result, "guest": guest_result,
                 "sealed_vault": sealed_vault,
+                "sustained": sustained,
                 "receipt_to_authority_impact_ms": impact - received, "activation_to_authority_impact_ms": impact - activated,
                 "rendered_warning_to_impact_ms": impact - displayed if rendered else None,
                 "host_diagnostics": host_errors, "guest_diagnostics": guest_errors}
@@ -91,7 +100,10 @@ def main():
     parser.add_argument("--rendered", action="store_true")
     parser.add_argument("--large", action="store_true")
     parser.add_argument("--sealed-vault", action="store_true")
+    parser.add_argument("--sustained", action="store_true")
     options = parser.parse_args()
+    if options.sustained and options.sealed_vault:
+        parser.error("--sustained uses the unsealed movement arm")
     exe, evidence = options.exe.resolve(strict=True), options.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="agip-wp12-peers-") as directory:
@@ -100,7 +112,8 @@ def main():
             keygen(exe, secrets / role, evidence, role)
         shutil.copyfile(secrets / "guest" / "guest.pub", secrets / "host" / "guest.pub")
         fingerprint = enroll(exe, secrets, evidence)
-        result = exchange(exe, evidence, secrets, fingerprint, options.rendered, options.large, options.sealed_vault)
+        result = exchange(exe, evidence, secrets, fingerprint, options.rendered, options.large,
+                          options.sealed_vault, options.sustained)
     text = json.dumps(result, indent=2, sort_keys=True)
     (evidence / "receipt.json").write_text(text + "\n", encoding="utf-8")
     print(text)
