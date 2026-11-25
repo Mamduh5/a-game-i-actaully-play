@@ -1,0 +1,85 @@
+[gd_resource type="Resource" script_class="CatalogBundle" format=3]
+
+[ext_resource type="Script" path="res://src/catalog/catalog_bundle.gd" id="1_bundle"]
+[ext_resource type="Script" path="res://src/catalog/catalog_entry.gd" id="2_entry"]
+[ext_resource type="Script" path="res://src/catalog/catalog_reference.gd" id="3_ref"]
+
+[sub_resource type="Resource" id="Resource_p07_link"]
+script = ExtResource("3_ref")
+target_id = &"P07"
+
+[sub_resource type="Resource" id="Resource_p12_link"]
+script = ExtResource("3_ref")
+target_id = &"P12"
+
+[sub_resource type="Resource" id="Resource_e07a_link"]
+script = ExtResource("3_ref")
+target_id = &"E07A"
+
+[sub_resource type="Resource" id="Resource_e12a_link"]
+script = ExtResource("3_ref")
+target_id = &"E12A"
+
+[sub_resource type="Resource" id="Resource_p07"]
+script = ExtResource("2_entry")
+id = &"P07"
+kind = 3
+lifetime = 2
+targeting = 2
+eligibility = 3
+source_family = &"fixture.vital_exchange"
+ranks = Array[StringName]([&"base", &"rank_2", &"survival_instinct", &"rank_4", &"recovery_surge"])
+capabilities = Array[StringName]([&"vital_exchange"])
+
+[sub_resource type="Resource" id="Resource_p12"]
+script = ExtResource("2_entry")
+id = &"P12"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 3
+source_family = &"fixture.reprisal_pulse"
+ranks = Array[StringName]([&"base", &"rank_2", &"proportional_wrath", &"rank_4", &"expanding_wrath"])
+capabilities = Array[StringName]([&"reprisal_pulse"])
+
+[sub_resource type="Resource" id="Resource_e07a"]
+script = ExtResource("2_entry")
+id = &"E07A"
+kind = 4
+lifetime = 2
+targeting = 2
+eligibility = 4
+source_family = &"fixture.vital_exchange"
+capabilities = Array[StringName]([&"vital_exchange"])
+base = SubResource("Resource_p07_link")
+catalyst = SubResource("Resource_p12_link")
+catalyst_capability = &"reprisal_pulse"
+
+[sub_resource type="Resource" id="Resource_e12a"]
+script = ExtResource("2_entry")
+id = &"E12A"
+kind = 4
+lifetime = 2
+targeting = 3
+eligibility = 4
+source_family = &"fixture.reprisal_pulse"
+capabilities = Array[StringName]([&"reprisal_pulse"])
+base = SubResource("Resource_p12_link")
+catalyst = SubResource("Resource_p07_link")
+catalyst_capability = &"vital_exchange"
+
+[sub_resource type="Resource" id="Resource_f06"]
+script = ExtResource("2_entry")
+id = &"F06"
+kind = 5
+lifetime = 2
+targeting = 2
+eligibility = 4
+source_family = &"fixture.sanguine_aegis"
+components = Array[ExtResource("3_ref")]([SubResource("Resource_e07a_link"), SubResource("Resource_e12a_link")])
+
+[resource]
+resource_name = "Development fixture · reciprocal capabilities only"
+script = ExtResource("1_bundle")
+revision = &"wp03-fixture-v1"
+entries = Array[ExtResource("2_entry")]([SubResource("Resource_p07"), SubResource("Resource_p12"), SubResource("Resource_e07a"), SubResource("Resource_e12a"), SubResource("Resource_f06")])
