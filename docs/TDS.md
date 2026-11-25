@@ -350,6 +350,8 @@ The driver supplies a fresh path per mode/role, `QUAL_JOURNAL=DELETE` or `WAL`, 
 
 **Browser adapter.** The v4.9 archive has threaded and single-threaded wasm32 modules. Qualify the matching single-threaded extension/template only if practical. The same boundary can use a browser-local transactional adapter such as IndexedDB if the extension is unsuitable. Expose actual capabilities and wait for transaction completion. Test reopen on the same origin, blocked/denied access, quota, eviction, private mode, concurrent tabs and interrupted writes. Report unsupported persistence or explicitly scoped volatile play before relying on a browser profile. A Web limitation cannot select a weaker native backend or grant a Windows durability pass. Browser multiplayer is outside OWNER-T02. [Godot Web export and storage](https://docs.godotengine.org/en/4.7/tutorials/export/exporting_for_web.html) · [Archive manifest](https://github.com/2shady4u/godot-sqlite/blob/v4.9/demo/addons/godot-sqlite/gdsqlite.gdextension)
 
+**WP13 production integration checkpoint (`4d93665`, independent checkpoint review pending).** The Windows presets include the binding and godot-cpp notices. Both Windows binaries match the existing pins. The adapter gates writes on a successful opening transaction and checks profile identity and schema. Separate release processes verified exclusive ownership, a second identity and reopen after an idle holder exits or is killed. Exact economic transactions, migrations and durability faults remain due. [WP13 evidence](records/WP13.md#native-profile-ownership-checkpoint)
+
 <a id="tds-performance"></a>
 
 ## 7. Numerical range and performance
