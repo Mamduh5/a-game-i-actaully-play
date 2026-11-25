@@ -32,10 +32,12 @@ static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Arra
 		return null
 	var result := DamageDraft.new()
 	var raw_left := raw
+	var incoming_error: QuantityErrorBounds
 	var represented_left := nominal
 	var represented_spent := Quantity.from_count(0)
 	for pool: Pool in ordered_layers:
-		var posting := _resolve(pool, raw_left, represented_left)
+		var bounds := _effective_bounds(pool, incoming_error)
+		var posting := _resolve(pool, bounds, raw_left, represented_left)
 		if posting == null:
 			return null
 		result.layers.append(_debit(posting, hostile))
@@ -43,14 +45,24 @@ static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Arra
 		if represented_spent == null:
 			return null
 		represented_left = posting.overkill
+		incoming_error = null
 		if represented_left.sign_value == 0:
 			raw_left = QuantityFraction.from_amount(represented_left)
 		else:
-			var exact_residual := pool.error.exact_after(pool.amount, raw_left)
-			if exact_residual == null or exact_residual.numerator.sign_value >= 0:
-				return null
-			raw_left = exact_residual.opposite()
-	var hit := _resolve(hp, raw_left, represented_left)
+			var exact_residual := bounds.exact_after(pool.amount, raw_left)
+			if exact_residual != null:
+				if exact_residual.numerator.sign_value >= 0:
+					return null
+				raw_left = exact_residual.opposite()
+			else:
+				# The exhausted layer has already certified strict overkill. Carry the
+				# unresolved ideal-minus-represented difference into the next pool.
+				var residual_error := bounds.after_debit(raw_left, posting.incoming)
+				if residual_error == null:
+					return null
+				incoming_error = residual_error.opposite()
+				raw_left = QuantityFraction.from_amount(represented_left)
+	var hit := _resolve(hp, _effective_bounds(hp, incoming_error), raw_left, represented_left)
 	if hit == null:
 		return null
 	result.hp = _debit(hit, false)
@@ -66,8 +78,15 @@ static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Arra
 	return result if result.adjustment != null else null
 
 
-static func _resolve(pool: Pool, raw: QuantityFraction, nominal: Quantity) -> QuantityThresholdDebit.Draft:
-	if pool == null or pool.amount == null or pool.error == null or pool.amount.sign_value < 0:
+static func _effective_bounds(pool: Pool, incoming_error: QuantityErrorBounds) -> QuantityErrorBounds:
+	if pool == null or pool.error == null:
+		return null
+	return pool.error if incoming_error == null else pool.error.minus(incoming_error)
+
+
+static func _resolve(pool: Pool, bounds: QuantityErrorBounds, raw: QuantityFraction,
+		nominal: Quantity) -> QuantityThresholdDebit.Draft:
+	if pool == null or pool.amount == null or bounds == null or raw == null or pool.amount.sign_value < 0:
 		return null
 	if raw.numerator.sign_value == 0 and nominal.sign_value == 0:
 		var untouched := QuantityThresholdDebit.Draft.new()
@@ -76,9 +95,9 @@ static func _resolve(pool: Pool, raw: QuantityFraction, nominal: Quantity) -> Qu
 		untouched.remaining = pool.amount
 		untouched.overkill = nominal
 		untouched.adjustment = nominal
-		untouched.error = pool.error
+		untouched.error = bounds
 		return untouched
-	return QuantityThresholdDebit.resolve(pool.amount, pool.error, raw, nominal)
+	return QuantityThresholdDebit.resolve(pool.amount, bounds, raw, nominal)
 
 
 static func _debit(posting: QuantityThresholdDebit.Draft, hostile: bool) -> Debit:

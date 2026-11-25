@@ -115,6 +115,46 @@ func test_mixed_layer_frontier_passes_only_certified_overkill_to_the_next_pool()
 		assert_eq(second.amount.compare(quarter_micro), 0)
 
 
+func test_expired_barrier_replay_keeps_certified_overflow_and_stops_ambiguous_hp() -> void:
+	var barrier := QuantityLayerLedger.Pool.new(Quantity.from_count(100), QuantityErrorBounds.new())
+	var ideal := QuantityFraction.from_amount(barrier.amount)
+	var denominators: Array[int] = [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173]
+	for denominator: int in denominators:
+		var raw := _fraction(10, denominator)
+		var posted := QuantityThresholdDebit.resolve(barrier.amount, barrier.error, raw, _quantize(raw))
+		assert_not_null(posted)
+		if posted == null:
+			return
+		barrier = QuantityLayerLedger.Pool.new(posted.remaining, posted.error)
+		ideal = ideal.plus(raw.opposite())
+	assert_false(barrier.error.is_exact())
+	assert_eq(barrier.error.replay_size(), 0)
+	var checkpoint := barrier.error.snapshot()
+	barrier.error = QuantityErrorBounds.restore(checkpoint)
+	var second := QuantityLayerLedger.Pool.new(Quantity.from_count(1), QuantityErrorBounds.new())
+	var hp := QuantityLayerLedger.Pool.new(Quantity.from_count(20), QuantityErrorBounds.new())
+	var incoming := _fraction(105, 1)
+	var settled := QuantityLayerLedger.draft(incoming, _quantize(incoming), [barrier, second], hp, true)
+	assert_not_null(settled)
+	if settled == null:
+		return
+	assert_true(settled.layers[0].hostile_depletion)
+	assert_true(settled.layers[1].hostile_depletion)
+	assert_false(settled.lethal)
+	var hp_spent := Quantity.from_count(104).subtract(barrier.amount)
+	assert_eq(settled.hp.spent.compare(hp_spent), 0)
+	assert_eq(settled.eligible_hostile_hp.compare(hp_spent), 0)
+	assert_eq(settled.incoming.compare(Quantity.from_count(105)), 0)
+	assert_false(settled.hp.after.error.is_exact())
+	assert_eq(QuantityErrorBounds.restore(settled.hp.after.error.snapshot()).snapshot(), settled.hp.after.error.snapshot())
+
+	var hp_boundary := ideal.plus(_fraction(21, 1))
+	assert_null(QuantityLayerLedger.draft(hp_boundary, _quantize(hp_boundary), [barrier, second], hp, true),
+		"An ideal equality within an expired interval cannot be published")
+	assert_eq(barrier.error.snapshot(), checkpoint)
+	assert_eq(hp.amount.compare(Quantity.from_count(20)), 0)
+
+
 func _fraction(numerator: int, divisor: int) -> QuantityFraction:
 	return QuantityFraction.create(Quantity.from_count(numerator), Quantity.from_count(divisor))
 

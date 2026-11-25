@@ -29,6 +29,44 @@ func after_debit(ideal: QuantityFraction, represented: Quantity) -> QuantityErro
 	return _after_change(ideal, represented, -1)
 
 
+## Difference between two error states. Combining independent intervals conserves
+## the bound. A replay from either pool alone cannot certify the combined state.
+func minus(other: QuantityErrorBounds) -> QuantityErrorBounds:
+	if other._exact != null:
+		return _accumulate(other._exact.opposite())
+	var own := _outward_bounds()
+	if own.size() != 2:
+		return null
+	return _from_bounds(own[0].subtract(other._upper), own[1].subtract(other._lower))
+
+
+func opposite() -> QuantityErrorBounds:
+	if _exact != null:
+		return QuantityErrorBounds.new(_exact.opposite())
+	var next := _from_bounds(_upper.negated(), _lower.negated())
+	if _anchor != null:
+		next._anchor = _anchor.opposite()
+		for operand: QuantityFraction in _suffix:
+			next._suffix.append(operand.opposite())
+	return next
+
+
+func _outward_bounds() -> Array[Quantity]:
+	if _exact != null:
+		return _exact.outward(BOUND_SCALE)
+	return [_lower, _upper]
+
+
+static func _from_bounds(lower: Quantity, upper: Quantity) -> QuantityErrorBounds:
+	if lower == null or upper == null:
+		return null
+	var state := QuantityErrorBounds.new()
+	state._exact = null
+	state._lower = lower
+	state._upper = upper
+	return state
+
+
 func _after_change(ideal: QuantityFraction, represented: Quantity, direction: int) -> QuantityErrorBounds:
 	if ideal == null or represented == null:
 		return null
