@@ -12,6 +12,7 @@ class Event:
 	var kind: EventKind
 	var peer: ENetPacketPeer
 	var frame: NativeSessionFrame
+	var native_type: int
 
 var _host: ENetConnection
 var _server := false
@@ -70,6 +71,7 @@ func pump() -> Array[Event]:
 		if type == ENetConnection.EVENT_NONE:
 			break
 		var observed := Event.new()
+		observed.native_type = type
 		observed.peer = raw[1]
 		match type:
 			ENetConnection.EVENT_CONNECT:
@@ -78,6 +80,12 @@ func pump() -> Array[Event]:
 			ENetConnection.EVENT_DISCONNECT:
 				_peers.erase(observed.peer)
 				observed.kind = EventKind.DISCONNECT
+				if not _server and _drain_deadline >= 0:
+					# This client has one peer. Finish after its disconnect is acknowledged.
+					events.append(observed)
+					_host.flush()
+					_close()
+					return events
 			ENetConnection.EVENT_RECEIVE:
 				var payload := observed.peer.get_packet()
 				if _drain_deadline >= 0:
@@ -90,7 +98,8 @@ func pump() -> Array[Event]:
 				_close()
 				return events
 		events.append(observed)
-	if _drain_deadline >= 0 and (_peers.is_empty() or Time.get_ticks_msec() >= _drain_deadline):
+	# Keep servicing the socket through the bounded drain so its last ACK can leave.
+	if _drain_deadline >= 0 and Time.get_ticks_msec() >= _drain_deadline:
 		_close()
 	return events
 
@@ -118,6 +127,10 @@ func request_close() -> void:
 
 func is_open() -> bool:
 	return _host != null
+
+
+func local_port() -> int:
+	return _host.get_local_port() if _host != null and _server else 0
 
 
 func _close() -> void:
