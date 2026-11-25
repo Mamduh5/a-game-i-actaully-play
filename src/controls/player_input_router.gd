@@ -23,6 +23,7 @@ var _pending: Array[PlayerCommand] = []
 var _aim: PlayerCommand
 var _overflow := false
 var _pointer := Vector2.ZERO
+var _world_focus := false
 
 
 func _ready() -> void:
@@ -60,7 +61,7 @@ static func rebind(layout: Dictionary[StringName, InputEvent]) -> bool:
 			var second_events := _layout_events(ACTIONS[next], layout)
 			for left: InputEvent in first_events:
 				for right: InputEvent in second_events:
-					if left.is_match(right):
+					if _bindings_conflict(left, right):
 						return false
 	for action: StringName in layout:
 		if not InputMap.has_action(action):
@@ -68,6 +69,23 @@ static func rebind(layout: Dictionary[StringName, InputEvent]) -> bool:
 		InputMap.action_erase_events(action)
 		InputMap.action_add_event(action, layout[action].duplicate())
 	return true
+
+
+static func _bindings_conflict(left: InputEvent, right: InputEvent) -> bool:
+	if left.is_match(right):
+		return true
+	if not left is InputEventKey or not right is InputEventKey:
+		return false
+	var left_physical: bool = left.physical_keycode != KEY_NONE
+	var right_physical: bool = right.physical_keycode != KEY_NONE
+	if left_physical == right_physical or left.get_modifiers_mask() != right.get_modifiers_mask():
+		return false
+	var physical: InputEventKey = left if left_physical else right
+	var logical: InputEventKey = right if left_physical else left
+	var mapped := physical.physical_keycode
+	if DisplayServer.get_name() != "headless":
+		mapped = DisplayServer.keyboard_get_keycode_from_physical(mapped)
+	return logical.keycode == (physical.physical_keycode if mapped == KEY_NONE else mapped)
 
 
 static func _layout_events(action: StringName, layout: Dictionary[StringName, InputEvent]) -> Array[InputEvent]:
@@ -103,11 +121,18 @@ func _input(event: InputEvent) -> void:
 			_key_down.erase(id)
 			if _held.erase(id):
 				_queue_axes()
+				get_viewport().set_input_as_handled()
+		elif _held.has(id):
+			get_viewport().set_input_as_handled()
 		elif not event.echo:
 			if _key_down.has(id):
 				get_viewport().set_input_as_handled()
 			else:
 				_key_down[id] = true
+				# Godot can reacquire GUI focus from a navigation key even
+				# with no focused Control. Honor the latest world gesture.
+				if _world_focus and get_viewport().gui_get_focus_owner() == null:
+					_press_axis(event)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -118,17 +143,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and _mouse_down.has(event.button_index):
 		_mouse_down[event.button_index] = true
-	for action: StringName in AXES:
-		if event is InputEventKey and event.is_action_pressed(action, false, true):
-			_held[_key_id(event)] = action
-			_queue_axes()
-			get_viewport().set_input_as_handled()
-			return
+	if event is InputEventKey and _press_axis(event):
+		return
 	for pair: Array in [[DESTINATION, PlayerCommand.MOVE_TO], [MANUAL, PlayerCommand.MANUAL],
 			[INTERACT, PlayerCommand.INTERACT], [TARGET, PlayerCommand.TARGET]]:
 		if event.is_action_pressed(pair[0], false, true):
 			if pair[0] != DESTINATION or _held.is_empty():
-				_queue(_position_command(pair[1]))
+				var command := _position_command(pair[1])
+				if command != null:
+					if event is InputEventMouseButton:
+						var focused := get_viewport().gui_get_focus_owner()
+						if focused != null:
+							focused.release_focus()
+						_world_focus = true
+					_queue(command)
 			get_viewport().set_input_as_handled()
 			return
 
@@ -152,7 +180,18 @@ func clear_focus() -> void:
 	_pending.clear()
 	_aim = null
 	_overflow = false
+	_world_focus = false
 	_queue_axes()
+
+
+func _press_axis(event: InputEventKey) -> bool:
+	for action: StringName in AXES:
+		if event.is_action_pressed(action, false, true):
+			_held[_key_id(event)] = action
+			_queue_axes()
+			get_viewport().set_input_as_handled()
+			return true
+	return false
 
 
 func _position_command(kind: StringName) -> PlayerCommand:

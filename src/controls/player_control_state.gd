@@ -40,10 +40,15 @@ func step(geometry: RealmGeometry, actor: StringName, slot: int, blockers: int,
 	var requested := _requested_pose(start, distance)
 	if requested == null:
 		return null
-	if requested.x == start.x and requested.y == start.y:
-		return start
-	var movement := geometry.displace_circle(actor, slot, requested, blockers)
-	return movement.finish if movement != null else null
+	var finish := start
+	if requested.x != start.x or requested.y != start.y:
+		var movement := geometry.displace_circle(actor, slot, requested, blockers)
+		if movement == null:
+			return null
+		finish = movement.finish
+	if _destination != null and finish.x == _destination.x and finish.y == _destination.y:
+		_destination = null
+	return finish
 
 
 func _requested_pose(start: RealmSweep.Point, distance: float) -> RealmSweep.Point:

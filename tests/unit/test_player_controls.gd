@@ -73,6 +73,21 @@ func test_voluntary_motion_uses_the_certified_blocker_and_sees_immediate_removal
 	assert_eq(geometry.circle_center(&"player", 0).x, clipped.x)
 	assert_true(geometry.remove_mutable(&"door", 0))
 	assert_eq(control.step(geometry, &"player", 0, 1, 100, 0.1).x, 10.0)
+	var knockback := geometry.displace_circle(&"player", 0, _point(0, 0), 1)
+	assert_not_null(knockback)
+	if knockback != null:
+		assert_eq(knockback.finish.x, 0.0)
+		assert_eq(control.step(geometry, &"player", 0, 1, 100, 0.05).x, 0.0)
+
+
+func test_click_at_current_position_leaves_no_destination_after_later_displacement() -> void:
+	var geometry := RealmGeometry.new(&"outer")
+	assert_true(geometry.add_circle(&"player", 0, _point(0, 0), 1, 2))
+	var control := PlayerControlState.new()
+	control.apply(PlayerCommand.new(PlayerCommand.MOVE_TO, 0, 0))
+	assert_eq(control.step(geometry, &"player", 0, 1, 100, 0.1).x, 0.0)
+	assert_not_null(geometry.displace_circle(&"player", 0, _point(5, 0), 1))
+	assert_eq(control.step(geometry, &"player", 0, 1, 100, 0.05).x, 5.0)
 
 
 func test_hostile_priority_and_known_deliberate_targets_have_distinct_eligibility() -> void:
@@ -181,6 +196,14 @@ func test_rebinding_held_keys_clears_the_original_direction_on_release_and_focus
 		assert_eq(east[0].x, 1.0)
 	var conflict: Dictionary[StringName, InputEvent] = {PlayerInputRouter.RIGHT: _key(KEY_A)}
 	assert_false(PlayerInputRouter.rebind(conflict))
+	var logical := InputEventKey.new()
+	logical.keycode = KEY_A if DisplayServer.get_name() == "headless" else DisplayServer.keyboard_get_keycode_from_physical(KEY_A)
+	if logical.keycode == KEY_NONE:
+		logical.keycode = KEY_A
+	conflict[PlayerInputRouter.RIGHT] = logical
+	assert_false(PlayerInputRouter.rebind(conflict))
+	logical.shift_pressed = true
+	assert_true(PlayerInputRouter.rebind(conflict), "An exact shifted binding is a different gesture.")
 	var arrows: Dictionary[StringName, InputEvent] = {PlayerInputRouter.RIGHT: _key(KEY_RIGHT)}
 	assert_true(PlayerInputRouter.rebind(arrows))
 	_push_key(viewport, KEY_D, false)
@@ -194,6 +217,63 @@ func test_rebinding_held_keys_clears_the_original_direction_on_release_and_focus
 	assert_eq(cleared.size(), 1)
 	if cleared.size() == 1:
 		assert_eq(cleared[0].x, 0.0)
+	for action: StringName in PlayerInputRouter.ACTIONS:
+		InputMap.erase_action(action)
+
+
+func test_ground_click_leaves_panel_focus_and_both_vertical_arrows_control_movement() -> void:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(400, 300)
+	add_child_autofree(viewport)
+	var router := PlayerInputRouter.new()
+	router.world_from_viewport = func(point: Vector2) -> RealmSweep.Point: return _point(point.x, point.y)
+	viewport.add_child(router)
+	var upper := Button.new()
+	upper.name = "UpperReward"
+	upper.position = Vector2(220, 45)
+	upper.size = Vector2(140, 44)
+	viewport.add_child(upper)
+	var lower := Button.new()
+	lower.name = "LowerReward"
+	lower.position = Vector2(220, 100)
+	lower.size = Vector2(140, 44)
+	viewport.add_child(lower)
+	lower.focus_neighbor_top = lower.get_path_to(upper)
+	upper.focus_neighbor_bottom = upper.get_path_to(lower)
+	watch_signals(lower)
+	await get_tree().process_frame
+	var arrows: Dictionary[StringName, InputEvent] = {
+		PlayerInputRouter.DESTINATION: _mouse(MOUSE_BUTTON_LEFT),
+		PlayerInputRouter.MANUAL: _mouse(MOUSE_BUTTON_RIGHT),
+		PlayerInputRouter.UP: _key(KEY_UP),
+		PlayerInputRouter.DOWN: _key(KEY_DOWN),
+	}
+	assert_true(PlayerInputRouter.rebind(arrows))
+	var panel := Vector2(250, 120)
+	_push_mouse(viewport, panel, MOUSE_BUTTON_LEFT, true)
+	_push_mouse(viewport, panel, MOUSE_BUTTON_LEFT, false)
+	assert_true(lower.has_focus())
+	_push_key(viewport, KEY_SPACE, true)
+	_push_key(viewport, KEY_SPACE, false)
+	assert_signal_emit_count(lower, "pressed", 2)
+	assert_eq(router.drain().size(), 0)
+	var ground := Vector2(40, 160)
+	_push_mouse(viewport, ground, MOUSE_BUTTON_LEFT, true)
+	_push_mouse(viewport, ground, MOUSE_BUTTON_LEFT, false)
+	assert_null(viewport.gui_get_focus_owner())
+	assert_eq(router.drain().size(), 1)
+	for code: Key in [KEY_UP, KEY_DOWN]:
+		_push_key(viewport, code, true)
+		var step := router.drain()
+		assert_eq(step.size(), 1)
+		if step.size() == 1:
+			assert_eq(step[0].action, PlayerCommand.MOVE_AXES)
+			assert_eq(step[0].y, -1.0 if code == KEY_UP else 1.0)
+		_push_key(viewport, code, false)
+		router.drain()
+	_push_key(viewport, KEY_SPACE, true)
+	_push_key(viewport, KEY_SPACE, false)
+	assert_signal_emit_count(lower, "pressed", 2)
 	for action: StringName in PlayerInputRouter.ACTIONS:
 		InputMap.erase_action(action)
 
@@ -243,6 +323,7 @@ static func _mouse(index: MouseButton) -> InputEventMouseButton:
 
 static func _push_key(viewport: Viewport, code: Key, down: bool) -> void:
 	var event := _key(code)
+	event.keycode = code
 	event.pressed = down
 	viewport.push_input(event, true)
 
