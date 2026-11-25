@@ -1,0 +1,54 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://dev/fixtures/run_authority_fixture.gd" id="1_fixture"]
+
+[node name="RunAuthorityFixture" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_fixture")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.14, 0.16, 0.18, 1)
+
+[node name="Stack" type="VBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 48.0
+offset_top = 48.0
+offset_right = 960.0
+theme_override_constants/separation = 12
+
+[node name="Heading" type="Label" parent="Stack"]
+theme_override_font_sizes/font_size = 28
+text = "Development fixture · Run authority"
+
+[node name="Status" type="Label" parent="Stack"]
+unique_name_in_owner = true
+text = "Starting run"
+
+[node name="Actions" type="HBoxContainer" parent="Stack"]
+theme_override_constants/separation = 12
+
+[node name="Sample" type="Button" parent="Stack/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 40)
+text = "Sample world stream"
+
+[node name="Stale" type="Button" parent="Stack/Actions"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 40)
+text = "Submit stale epoch"
+
+[node name="InputResult" type="Label" parent="Stack"]
+unique_name_in_owner = true
+text = "Waiting for input"
+
+[node name="ClosedResult" type="Label" parent="Stack"]
+unique_name_in_owner = true
+text = "No sample has resolved"
