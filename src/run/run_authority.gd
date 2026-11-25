@@ -49,7 +49,7 @@ func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
 		return Admission.WRONG_TICK
 	if intent.sequence <= _last_sequences[bound_seat]:
 		return Admission.STALE_SEQUENCE
-	if not _supports_action(intent.action):
+	if not _supports_action(intent.action) or not intent.valid_payload():
 		return Admission.UNSUPPORTED_ACTION
 
 	var seat_intents: Dictionary = _pending[bound_seat]
@@ -57,7 +57,7 @@ func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
 		return Admission.QUEUE_FULL
 	if seat_intents.has(intent.sequence):
 		var previous: RunIntent = seat_intents[intent.sequence]
-		if previous != null and previous.action == intent.action:
+		if previous != null and previous.matches_payload(intent):
 			return Admission.DUPLICATE
 		# Neither of two conflicting envelopes can win by arriving first.
 		seat_intents[intent.sequence] = null
