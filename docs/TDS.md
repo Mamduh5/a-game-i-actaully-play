@@ -141,6 +141,8 @@ Reuse geometric deliveries, damage/recovery accounting and trigger implementatio
 
 Validate unique IDs, references, rank order, recipe closure, source permissions, stock/reward scope and content revision before admitting a catalog. Check whether prerequisites can coexist in ten slots with two distinct runes and legitimately reachable unlocks. Reject circular ownership gates that prevent first acquisition. Reciprocal catalyst powers in Sanguine Aegis are legal because both base powers can be acquired before either form. Validate each Fusion separately and compatible disjoint builds. F01 and F03 together require three runes. That conflict invalidates the combined build only. Runtime evidence of actual acquisition and behavior belongs in the [QAS coverage matrix](QAS.md#qas-catalog).
 
+**WP03 writer-verified, independent review pending.** Typed authoring resources compile to a detached, versioned catalog snapshot. Validation reports offending IDs, checks hard prerequisite cycles and recipe reachability, and keeps per-owner counters outside definitions. The reciprocal fixture passed both named acquisition orders and the opposing capability-loss case. [Implementation, limits and evidence](records/WP03.md)
+
 <a id="tds-transform"></a>
 
 ### Transformation and payment contracts (F-13)

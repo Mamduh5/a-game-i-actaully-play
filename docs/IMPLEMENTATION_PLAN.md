@@ -313,6 +313,7 @@ Packages not listed below remain **NOT STARTED**.
 |---|---|---|---|---|---|
 | [WP01](#wp01) | **COMPLETE** | `dev` / `32bab3c` (foundation `907b19f`) | Claude Opus / Antigravity (`APPROVED`) | [WP01.md](records/WP01.md) · `.qa-evidence/WP01/` · `.qa-evidence/WP01-review/` (19/19 GUT unit / 40 assertions, failure probe pass, clean-checkout import/export/launch pass, split Player/Dev PCK boundary pass, live Antigravity native Godot MCP verification + rendered screenshots pass) | Approved and integrated on `dev`. Newly eligible downstream packages: `WP02`, `WP03`, `WP04`, `WP05`, `WP14`, `WP15` (preserving mandatory qualification gates for `WP04`, `WP05`, `WP06`, `WP18`). |
 | [WP02](#wp02) | **REVIEW REQUIRED** | `dev` / `bc811ee` | Codex / Antigravity | [WP02 record](records/WP02.md). 27/27 GUT, native split export, rendered solo MCP, 30/120 FPS trace and closed-frontier process replay passed. | Independent authority review; WP06, WP07 and WP19 still depend on this gate. |
+| [WP03](#wp03) | **REVIEW REQUIRED** | `dev` / `41fa042` | Codex / Antigravity | [WP03 record](records/WP03.md). 37/37 GUT, fresh text-resource load, shared-definition instance isolation, opposing catalyst and rune eligibility cases, Windows Player export passed. | Independent catalog and eligibility review before WP10 or WP16 consumes the contract. |
 
 <a id="plan-promotion"></a>
 
