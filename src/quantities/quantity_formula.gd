@@ -70,3 +70,29 @@ static func collapse_factor(tier: int, for_hp: bool) -> QuantityFraction:
 	if factor == null:
 		return null
 	return factor.times(QuantityFraction.from_amount(Quantity.from_count(3 if for_hp else 2)))
+
+
+## Time-zero world factors through the exact switch to Collapse.
+static func world_time_factor(elapsed_seconds: Quantity, for_hp: bool) -> QuantityFraction:
+	if elapsed_seconds == null or elapsed_seconds.sign_value < 0:
+		return null
+	var boundary := Quantity.from_count(1500)
+	if elapsed_seconds.compare(boundary) < 0:
+		var relative := QuantityFraction.create(elapsed_seconds, boundary)
+		if relative == null:
+			return null
+		var square := relative.raised(2)
+		if square == null:
+			return null
+		if for_hp:
+			square = square.times(QuantityFraction.from_amount(Quantity.from_count(2)))
+		return QuantityFraction.from_amount(Quantity.from_count(1)).plus(square) if square != null else null
+	var since := elapsed_seconds.subtract(boundary)
+	var tier_ratio := QuantityFraction.create(since, Quantity.from_count(120))
+	if tier_ratio == null:
+		return null
+	var quotient := Quantity.divide_integers(tier_ratio.numerator, tier_ratio.divisor)
+	if quotient.is_empty() or quotient[0] == null or quotient[0].uses_limbs:
+		return null
+	var elapsed_tiers: int = quotient[0].native_at_scale(0)
+	return collapse_factor(elapsed_tiers + 1, for_hp) if elapsed_tiers < Quantity.INT_MAX else null

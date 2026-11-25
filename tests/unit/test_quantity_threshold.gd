@@ -90,6 +90,31 @@ func test_outward_bounds_replay_then_fail_safely_when_the_exact_anchor_is_lost()
 	assert_true(QuantityErrorBounds.restore(exact.snapshot()).is_exact())
 
 
+func test_mixed_layer_frontier_passes_only_certified_overkill_to_the_next_pool() -> void:
+	var barrier := Quantity.from_count(1)
+	var uncertainty := QuantityErrorBounds.new()
+	for rate: int in [2, 3]:
+		var raw := _fraction(rate, 9)
+		var hit := QuantityThresholdDebit.resolve(barrier, uncertainty, raw, _quantize(raw))
+		barrier = hit.remaining
+		uncertainty = hit.error
+	var first := QuantityLayerLedger.Pool.new(barrier, uncertainty)
+	var quarter_micro := Quantity.from_count(25, 8)
+	var second := QuantityLayerLedger.Pool.new(quarter_micro, QuantityErrorBounds.new())
+	var hp := QuantityLayerLedger.Pool.new(Quantity.from_count(1), QuantityErrorBounds.new())
+	var incoming := _fraction(4, 9).plus(QuantityFraction.from_amount(quarter_micro))
+	var resolved := QuantityLayerLedger.draft(incoming, _quantize(incoming), [first, second], hp, true)
+	assert_not_null(resolved)
+	if resolved != null:
+		assert_true(resolved.layers[0].hostile_depletion)
+		assert_true(resolved.layers[1].hostile_depletion)
+		assert_eq(resolved.layers[1].spent.compare(quarter_micro), 0)
+		assert_eq(resolved.hp.spent.sign_value, 0)
+		assert_eq(resolved.overkill.sign_value, 0)
+		assert_eq(resolved.incoming.compare(barrier.add(quarter_micro)), 0)
+		assert_eq(second.amount.compare(quarter_micro), 0)
+
+
 func _fraction(numerator: int, divisor: int) -> QuantityFraction:
 	return QuantityFraction.create(Quantity.from_count(numerator), Quantity.from_count(divisor))
 

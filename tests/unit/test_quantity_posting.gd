@@ -57,5 +57,16 @@ func test_faulted_draft_leaves_original_pool_unchanged() -> void:
 	assert_eq(huge.magnitude_text(), "9".repeat(Quantity.MAX_DIGITS))
 
 
+func test_pr08_debits_only_the_actual_fractional_release() -> void:
+	var cap := Quantity.from_count(1355, 1)
+	var draft := QuantityPosting.reserve_release(_units(8), _units(100), cap)
+	assert_eq(draft.hp_restored.compare(Quantity.from_count(6775, 3)), 0)
+	assert_eq(draft.reserve_spent.compare(draft.hp_restored), 0)
+	assert_eq(draft.reserve_after.compare(Quantity.from_count(1225, 3)), 0)
+	assert_eq(draft.hp_after.compare(Quantity.from_count(106775, 3)), 0)
+	assert_eq(QuantityPosting.reserve_release(_units(8), cap, cap).reserve_spent.sign_value, 0)
+	assert_eq(QuantityPosting.reserve_release(_units(8), _units(0), cap).reserve_spent.sign_value, 0)
+
+
 func _units(count: int) -> Quantity:
 	return Quantity.from_count(count)

@@ -21,6 +21,12 @@ class RecoveryDraft:
 	var eligible_excess: Quantity
 	var discarded: Quantity
 
+class ReserveDraft:
+	var hp_restored: Quantity
+	var hp_after: Quantity
+	var reserve_spent: Quantity
+	var reserve_after: Quantity
+
 
 ## Layer compatibility, ordering and origin arbitration are supplied by the group's owner.
 static func damage(incoming: Quantity, ordered_layers: Array[Quantity], hp: Quantity,
@@ -74,6 +80,27 @@ static func recovery(offered: Quantity, hp: Quantity, max_hp: Quantity,
 		return null
 	draft.eligible_excess = excess if excess_allowed else zero
 	draft.discarded = zero if excess_allowed else excess
+	return draft
+
+
+## PR08's one-to-one release. The cadence, living eligibility and lineage are run rules.
+static func reserve_release(reserve: Quantity, hp: Quantity, max_hp: Quantity) -> ReserveDraft:
+	if not _valid(reserve) or not _valid(hp) or not _valid(max_hp) or hp.compare(max_hp) > 0:
+		return null
+	var cadence_cap := max_hp.multiply(Quantity.from_count(5, 2))
+	if cadence_cap == null:
+		return null
+	var healed := recovery(_minimum(reserve, cadence_cap), hp, max_hp, false)
+	if healed == null:
+		return null
+	var remainder := reserve.subtract(healed.hp_restored)
+	if remainder == null:
+		return null
+	var draft := ReserveDraft.new()
+	draft.hp_restored = healed.hp_restored
+	draft.hp_after = healed.hp_after
+	draft.reserve_spent = healed.hp_restored
+	draft.reserve_after = remainder
 	return draft
 
 

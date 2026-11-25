@@ -38,6 +38,14 @@ static func from_count(count: int, decimal_scale: int = 0) -> Quantity:
 	return _make_native(signi(count), absi(count), decimal_scale)
 
 
+static func from_integer_count(value: Quantity, decimal_scale: int) -> Quantity:
+	if value == null or value.scale != 0 or not _valid_scale(decimal_scale):
+		return null
+	if value.uses_limbs:
+		return _make_wide(value._sign, decimal_scale, value._limbs.duplicate())
+	return _make_native(value._sign, value._native, decimal_scale)
+
+
 ## Canonical magnitude text avoids any float or JSON numeric field for the count.
 static func from_canonical(negative: bool, decimal_scale: int, digits: String) -> Quantity:
 	if not _valid_scale(decimal_scale) or not is_canonical_magnitude(digits, decimal_scale, negative):
