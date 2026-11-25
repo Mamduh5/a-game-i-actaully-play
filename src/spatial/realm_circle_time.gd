@@ -59,12 +59,12 @@ func measure(start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
 	var r := _add(_point(radius), _point(target_radius))
 	var dx := _subtract(_difference(finish.x, start.x), _difference(target_finish.x, target_start.x))
 	var dy := _subtract(_difference(finish.y, start.y), _difference(target_finish.y, target_start.y))
-	if y.is_point(0.0) and dy.is_point(0.0):
-		var horizontal := _axis_hit(x, dx, r)
+	if dy.is_point(0.0):
+		var horizontal := _axis_contact(x, dx, y, r)
 		if horizontal != null:
 			return horizontal
-	if x.is_point(0.0) and dx.is_point(0.0):
-		var vertical := _axis_hit(y, dy, r)
+	if dx.is_point(0.0):
+		var vertical := _axis_contact(y, dy, x, r)
 		if vertical != null:
 			return vertical
 	var r_squared := _square(r)
@@ -243,6 +243,19 @@ static func _contact_on_path(time: Interval) -> Contact:
 
 ## Collinear roots reduce to an exact ratio when the input differences fit a
 ## scalar. Compare cross-products on the rare overlapping interval path.
+func _axis_contact(position: Interval, advance: Interval, perpendicular: Interval, radius: Interval) -> Contact:
+	if perpendicular.is_point(0.0):
+		return _axis_hit(position, advance, radius)
+	if perpendicular.lower != perpendicular.upper or radius.lower != radius.upper:
+		return null
+	var offset := absf(perpendicular.lower)
+	if offset > radius.lower:
+		return Contact.new(Result.MISS)
+	if offset == radius.lower:
+		return _axis_hit(position, advance, _point(0.0))
+	return null
+
+
 func _axis_hit(position: Interval, advance: Interval, radius: Interval) -> Contact:
 	if position.lower != position.upper or advance.lower != advance.upper or radius.lower != radius.upper:
 		return null

@@ -66,7 +66,7 @@ func test_moving_target_is_indexed_across_the_path_until_commit_or_displacement(
 	assert_almost_eq(displaced.contacts[0].time, 0.996, 1e-14)
 
 
-func test_certified_sweep_preserves_an_unresolved_tangent_and_orders_far_walls() -> void:
+func test_certified_sweep_orders_far_walls_and_retains_the_tangent_contact() -> void:
 	var geometry := RealmGeometry.new(&"outer")
 	var far := 1_000_000_000_000.0
 	var start := RealmSweep.Point.new(far, -far)
@@ -79,11 +79,16 @@ func test_certified_sweep_preserves_an_unresolved_tangent_and_orders_far_walls()
 		assert_true(geometry.add_segment(&"wall", slot, wall, BLOCKER, true))
 	assert_true(geometry.add_circle(&"tangent", 0, RealmSweep.Point.new(far + 32.0, -far + 0.125), 0.0, BODY))
 	var result := geometry.certify_circle_sweep(&"outer", start, finish, 0.125, BODY | BLOCKER)
-	assert_eq(result.contacts.size(), 2)
-	assert_eq(result.unresolved.size(), 1)
-	assert_eq(result.unresolved[0].entity, &"tangent")
-	var first := result.contacts[0] if result.contacts[0].shape == 0 else result.contacts[1]
-	var second := result.contacts[1] if result.contacts[0].shape == 0 else result.contacts[0]
+	assert_eq(result.contacts.size(), 3)
+	assert_true(result.unresolved.is_empty())
+	var walls: Dictionary[int, RealmGeometry.Contact] = {}
+	for contact: RealmGeometry.Contact in result.contacts:
+		if contact.entity == &"wall":
+			walls[contact.shape] = contact
+		else:
+			assert_true(contact.proof.earliest <= 0.5 and contact.proof.latest >= 0.5)
+	var first := walls[0]
+	var second := walls[1]
 	assert_eq(first.proof.order_against(second.proof), RealmCircleTime.Order.BEFORE)
 
 
@@ -136,7 +141,13 @@ func test_displacement_can_retreat_from_initial_overlap_and_holds_ambiguous_path
 	assert_eq(retreat.finish.x, -4.0)
 	assert_eq(retreat.revision, 3)
 	assert_true(retreat.stopped_by.is_empty())
-	assert_true(geometry.add_circle(&"tangent", 0, RealmSweep.Point.new(-6.0, 1.0), 0.0, BLOCKER))
-	assert_null(geometry.displace_circle(&"mover", 0, RealmSweep.Point.new(-10.0, 0.0), BLOCKER))
-	assert_eq(geometry.revision, 4)
-	assert_eq(geometry.circle_center(&"mover", 0).x, -4.0)
+	var ambiguous := RealmGeometry.new(&"outer")
+	assert_true(ambiguous.add_circle(&"mover", 0, RealmSweep.Point.new(0.0, 0.0), 5.0, BODY))
+	assert_true(ambiguous.add_circle(&"tangent", 0, RealmSweep.Point.new(2.0, 11.0), 0.0, BLOCKER))
+	var diagonal := RealmSweep.Point.new(12.0, 16.0)
+	var proof := ambiguous.certify_circle_sweep(&"outer", RealmSweep.Point.new(0.0, 0.0), diagonal, 5.0, BLOCKER)
+	assert_eq(proof.unresolved.size(), 1)
+	assert_eq(proof.unresolved[0].entity, &"tangent")
+	assert_null(ambiguous.displace_circle(&"mover", 0, diagonal, BLOCKER))
+	assert_eq(ambiguous.revision, 2)
+	assert_eq(ambiguous.circle_center(&"mover", 0).x, 0.0)

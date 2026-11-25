@@ -83,7 +83,11 @@ func test_circle_time_bounds_enclose_diagonal_contact_and_hold_ambiguous_tangenc
 	var off_path := _point(5, -5)
 	assert_eq(proof.measure(from, to, 1, off_path, off_path, 0).outcome, RealmCircleTime.Result.MISS)
 	var tangent := _point(5, 1)
-	assert_eq(proof.measure(from, _point(8, 0), 1, tangent, tangent, 0).outcome,
+	var cardinal := proof.measure(from, _point(8, 0), 1, tangent, tangent, 0)
+	assert_eq(cardinal.outcome, RealmCircleTime.Result.HIT)
+	assert_true(cardinal.earliest <= 0.625 and cardinal.latest >= 0.625)
+	var oblique := _point(2, 11)
+	assert_eq(proof.measure(from, _point(12, 16), 5, oblique, oblique, 0).outcome,
 		RealmCircleTime.Result.UNRESOLVED)
 	assert_eq(proof.measure(center, from, 1, center, center, 0).earliest, 0.0)
 
