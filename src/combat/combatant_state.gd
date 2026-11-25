@@ -44,7 +44,9 @@ var physical := Defense.new()
 var magical := Defense.new()
 var prevents_hit: bool
 var statuses: Dictionary[StringName, int] = {}
+var resources: Dictionary[StringName, Quantity] = {}
 var _rates: Dictionary[int, QuantityRateCursor] = {}
+var _ready_at: Dictionary[StringName, CombatInstant] = {}
 
 
 func is_valid() -> bool:
@@ -57,6 +59,10 @@ func is_valid() -> bool:
 	var expected := QuantityErrorBounds.Sign.ABOVE if is_alive() else QuantityErrorBounds.Sign.EQUAL
 	if hp.error.certify_after(hp.amount, zero) != expected:
 		return false
+	for resource: StringName in resources:
+		var value := resources[resource]
+		if resource.is_empty() or value == null or value.sign_value < 0:
+			return false
 	var layers: Dictionary[StringName, bool] = {}
 	for barrier: Barrier in barriers:
 		if (barrier == null or barrier.id.is_empty() or layers.has(barrier.id) or barrier.mask <= 0
@@ -83,11 +89,45 @@ func copy() -> CombatantState:
 	result.magical = magical.copy()
 	result.prevents_hit = prevents_hit
 	result.statuses = statuses.duplicate()
+	result.resources = resources.duplicate()
+	result._ready_at = _ready_at.duplicate()
 	for barrier: Barrier in barriers:
 		result.barriers.append(barrier.copy())
 	for kind: int in _rates:
 		result._rates[kind] = _rates[kind].copy()
 	return result
+
+
+## All resource costs and cooldown readiness settle together. A rejected
+## draft leaves the exact represented resources and next-ready time intact.
+func pay_activation(action: CombatAction) -> bool:
+	if action.activation_costs.is_empty() and action.cooldown.is_empty():
+		return true
+	var now := action.origin.committed_at
+	var last_ready: CombatInstant = _ready_at.get(action.cooldown)
+	if last_ready != null:
+		var order := last_ready.order_against(now)
+		if order not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]:
+			return false
+	var next_ready := now.after_ticks(action.cooldown_ticks)
+	if next_ready == null:
+		return false
+	var remainder := resources.duplicate()
+	for resource: StringName in action.activation_costs:
+		var cost := action.activation_costs[resource]
+		if cost.sign_value == 0:
+			continue
+		var available: Quantity = remainder.get(resource)
+		if available == null or available.compare(cost) < 0:
+			return false
+		var after := available.subtract(cost)
+		if after == null:
+			return false
+		remainder[resource] = after
+	resources = remainder
+	if not action.cooldown.is_empty():
+		_ready_at[action.cooldown] = next_ready
+	return true
 
 
 func post_rate(kind: CombatAction.Damage, raw: QuantityFraction) -> Quantity:

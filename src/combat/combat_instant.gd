@@ -43,3 +43,12 @@ func order_against(other: CombatInstant) -> RealmCircleTime.Order:
 	if _tick > other.tick:
 		return RealmCircleTime.Order.AFTER
 	return _time.order_against(other._time)
+
+
+func after_ticks(duration: int) -> CombatInstant:
+	if _time == null or duration < 0 or duration > RunAuthority.MAX_TICK - _tick:
+		return null
+	var instant := CombatInstant.new()
+	instant._tick = _tick + duration
+	instant._time = _time
+	return instant

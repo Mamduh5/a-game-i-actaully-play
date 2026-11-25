@@ -85,8 +85,8 @@ func set_defense(id: StringName, life: int, kind: CombatAction.Damage, defense: 
 	return true
 
 
-## The caller has validated authored action restrictions and commits their cost
-## with a successful result. Root resolution never rechecks source liveness.
+## The caller validates authored placement and eligibility. A successful
+## commitment consumes its activation costs once, including after a miss.
 func commit(action: CombatAction) -> String:
 	if not _fault.is_empty() or action == null or not action.is_valid():
 		return ""
@@ -98,7 +98,7 @@ func commit(action: CombatAction) -> String:
 	if _closed != null and _closed.order_against(origin.committed_at) != RealmCircleTime.Order.BEFORE:
 		return ""
 	var stream := origin.activation_stream_key()
-	if origin.activation <= int(_latest_activation.get(stream, 0)):
+	if origin.activation <= int(_latest_activation.get(stream, 0)) or not source.pay_activation(action):
 		return ""
 	var held := Commitment.new()
 	held.action = action.copy()

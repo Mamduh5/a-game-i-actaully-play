@@ -164,7 +164,9 @@ func test_same_kind_matching_rate_carries_across_contributors_until_exact_lethal
 
 func test_component_compatibility_distinguishes_hit_rejection_from_damage_immunity() -> void:
 	var kernel := CombatKernel.new()
-	assert_true(kernel.add_actor(_actor(&"source", 10)))
+	var source := _actor(&"source", 10)
+	source.resources[&"charge"] = Quantity.from_count(5)
+	assert_true(kernel.add_actor(source))
 	var target := _actor(&"target", 30)
 	target.barriers.append(_barrier(&"physical", 10, CombatAction.Damage.PHYSICAL))
 	target.physical.immune = true
@@ -173,6 +175,7 @@ func test_component_compatibility_distinguishes_hit_rejection_from_damage_immuni
 	blocked.prevents_hit = true
 	assert_true(kernel.add_actor(blocked))
 	var mixed := _attack(&"source", 1, 1, 11)
+	mixed.activation_costs[&"charge"] = Quantity.from_count(2)
 	var magic := CombatAction.Component.new()
 	magic.kind = CombatAction.Damage.MAGICAL
 	magic.base = Quantity.from_count(7)
@@ -191,6 +194,40 @@ func test_component_compatibility_distinguishes_hit_rejection_from_damage_immuni
 	assert_eq(_count(wave.hits[1].components[0].incoming), 0)
 	assert_eq(_count(wave.hits[1].components[1].hp_removed), 7)
 	assert_eq(_count(kernel.actor_snapshot(&"target").barriers[0].pool.amount), 10)
+	assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"charge"]), 3)
+
+
+func test_failed_payment_preserves_all_pools_and_committed_miss_keeps_its_cost_and_cooldown() -> void:
+	var kernel := CombatKernel.new()
+	var source := _actor(&"source", 20)
+	source.resources[&"mana"] = Quantity.from_count(7)
+	source.resources[&"charge"] = Quantity.from_count(1)
+	assert_true(kernel.add_actor(source))
+	var action := _attack(&"source", 1, 2, 5)
+	action.activation_costs = {&"mana": Quantity.from_count(4), &"charge": Quantity.from_count(2)}
+	action.cooldown = &"fixture_cast"
+	action.cooldown_ticks = 5
+	assert_eq(kernel.commit(action), "")
+	assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"mana"]), 7)
+	assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"charge"]), 1)
+	action.activation_costs[&"charge"] = Quantity.from_count(1)
+	var committed := kernel.commit(action)
+	assert_ne(committed, "")
+	assert_true(kernel.finish_delivery(committed))
+	assert_eq(kernel.pending_count(), 0)
+	assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"mana"]), 3)
+	assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"charge"]), 0)
+
+	var retry := _attack(&"source", 2, 6, 3)
+	retry.cooldown = action.cooldown
+	retry.cooldown_ticks = 5
+	retry.activation_costs[&"mana"] = Quantity.from_count(1)
+	assert_eq(kernel.commit(retry), "")
+	assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"mana"]), 3)
+	retry.origin.committed_at = CombatInstant.at_tick(7)
+	assert_ne(kernel.commit(retry), "")
+	assert_eq(kernel.commit(retry), "")
+	assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"mana"]), 2)
 
 
 func test_numeric_resource_failure_releases_neither_partial_debits_nor_receipts() -> void:
