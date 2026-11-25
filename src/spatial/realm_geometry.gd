@@ -201,20 +201,18 @@ func _verify_clipped_pose(start: RealmSweep.Point, requested: RealmSweep.Point, 
 		return RealmSweep.Point.new(start.x, start.y)
 	var scratch := PackedByteArray()
 	scratch.resize(8)
-	var limit := RealmBounds.adjacent(time, false, scratch)
-	var point := RealmSweep.Point.new(lerpf(start.x, requested.x, limit), lerpf(start.y, requested.y, limit))
-	# Interpolation at a far coordinate can round back onto the blocker.
-	# Recheck the actual representable path before committing it.
-	for _attempt: int in 4:
+	var retreat := time - RealmBounds.adjacent(time, false, scratch)
+	# Rounding the two interpolated coordinates can turn a tangent prefix
+	# into a hit. Back off in path time and verify the actual stored pose.
+	for _attempt: int in 55:
+		var limit := maxf(0.0, time - retreat)
+		var point := RealmSweep.Point.new(lerpf(start.x, requested.x, limit), lerpf(start.y, requested.y, limit))
 		if point.x == start.x and point.y == start.y:
 			return point
 		var prefix := _sweep(realm_id, start, point, radius, blockers, entity, certifier, true)
 		if prefix != null and prefix.contacts.is_empty() and prefix.unresolved.is_empty():
 			return point
-		if point.x != start.x:
-			point.x = RealmBounds.adjacent(point.x, point.x < start.x, scratch)
-		if point.y != start.y:
-			point.y = RealmBounds.adjacent(point.y, point.y < start.y, scratch)
+		retreat *= 2.0
 	return null
 
 

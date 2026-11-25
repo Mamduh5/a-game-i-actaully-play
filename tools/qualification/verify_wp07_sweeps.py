@@ -3,6 +3,7 @@
 import argparse
 from decimal import Decimal as D, localcontext
 import json
+import math
 from pathlib import Path
 import random
 import subprocess
@@ -81,6 +82,26 @@ def vectors():
         b = at(a[0] - center + randomizer.randrange(-9, 10), a[1] + center + randomizer.randrange(-15, 16))
         rows.append({"kind": kind, "start": start, "finish": finish, "a": a, "b": b,
                      "radius": radius, "other_radius": 0.625})
+    for power in range(0, 26):
+        scale = 1 << power
+        for gap in (0.0, math.ulp(5.0 * scale), -math.ulp(5.0 * scale)):
+            center = (5.0 * scale + gap, 5.0 * scale)
+            vector = {"kind": "circle", "start": (0, 0), "finish": (8 * scale, 8 * scale),
+                      "a": center, "b": center, "radius": scale, "other_radius": 0, "certified_only": True}
+            if gap == 0:
+                reference_index = len(rows)
+            else:
+                vector["compare_to"] = reference_index
+            rows.append(vector)
+        rows.append({"kind": "segment", "start": (0, 0), "finish": (8 * scale, 8 * scale),
+                     "a": (scale, 9 * scale), "b": (9 * scale, scale), "radius": scale,
+                     "certified_only": True, "compare_to": reference_index, "equal": True})
+    scale = 1 << 30
+    tangent = {"kind": "circle", "start": (0, 0), "finish": (12 * scale, 16 * scale),
+               "a": (2 * scale, 11 * scale), "b": (2 * scale, 11 * scale), "other_radius": 0,
+               "certified_only": True}
+    for radius in (5.0 * scale, math.nextafter(5.0 * scale, 0.0), math.nextafter(5.0 * scale, math.inf)):
+        rows.append(dict(tangent, radius=radius))
     far = 10 ** 12
     for offset in (16.0, 16.0009765625):
         rows.append({"kind": "segment", "start": [far, -far], "finish": [far + 64, -far],
@@ -116,14 +137,17 @@ def main():
         (output / "reference.json").write_text(json.dumps(projected, default=str), encoding="utf-8")
         worst = D(0)
         certified = {kind: {"hits": 0, "misses": 0, "unresolved": 0} for kind in ("circle", "segment")}
+        ordered = 0
         for index, (row, expected) in enumerate(zip(native, projected, strict=True)):
+            case = cases[index]
             observed = row["time"]
-            if (observed == -1) != (expected is None):
-                raise ValueError(f"Contact classification mismatch at vector {index}")
-            if expected is not None:
-                worst = max(worst, abs(D.from_float(float(observed)) - expected))
-                if abs(D.from_float(float(observed)) - expected) > D("2e-12"):
-                    raise ValueError(f"Contact time mismatch at vector {index}")
+            if not case.get("certified_only"):
+                if (observed == -1) != (expected is None):
+                    raise ValueError(f"Contact classification mismatch at vector {index}")
+                if expected is not None:
+                    worst = max(worst, abs(D.from_float(float(observed)) - expected))
+                    if abs(D.from_float(float(observed)) - expected) > D("2e-12"):
+                        raise ValueError(f"Contact time mismatch at vector {index}")
             proof = row.get("proof")
             if proof is None:
                 continue
@@ -137,14 +161,24 @@ def main():
                     raise ValueError(f"Contact outside certified bounds at vector {index}")
                 counts["hits"] += 1
             elif proof["outcome"] == 2:
+                if case.get("certified_only"):
+                    raise ValueError(f"Unresolved adversarial vector {index}")
                 counts["unresolved"] += 1
             else:
                 raise ValueError(f"Invalid certification at vector {index}")
+            if "compare_to" in case:
+                delta = expected - projected[case["compare_to"]]
+                if case.get("equal"):
+                    assert abs(delta) < D("1e-75")
+                    delta = D(0)
+                if row["order"] != 1 + (delta > 0) - (delta < 0):
+                    raise ValueError(f"Certified order mismatch at vector {index}")
+                ordered += 1
         if not actual[-2] < actual[-1] or not projected[-2] < projected[-1]:
             raise ValueError("Far-realm order did not survive")
     print(json.dumps({"cases": len(cases), "contacts": sum(time is not None for time in projected),
                       "maximum_time_error": str(worst), "far_order": actual[-2:],
-                      "certified": certified}, indent=2))
+                      "certified_order_pairs": ordered, "certified": certified}, indent=2))
 
 
 if __name__ == "__main__":

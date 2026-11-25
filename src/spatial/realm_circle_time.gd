@@ -6,11 +6,15 @@ extends RefCounted
 enum Result { MISS, HIT, UNRESOLVED }
 enum Order { BEFORE, SAME, AFTER, UNRESOLVED }
 
+const ExactContact := preload("res://src/spatial/realm_exact_contact.gd")
+
 class Contact:
 	var outcome: Result
 	var earliest: float
 	var latest: float
 	var _exact_ratio: PackedFloat64Array
+	var _path: PackedFloat64Array
+	var _exact_root: ExactContact.Root
 
 	func _init(result: Result, lower: float = 0.0, upper: float = 0.0) -> void:
 		outcome = result
@@ -28,7 +32,26 @@ class Contact:
 			return Order.SAME
 		if _exact_ratio.size() == 2 and other._exact_ratio.size() == 2:
 			return RealmCircleTime._order_fractions(_exact_ratio, other._exact_ratio)
-		return Order.UNRESOLVED
+		var left := _root()
+		var right := other._root()
+		if left == null or right == null:
+			return Order.UNRESOLVED
+		match left.compare(right):
+			-1: return Order.BEFORE
+			0: return Order.SAME
+			_: return Order.AFTER
+
+	func _root() -> ExactContact.Root:
+		if _exact_root == null:
+			if _path.size() == 10:
+				_exact_root = ExactContact.path(_path)
+			elif _path.size() == 9:
+				_exact_root = ExactContact.segment_side(_path)
+			elif _exact_ratio.size() == 2:
+				_exact_root = ExactContact.ratio(_exact_ratio)
+			elif earliest == latest:
+				_exact_root = ExactContact.ratio(PackedFloat64Array([earliest, 1.0]))
+		return _exact_root
 
 class Interval:
 	var lower: float
@@ -54,6 +77,20 @@ func measure(start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
 			or not _finite_point(target_finish) or not is_finite(radius) or not is_finite(target_radius)
 			or radius < 0.0 or target_radius < 0.0):
 		return Contact.new(Result.UNRESOLVED)
+	var contact := _measure_intervals(start, finish, radius, target_start, target_finish, target_radius)
+	if contact.outcome == Result.MISS or (contact.outcome == Result.HIT and (
+			contact.latest == 0.0 or contact._exact_ratio.size() == 2)):
+		return contact
+	var path := PackedFloat64Array([start.x, start.y, finish.x, finish.y, target_start.x, target_start.y,
+		target_finish.x, target_finish.y, radius, target_radius])
+	if contact.outcome == Result.UNRESOLVED:
+		return _measure_exact(ExactContact.path(path))
+	contact._path = path
+	return contact
+
+
+func _measure_intervals(start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
+		target_start: RealmSweep.Point, target_finish: RealmSweep.Point, target_radius: float) -> Contact:
 	var x := _difference(start.x, target_start.x)
 	var y := _difference(start.y, target_start.y)
 	var r := _add(_point(radius), _point(target_radius))
@@ -82,12 +119,39 @@ func measure(start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
 	if discriminant.upper < 0.0:
 		return Contact.new(Result.MISS)
 	if projection.upper >= 0.0 or not is_finite(discriminant.upper) or discriminant.lower < 0.0:
-		return _refine_tangency([x, y, dx, dy, r])
+		return Contact.new(Result.UNRESOLVED)
 	var root := _enclose(sqrt(discriminant.lower), sqrt(discriminant.upper))
 	var divisor := _subtract(root, projection)
 	if divisor.lower <= 0.0 or not is_finite(divisor.upper):
 		return Contact.new(Result.UNRESOLVED)
 	return _contact_on_path(_divide_positive(separation, divisor))
+
+
+static func _measure_exact(root: ExactContact.Root) -> Contact:
+	if root == null:
+		return Contact.new(Result.MISS)
+	if root.separation.direction <= 0:
+		return Contact.new(Result.HIT)
+	if not root.first_contact():
+		return Contact.new(Result.MISS)
+	var lower := 0.0
+	var upper := 1.0
+	for iteration: int in 64:
+		var middle := (lower + upper) * 0.5
+		if middle == lower or middle == upper:
+			break
+		var order := root.compare_time(middle)
+		if order == 0:
+			lower = middle
+			upper = middle
+			break
+		if order > 0:
+			lower = middle
+		else:
+			upper = middle
+	var contact := Contact.new(Result.HIT, lower, upper)
+	contact._exact_root = root
+	return contact
 
 
 func measure_segment(start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
@@ -106,7 +170,15 @@ func measure_segment(start: RealmSweep.Point, finish: RealmSweep.Point, radius: 
 	var ends := _first_contact(first, last)
 	if ends.outcome == Result.HIT and ends.latest == 0.0:
 		return ends
-	return _first_contact(ends, _segment_side(start, finish, radius, a, b))
+	var side := _segment_side(start, finish, radius, a, b)
+	if side.outcome == Result.MISS or (side.outcome == Result.HIT and side.latest == 0.0):
+		return _first_contact(ends, side)
+	var path := PackedFloat64Array([start.x, start.y, finish.x, finish.y, a.x, a.y, b.x, b.y, radius])
+	if side.outcome == Result.UNRESOLVED:
+		side = _measure_exact(ExactContact.segment_side(path))
+	else:
+		side._path = path
+	return _first_contact(ends, side)
 
 
 ## Squared distance to a convex obstacle along a linear path is convex. A
@@ -268,45 +340,6 @@ func _axis_hit(position: Interval, advance: Interval, radius: Interval) -> Conta
 	if gap.lower != gap.upper or gap.lower <= 0.0 or not is_finite(speed):
 		return null
 	return _exact_ratio_hit(gap.lower, speed)
-
-
-## In units at a common binary scale, the small operands have an exact int64
-## determinant. This resolves zero discriminants without subtracting doubles.
-func _refine_tangency(operands: Array[Interval]) -> Contact:
-	const SAFE_COORDINATE := 32767.0
-	const MAX_REFINEMENT_SCALE := 1024
-	for operand: Interval in operands:
-		if operand.lower != operand.upper or not is_finite(operand.lower):
-			return Contact.new(Result.UNRESOLVED)
-	var integers := PackedInt64Array()
-	integers.resize(operands.size())
-	var scale := 1
-	while scale <= MAX_REFINEMENT_SCALE:
-		var integral := true
-		for index: int in operands.size():
-			var value := operands[index].lower * scale
-			if absf(value) > SAFE_COORDINATE:
-				return Contact.new(Result.UNRESOLVED)
-			integers[index] = int(value)
-			integral = integral and float(integers[index]) == value
-		if integral:
-			return _classify_integer_tangent(integers)
-		scale <<= 1
-	return Contact.new(Result.UNRESOLVED)
-
-
-func _classify_integer_tangent(values: PackedInt64Array) -> Contact:
-	var speed_squared := values[2] * values[2] + values[3] * values[3]
-	var approaching := -(values[0] * values[2] + values[1] * values[3])
-	if speed_squared == 0 or approaching <= 0:
-		return Contact.new(Result.MISS)
-	var cross := values[0] * values[3] - values[1] * values[2]
-	var discriminant := speed_squared * values[4] * values[4] - cross * cross
-	if discriminant < 0:
-		return Contact.new(Result.MISS)
-	if discriminant == 0:
-		return _exact_ratio_hit(float(approaching), float(speed_squared))
-	return Contact.new(Result.UNRESOLVED)
 
 
 func _exact_ratio_hit(distance: float, speed: float) -> Contact:

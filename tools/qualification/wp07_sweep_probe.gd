@@ -17,6 +17,7 @@ func _initialize() -> void:
 		quit(2)
 		return
 	var results: Array[Dictionary] = []
+	var contacts: Array[RealmCircleTime.Contact] = []
 	var proof := RealmCircleTime.new()
 	for row: Dictionary in cases:
 		var start := _point(row["start"])
@@ -38,6 +39,9 @@ func _initialize() -> void:
 		var result := {"time": time}
 		if checked != null:
 			result["proof"] = {"outcome": checked.outcome, "lower": checked.earliest, "upper": checked.latest}
+		if row.has("compare_to"):
+			result["order"] = checked.order_against(contacts[int(row["compare_to"])])
+		contacts.append(checked)
 		results.append(result)
 	output.store_string(JSON.stringify(results, "", true, true))
 	output.close()

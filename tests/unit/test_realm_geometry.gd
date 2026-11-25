@@ -123,7 +123,7 @@ func test_displacement_stops_at_thin_wall_and_commits_before_the_child_query() -
 	assert_eq(result.stopped_by.size(), 2)
 
 
-func test_displacement_can_retreat_from_initial_overlap_and_holds_ambiguous_path() -> void:
+func test_displacement_can_retreat_from_initial_overlap_and_stop_at_certified_tangent() -> void:
 	var geometry := RealmGeometry.new(&"outer")
 	var start := RealmSweep.Point.new(-0.5, 0.0)
 	assert_true(geometry.add_circle(&"mover", 0, start, 1.0, BODY))
@@ -141,14 +141,19 @@ func test_displacement_can_retreat_from_initial_overlap_and_holds_ambiguous_path
 	assert_eq(retreat.finish.x, -4.0)
 	assert_eq(retreat.revision, 3)
 	assert_true(retreat.stopped_by.is_empty())
-	var ambiguous := RealmGeometry.new(&"outer")
+	var wide := RealmGeometry.new(&"outer")
 	var scale := 65536.0
-	assert_true(ambiguous.add_circle(&"mover", 0, RealmSweep.Point.new(0.0, 0.0), 5.0 * scale, BODY))
-	assert_true(ambiguous.add_circle(&"tangent", 0, RealmSweep.Point.new(2.0 * scale, 11.0 * scale), 0.0, BLOCKER))
+	assert_true(wide.add_circle(&"mover", 0, RealmSweep.Point.new(0.0, 0.0), 5.0 * scale, BODY))
+	assert_true(wide.add_circle(&"tangent", 0, RealmSweep.Point.new(2.0 * scale, 11.0 * scale), 0.0, BLOCKER))
 	var diagonal := RealmSweep.Point.new(12.0 * scale, 16.0 * scale)
-	var proof := ambiguous.certify_circle_sweep(&"outer", RealmSweep.Point.new(0.0, 0.0), diagonal, 5.0 * scale, BLOCKER)
-	assert_eq(proof.unresolved.size(), 1)
-	assert_eq(proof.unresolved[0].entity, &"tangent")
-	assert_null(ambiguous.displace_circle(&"mover", 0, diagonal, BLOCKER))
-	assert_eq(ambiguous.revision, 2)
-	assert_eq(ambiguous.circle_center(&"mover", 0).x, 0.0)
+	var proof := wide.certify_circle_sweep(&"outer", RealmSweep.Point.new(0.0, 0.0), diagonal, 5.0 * scale, BLOCKER)
+	assert_true(proof.unresolved.is_empty())
+	assert_eq(proof.contacts.size(), 1)
+	var clipped := wide.displace_circle(&"mover", 0, diagonal, BLOCKER)
+	assert_not_null(clipped)
+	if clipped == null:
+		return
+	assert_eq(clipped.stopped_by[0].entity, &"tangent")
+	assert_eq(wide.revision, 3)
+	assert_gt(wide.circle_center(&"mover", 0).x, 0.0)
+	assert_lt(wide.circle_center(&"mover", 0).x, diagonal.x * 0.5)

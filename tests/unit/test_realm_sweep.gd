@@ -70,7 +70,7 @@ func test_certified_circle_times_order_distinct_roots_with_the_same_rounded_time
 	assert_eq(first.order_against(equal), RealmCircleTime.Order.SAME)
 
 
-func test_circle_time_bounds_enclose_diagonal_contact_and_hold_ambiguous_tangency() -> void:
+func test_circle_time_bounds_enclose_diagonal_contact_and_refine_tangency() -> void:
 	var proof := RealmCircleTime.new()
 	var from := _point(0, 0)
 	var to := _point(8, 8)
@@ -79,7 +79,7 @@ func test_circle_time_bounds_enclose_diagonal_contact_and_hold_ambiguous_tangenc
 	var expected := (5.0 - 1.0 / sqrt(2.0)) / 8.0
 	assert_eq(diagonal.outcome, RealmCircleTime.Result.HIT)
 	assert_true(diagonal.earliest <= expected and expected <= diagonal.latest)
-	assert_eq(diagonal.order_against(diagonal), RealmCircleTime.Order.UNRESOLVED)
+	assert_eq(diagonal.order_against(diagonal), RealmCircleTime.Order.SAME)
 	var off_path := _point(5, -5)
 	assert_eq(proof.measure(from, to, 1, off_path, off_path, 0).outcome, RealmCircleTime.Result.MISS)
 	var tangent := _point(5, 1)
@@ -94,9 +94,33 @@ func test_circle_time_bounds_enclose_diagonal_contact_and_hold_ambiguous_tangenc
 	var equal := proof.measure(from, _point(8, 0), 5, same_time, same_time, 0)
 	assert_eq(refined.order_against(equal), RealmCircleTime.Order.SAME)
 	var large_oblique := _point(2 * 65536, 11 * 65536)
-	assert_eq(proof.measure(from, _point(12 * 65536, 16 * 65536), 5 * 65536, large_oblique, large_oblique, 0).outcome,
-		RealmCircleTime.Result.UNRESOLVED)
+	var large := proof.measure(from, _point(12 * 65536, 16 * 65536), 5 * 65536, large_oblique, large_oblique, 0)
+	assert_eq(large.outcome, RealmCircleTime.Result.HIT)
+	assert_eq(large.order_against(equal), RealmCircleTime.Order.SAME)
 	assert_eq(proof.measure(center, from, 1, center, center, 0).earliest, 0.0)
+
+
+func test_overlapping_irrational_and_segment_times_have_exact_order() -> void:
+	var proof := RealmCircleTime.new()
+	var scratch := PackedByteArray()
+	scratch.resize(8)
+	var from := _point(0, 0)
+	var to := _point(8, 8)
+	var center := _point(5, 5)
+	var shifted := _point(RealmBounds.adjacent(5.0, true, scratch), 5)
+	var first := proof.measure(from, to, 1, center, center, 0)
+	var second := proof.measure(from, to, 1, shifted, shifted, 0)
+	assert_eq(first.outcome, RealmCircleTime.Result.HIT)
+	assert_eq(second.outcome, RealmCircleTime.Result.HIT)
+	assert_true(first.latest >= second.earliest)
+	assert_eq(first.order_against(second), RealmCircleTime.Order.BEFORE)
+	assert_eq(second.order_against(first), RealmCircleTime.Order.AFTER)
+
+	var diagonal_wall := proof.measure_segment(from, to, 1, _point(1, 9), _point(9, 1))
+	var vertical_wall := proof.measure_segment(from, to, 1, _point(5, 2), _point(5, 8))
+	assert_eq(diagonal_wall.outcome, RealmCircleTime.Result.HIT)
+	assert_eq(diagonal_wall.order_against(first), RealmCircleTime.Order.SAME)
+	assert_eq(vertical_wall.order_against(first), RealmCircleTime.Order.BEFORE)
 
 
 func _point(x: float, y: float) -> RealmSweep.Point:
