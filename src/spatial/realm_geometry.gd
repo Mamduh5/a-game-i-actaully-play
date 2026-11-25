@@ -42,6 +42,31 @@ func _init(id: StringName) -> void:
 	_index = RealmSpatialIndex.new(id)
 
 
+## Build an isolated working image for a transaction spanning several waves.
+func fork() -> RealmGeometry:
+	var draft := RealmGeometry.new(realm_id)
+	draft._index = _index.fork()
+	draft._revision = _revision
+	for key: StringName in _shapes:
+		var original := _shapes[key]
+		var shape := Shape.new()
+		shape.center = original.center
+		shape.motion_end = original.motion_end
+		shape.radius = original.radius
+		shape.edge = original.edge
+		shape.category = original.category
+		shape.fixed = original.fixed
+		draft._shapes[key] = shape
+	return draft
+
+
+## The owner transfers the draft after checking all participating revisions.
+func adopt(draft: RealmGeometry) -> void:
+	_index = draft._index
+	_shapes = draft._shapes
+	_revision = draft._revision
+
+
 func add_circle(entity: StringName, slot: int, center: RealmSweep.Point, radius: float,
 		category: int) -> bool:
 	if center == null or category <= 0:

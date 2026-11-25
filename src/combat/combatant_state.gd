@@ -39,12 +39,14 @@ var life: int
 var owner: StringName
 var provenance: CombatOrigin.Provenance
 var hp: QuantityLayerLedger.Pool
+var max_hp: Quantity
 var barriers: Array[Barrier] = []
 var physical := Defense.new()
 var magical := Defense.new()
 var prevents_hit: bool
 var statuses: Dictionary[StringName, int] = {}
 var resources: Dictionary[StringName, Quantity] = {}
+var follow_ups: Array[CombatFollowUp] = []
 var _rates: Dictionary[int, QuantityRateCursor] = {}
 var _ready_at: Dictionary[StringName, CombatInstant] = {}
 
@@ -59,6 +61,16 @@ func is_valid() -> bool:
 	var expected := QuantityErrorBounds.Sign.ABOVE if is_alive() else QuantityErrorBounds.Sign.EQUAL
 	if hp.error.certify_after(hp.amount, zero) != expected:
 		return false
+	if max_hp != null and (max_hp.sign_value <= 0 or hp.amount.compare(max_hp) > 0):
+		return false
+	for status: StringName in statuses:
+		if status.is_empty() or statuses[status] <= 0:
+			return false
+	var rules: Dictionary[StringName, bool] = {}
+	for follow_up: CombatFollowUp in follow_ups:
+		if follow_up == null or not follow_up.is_valid() or rules.has(follow_up.id):
+			return false
+		rules[follow_up.id] = true
 	for resource: StringName in resources:
 		var value := resources[resource]
 		if resource.is_empty() or value == null or value.sign_value < 0:
@@ -85,17 +97,41 @@ func copy() -> CombatantState:
 	result.owner = owner
 	result.provenance = provenance
 	result.hp = QuantityLayerLedger.Pool.new(hp.amount, hp.error)
+	result.max_hp = max_hp
 	result.physical = physical.copy()
 	result.magical = magical.copy()
 	result.prevents_hit = prevents_hit
 	result.statuses = statuses.duplicate()
 	result.resources = resources.duplicate()
+	for follow_up: CombatFollowUp in follow_ups:
+		result.follow_ups.append(follow_up.copy())
 	result._ready_at = _ready_at.duplicate()
 	for barrier: Barrier in barriers:
 		result.barriers.append(barrier.copy())
 	for kind: int in _rates:
 		result._rates[kind] = _rates[kind].copy()
 	return result
+
+
+## Conservative exact cap check against the existing physical HP posting error.
+func recover_hp(amount: Quantity) -> bool:
+	if not is_alive() or max_hp == null:
+		return true
+	var next := hp.amount.add(amount)
+	if next == null:
+		return false
+	match hp.error.certify_after(next, QuantityFraction.from_amount(max_hp)):
+		QuantityErrorBounds.Sign.ABOVE, QuantityErrorBounds.Sign.EQUAL:
+			hp = QuantityLayerLedger.Pool.new(max_hp, QuantityErrorBounds.new())
+		QuantityErrorBounds.Sign.BELOW:
+			var represented := next if next.compare(max_hp) <= 0 else max_hp
+			var error := hp.error.after_change(QuantityFraction.from_amount(next), represented)
+			if error == null:
+				return false
+			hp = QuantityLayerLedger.Pool.new(represented, error)
+		_:
+			return false
+	return true
 
 
 ## All resource costs and cooldown readiness settle together. A rejected

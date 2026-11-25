@@ -46,6 +46,13 @@ func _init(id: StringName) -> void:
 	_realm_id = id
 
 
+func fork() -> RealmSpatialIndex:
+	var draft := RealmSpatialIndex.new(_realm_id)
+	for key: StringName in _proxies:
+		draft._insert(key, _proxies[key])
+	return draft
+
+
 func register(entity: StringName, shape: int, bounds: RealmBounds) -> bool:
 	var id := shape_key(entity, shape)
 	if _proxies.has(id):

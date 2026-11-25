@@ -252,6 +252,299 @@ func test_numeric_resource_failure_releases_neither_partial_debits_nor_receipts(
 	assert_eq(kernel.resolve_next(CombatInstant.at_tick(4)).result, CombatKernel.Result.INTERRUPTED)
 
 
+func test_lethal_reaction_finishes_before_terminal_and_future_delivery_cannot_hold_a_wipe() -> void:
+	for immediate: bool in [true, false]:
+		var kernel := CombatKernel.new()
+		var hero := _actor(&"hero", 3)
+		if immediate:
+			hero.follow_ups.append(_reaction(&"reprisal", CombatFollowUp.Cause.HOSTILE_HP, 4))
+		assert_true(kernel.add_actor(hero))
+		assert_true(kernel.add_actor(_actor(&"creator", 4)))
+		assert_true(kernel.configure_terminal(&"creator", [&"hero"]))
+		var later := kernel.commit(_attack(&"hero", 1, 1, 4))
+		var lethal := kernel.commit(_attack(&"creator", 1, 1, 3))
+		assert_eq(_admit(kernel, later, &"creator", 4), CombatRootQueue.Result.ACCEPTED)
+		assert_eq(_admit(kernel, lethal, &"hero", 2), CombatRootQueue.Result.ACCEPTED)
+		var result := kernel.resolve_next(CombatInstant.at_tick(3), 1)
+		if immediate:
+			assert_eq(result.result, CombatKernel.Result.YIELDED)
+			assert_true(result.hits.is_empty())
+			assert_true(kernel.actor_snapshot(&"hero").is_alive())
+			assert_false(kernel.finish_delivery(later))
+			result = kernel.resolve_next(CombatInstant.at_tick(3), 1)
+		assert_eq(result.result, CombatKernel.Result.CLOSED)
+		assert_eq(result.terminal, CombatKernel.Terminal.VICTORY if immediate else CombatKernel.Terminal.DEFEAT)
+		assert_eq(result.hits.size(), 2 if immediate else 1)
+		if immediate and result.hits.size() == 2:
+			assert_eq(result.hits[1].parent, result.hits[0].event)
+			assert_eq(result.hits[1].source, &"hero")
+			assert_eq(result.hits[1].reaction, &"reprisal")
+		assert_false(kernel.actor_snapshot(&"hero").is_alive())
+		assert_eq(kernel.pending_count(), 0)
+		assert_eq(kernel.resolve_next(CombatInstant.at_tick(6)).result, CombatKernel.Result.IDLE)
+
+
+func test_hostile_layer_depletion_creates_one_separate_descendant_even_on_lethal() -> void:
+	var kernel := CombatKernel.new()
+	var hero := _actor(&"hero", 3)
+	hero.barriers.append(_barrier(&"fortified", 2, CombatAction.Damage.PHYSICAL))
+	var release := _reaction(&"release", CombatFollowUp.Cause.HOSTILE_LAYER, 1)
+	release.layer = &"fortified"
+	hero.follow_ups.append(release)
+	assert_true(kernel.add_actor(hero))
+	assert_true(kernel.add_actor(_actor(&"enemy", 9)))
+	var enemy := kernel.commit(_attack(&"enemy", 1, 1, 5))
+	assert_eq(_admit(kernel, enemy, &"hero", 2), CombatRootQueue.Result.ACCEPTED)
+	var result := kernel.resolve_next(CombatInstant.at_tick(3))
+	assert_eq(result.hits.size(), 2)
+	if result.hits.size() == 2:
+		assert_true(result.hits[0].eliminated)
+		assert_eq(result.hits[1].reaction, &"release")
+		assert_eq(result.hits[1].source, &"hero")
+	assert_eq(_count(kernel.actor_snapshot(&"enemy").hp.amount), 8)
+
+
+func test_finite_immediate_chain_keeps_every_posting_under_different_slices() -> void:
+	for budget: int in [1, 11, 180]:
+		var kernel := CombatKernel.new()
+		var source := _actor(&"source", 5)
+		source.resources[&"chain"] = Quantity.from_count(96)
+		var paid := _reaction(&"paid", CombatFollowUp.Cause.PAID_HIT, 0)
+		paid.resource = &"chain"
+		paid.cost = Quantity.from_count(1)
+		source.follow_ups.append(paid)
+		assert_true(kernel.add_actor(source))
+		assert_true(kernel.add_actor(_actor(&"target", 5)))
+		var key := kernel.commit(_attack(&"source", 1, 1, 0))
+		assert_eq(_admit(kernel, key, &"target", 2), CombatRootQueue.Result.ACCEPTED)
+		var result := kernel.resolve_next(CombatInstant.at_tick(3), budget)
+		var calls := 1
+		while result.result == CombatKernel.Result.YIELDED and calls < 100:
+			assert_true(result.hits.is_empty())
+			assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"chain"]), 96)
+			result = kernel.resolve_next(CombatInstant.at_tick(3), budget)
+			calls += 1
+		assert_eq(result.result, CombatKernel.Result.CLOSED)
+		assert_eq(result.waves, 97)
+		assert_eq(result.hits.size(), 97)
+		assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"chain"]), 0)
+		for index: int in result.hits.size():
+			assert_eq(result.hits[index].parent, index)
+
+
+func test_status_claims_displacement_and_child_preparent_view_follow_the_group_order() -> void:
+	var kernel := CombatKernel.new()
+	var actor := _actor(&"source", 4)
+	actor.max_hp = Quantity.from_count(6)
+	actor.resources[&"charge"] = Quantity.from_count(1)
+	var paid := _reaction(&"lightning", CombatFollowUp.Cause.PAID_HIT, 1)
+	paid.resource = &"charge"
+	paid.cost = Quantity.from_count(1)
+	paid.inherit_parent_statuses = true
+	paid.consume_status = &"old"
+	actor.follow_ups.append(paid)
+	assert_true(kernel.add_actor(actor))
+	var target := _actor(&"target", 20)
+	target.statuses[&"old"] = 1
+	assert_true(kernel.add_actor(target))
+	var geometry := _geometry_with_wall(&"target")
+	assert_true(kernel.attach_geometry(geometry, 2))
+	var action := _attack(&"source", 1, 1, 1)
+	action.consume_status = &"old"
+	action.add_status = &"new"
+	action.status_units = 1
+	action.displacement = RealmSweep.Point.new(10.0, 0.0)
+	action.restore_source = Quantity.from_count(8)
+	var key := kernel.commit(action)
+	assert_eq(_admit(kernel, key, &"target", 2), CombatRootQueue.Result.ACCEPTED)
+	var result := kernel.resolve_next(CombatInstant.at_tick(3), 1)
+	assert_eq(result.result, CombatKernel.Result.YIELDED)
+	assert_eq(geometry.circle_center(&"target", 0).x, 0.0)
+	assert_eq(_count(kernel.actor_snapshot(&"source").hp.amount), 4)
+	result = kernel.resolve_next(CombatInstant.at_tick(3), 1)
+	assert_eq(result.result, CombatKernel.Result.CLOSED)
+	assert_eq(result.hits.size(), 2)
+	if result.hits.size() == 2:
+		assert_true(result.hits[0].status_consumed)
+		assert_eq(result.hits[0].displacement.stopped_by.size(), 1)
+		assert_eq(result.hits[1].before_statuses, {&"old": 1})
+		assert_false(result.hits[1].status_consumed, "The inherited observation does not restore a spent stack")
+	assert_eq(kernel.actor_snapshot(&"target").statuses, {&"new": 1})
+	assert_almost_eq(geometry.circle_center(&"target", 0).x, 4.0, 0.000001)
+	assert_eq(_count(kernel.actor_snapshot(&"source").hp.amount), 6)
+
+
+func test_zero_progress_cycle_rejects_the_group_without_publishing_its_geometry_or_hp() -> void:
+	var kernel := CombatKernel.new()
+	for id: StringName in [&"a", &"b"]:
+		var actor := _actor(id, 10)
+		actor.max_hp = Quantity.from_count(10)
+		var mirror := _reaction(&"mirror", CombatFollowUp.Cause.HOSTILE_HP, 1)
+		mirror.restore_source = Quantity.from_count(1)
+		actor.follow_ups.append(mirror)
+		assert_true(kernel.add_actor(actor))
+	var geometry := _geometry_with_wall(&"b")
+	assert_true(kernel.attach_geometry(geometry, 2))
+	var action := _attack(&"a", 1, 1, 1)
+	action.displacement = RealmSweep.Point.new(10.0, 0.0)
+	assert_eq(_admit(kernel, kernel.commit(action), &"b", 2), CombatRootQueue.Result.ACCEPTED)
+	var result := kernel.resolve_next(CombatInstant.at_tick(3))
+	assert_eq(result.result, CombatKernel.Result.INTERRUPTED)
+	assert_eq(result.fault, &"causal_cycle")
+	assert_eq(result.fault_wave, 3)
+	assert_true(result.hits.is_empty())
+	assert_eq(kernel.pending_count(), 1)
+	assert_eq(_count(kernel.actor_snapshot(&"a").hp.amount), 10)
+	assert_eq(_count(kernel.actor_snapshot(&"b").hp.amount), 10)
+	assert_eq(geometry.circle_center(&"b", 0).x, 0.0)
+
+
+func test_stage_six_barrier_protects_the_child_and_cannot_absorb_its_originating_wave() -> void:
+	var kernel := CombatKernel.new()
+	assert_true(kernel.add_actor(_actor(&"a", 10)))
+	var opponent := _actor(&"b", 10)
+	opponent.follow_ups.append(_reaction(&"retaliate", CombatFollowUp.Cause.HOSTILE_HP, 5))
+	assert_true(kernel.add_actor(opponent))
+	var first := _attack(&"a", 1, 1, 1)
+	first.barrier_for_source = CombatAction.BarrierGrant.new()
+	first.barrier_for_source.id = &"ward"
+	first.barrier_for_source.mask = CombatAction.Damage.PHYSICAL
+	first.barrier_for_source.capacity = Quantity.from_count(4)
+	assert_eq(_admit(kernel, kernel.commit(first), &"b", 2), CombatRootQueue.Result.ACCEPTED)
+	assert_eq(_admit(kernel, kernel.commit(_attack(&"b", 1, 1, 2)), &"a", 2), CombatRootQueue.Result.ACCEPTED)
+	var result := kernel.resolve_next(CombatInstant.at_tick(3))
+	assert_eq(result.hits.size(), 3)
+	if result.hits.size() == 3:
+		assert_true(result.hits[0].components[0].barriers.is_empty())
+		assert_eq(_count(result.hits[0].components[0].hp_removed), 2)
+		assert_eq(result.hits[1].granted_barrier, &"ward")
+		assert_eq(_count(result.hits[2].components[0].barriers[0].absorbed), 4)
+		assert_eq(_count(result.hits[2].components[0].hp_removed), 1)
+	assert_eq(_count(kernel.actor_snapshot(&"a").hp.amount), 7)
+
+
+func test_solid_impact_descendant_certifies_a_fresh_target_from_the_draft_pose() -> void:
+	for x: float in [5.0, 9.0]:
+		var kernel := CombatKernel.new()
+		var source := _actor(&"source", 10)
+		var target := _actor(&"target", 10)
+		var collision := _reaction(&"impact", CombatFollowUp.Cause.SOLID_IMPACT, 2)
+		collision.fresh_target = &"nearby"
+		collision.reach = 2.0
+		collision.collision_mask = 4
+		source.follow_ups.append(collision)
+		assert_true(kernel.add_actor(source))
+		assert_true(kernel.add_actor(target))
+		assert_true(kernel.add_actor(_actor(&"nearby", 10)))
+		var geometry := _geometry_with_wall(&"target")
+		assert_true(geometry.add_circle(&"nearby", 0, RealmSweep.Point.new(x, 0), 1.0, 4))
+		assert_true(kernel.attach_geometry(geometry, 2))
+		var action := _attack(&"source", 1, 1, 1)
+		action.displacement = RealmSweep.Point.new(10.0, 0.0)
+		assert_eq(_admit(kernel, kernel.commit(action), &"target", 2), CombatRootQueue.Result.ACCEPTED)
+		var result := kernel.resolve_next(CombatInstant.at_tick(3))
+		assert_eq(result.result, CombatKernel.Result.CLOSED)
+		assert_eq(result.hits.size(), 2 if x == 5.0 else 1)
+		assert_eq(_count(kernel.actor_snapshot(&"nearby").hp.amount), 8 if x == 5.0 else 10)
+
+
+func test_finite_reactions_contend_by_authored_priority_across_same_actor_hits() -> void:
+	for reverse: bool in [false, true]:
+		var kernel := CombatKernel.new()
+		var source := _actor(&"source", 10)
+		source.resources[&"charge"] = Quantity.from_count(1)
+		for index: int in 2:
+			var rule := _reaction(StringName("rule_%d" % index), CombatFollowUp.Cause.PAID_HIT, index + 2)
+			rule.priority = index
+			rule.resource = &"charge"
+			rule.cost = Quantity.from_count(1)
+			source.follow_ups.append(rule)
+		if reverse:
+			source.follow_ups.reverse()
+		assert_true(kernel.add_actor(source))
+		assert_true(kernel.add_actor(_actor(&"target", 10)))
+		assert_eq(_admit(kernel, kernel.commit(_attack(&"source", 1, 1, 1)), &"target", 2), CombatRootQueue.Result.ACCEPTED)
+		var result := kernel.resolve_next(CombatInstant.at_tick(3))
+		assert_eq(result.hits.size(), 2)
+		if result.hits.size() == 2:
+			assert_eq(result.hits[1].reaction, &"rule_1")
+		assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"charge"]), 0)
+
+
+func test_elimination_reaction_publishes_distinct_entitlements_at_the_closed_boundary() -> void:
+	var kernel := CombatKernel.new()
+	var source := _actor(&"source", 10)
+	var bloom := _reaction(&"bloom", CombatFollowUp.Cause.KILL, 2)
+	bloom.fresh_target = &"second"
+	bloom.reach = 4.0
+	bloom.collision_mask = CATEGORY
+	source.follow_ups.append(bloom)
+	assert_true(kernel.add_actor(source))
+	assert_true(kernel.add_actor(_actor(&"first", 1)))
+	assert_true(kernel.add_actor(_actor(&"second", 2)))
+	var geometry := RealmGeometry.new(REALM)
+	assert_true(geometry.add_circle(&"first", 0, RealmSweep.Point.new(0.0, 0.0), 1.0, CATEGORY))
+	assert_true(geometry.add_circle(&"second", 0, RealmSweep.Point.new(3.0, 0.0), 1.0, CATEGORY))
+	assert_true(kernel.attach_geometry(geometry, 2))
+	assert_eq(_admit(kernel, kernel.commit(_attack(&"source", 1, 1, 1)), &"first", 2), CombatRootQueue.Result.ACCEPTED)
+	var result := kernel.resolve_next(CombatInstant.at_tick(3), 1)
+	assert_eq(result.result, CombatKernel.Result.YIELDED)
+	assert_true(result.eliminations.is_empty())
+	result = kernel.resolve_next(CombatInstant.at_tick(3), 1)
+	assert_eq(result.eliminations.size(), 2)
+	if result.eliminations.size() == 2:
+		assert_eq(result.eliminations[0].target, &"first")
+		assert_eq(result.eliminations[1].target, &"second")
+		assert_eq(result.eliminations[1].origin.owner, &"source")
+		assert_eq(result.eliminations[1].parent, result.eliminations[0].event)
+
+
+func test_contention_on_geometry_during_a_yield_preserves_the_last_committed_combat_state() -> void:
+	var kernel := CombatKernel.new()
+	var attacker := _actor(&"a", 10)
+	attacker.resources[&"charge"] = Quantity.from_count(1)
+	var paid := _reaction(&"paid", CombatFollowUp.Cause.PAID_HIT, 1)
+	paid.resource = &"charge"
+	paid.cost = Quantity.from_count(1)
+	attacker.follow_ups.append(paid)
+	assert_true(kernel.add_actor(attacker))
+	assert_true(kernel.add_actor(_actor(&"b", 10)))
+	var geometry := _geometry_with_wall(&"b")
+	assert_true(kernel.attach_geometry(geometry, 2))
+	var action := _attack(&"a", 1, 1, 2)
+	action.displacement = RealmSweep.Point.new(10.0, 0.0)
+	assert_eq(_admit(kernel, kernel.commit(action), &"b", 2), CombatRootQueue.Result.ACCEPTED)
+	assert_eq(kernel.resolve_next(CombatInstant.at_tick(3), 1).result, CombatKernel.Result.YIELDED)
+	assert_true(geometry.commit_circle_pose(&"b", 0, RealmSweep.Point.new(-2.0, 0.0)))
+	var result := kernel.resolve_next(CombatInstant.at_tick(3), 1)
+	assert_eq(result.result, CombatKernel.Result.INTERRUPTED)
+	assert_eq(result.fault, &"geometry_changed")
+	assert_eq(kernel.pending_count(), 1)
+	assert_eq(_count(kernel.actor_snapshot(&"b").hp.amount), 10)
+	assert_eq(_count(kernel.actor_snapshot(&"a").resources[&"charge"]), 1)
+	assert_eq(geometry.circle_center(&"b", 0).x, -2.0)
+
+
+static func _reaction(id: StringName, cause: CombatFollowUp.Cause, damage: int) -> CombatFollowUp:
+	var rule := CombatFollowUp.new()
+	rule.id = id
+	rule.family = id
+	rule.cause = cause
+	rule.component = CombatAction.Component.new()
+	rule.component.base = Quantity.from_count(damage)
+	return rule
+
+
+static func _geometry_with_wall(target: StringName) -> RealmGeometry:
+	var geometry := RealmGeometry.new(REALM)
+	geometry.add_circle(target, 0, RealmSweep.Point.new(0, 0), 1.0, CATEGORY)
+	var edge := RealmOutline.Edge.new()
+	edge.first = RealmSweep.Point.new(5, -10)
+	edge.last = RealmSweep.Point.new(5, 10)
+	geometry.add_segment(&"wall", 0, edge, 2, true)
+	return geometry
+
+
 static func _actor(id: StringName, hp: int) -> CombatantState:
 	var actor := CombatantState.new()
 	actor.id = id
