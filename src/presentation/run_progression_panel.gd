@@ -64,22 +64,27 @@ func show_offer(offer: RunRewardQueue.Offer, display_names: Dictionary[StringNam
 		return
 	_names = display_names.duplicate()
 	_clear("Reward %d" % offer.ordinal)
+	var first: Button
 	for id: StringName in offer.options:
 		var option := Button.new()
 		option.text = _option_text(offer, id)
 		option.pressed.connect(choice_requested.emit.bind(offer.ordinal, id))
 		_content.add_child(option)
+		if first == null:
+			first = option
 	if offer.options.is_empty():
 		var compensation := Button.new()
 		compensation.text = "Claim compensation"
 		compensation.pressed.connect(compensation_requested.emit.bind(offer.ordinal))
 		_content.add_child(compensation)
+		first = compensation
 	var later := Button.new()
 	later.text = "Choose later"
 	later.pressed.connect(dismissed.emit)
 	_content.add_child(later)
 	_add_feedback()
 	show()
+	first.grab_focus()
 
 
 func show_feedback(message: String) -> void:
@@ -123,6 +128,8 @@ func _picker(parent: VBoxContainer, label: String, kind: CatalogEntry.Kind, blan
 	for id: StringName in RunPreparation.available(_catalog, kind, _unlocked):
 		picker.add_item(_display(id))
 		picker.set_item_metadata(picker.item_count - 1, id)
+	if picker.item_count > 0:
+		picker.select(0)
 	return picker
 
 

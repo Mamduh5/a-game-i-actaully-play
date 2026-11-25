@@ -149,6 +149,7 @@ func _choose(ordinal: int, id: StringName) -> void:
 		return
 	_party = durable
 	_panel.hide()
+	_reopen_button.visible = _party.offer(SEAT, 1) != null or _party.offer(SEAT, 2) != null
 	print("WP19_CHOICE ", JSON.stringify({"id": id, "ordinal": ordinal, "world_tick": tick,
 		"x": _pawn.position.x, "manual_casts": _authority.manual_casts, "recovered": true}))
 	_capture("selected-%d.png" % ordinal)
