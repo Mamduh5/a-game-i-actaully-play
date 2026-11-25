@@ -47,7 +47,7 @@ func _init(id: StringName) -> void:
 
 
 func register(entity: StringName, shape: int, bounds: RealmBounds) -> bool:
-	var id := _key(entity, shape)
+	var id := shape_key(entity, shape)
 	if _proxies.has(id):
 		return false
 	var proxy := _create_proxy(entity, shape, bounds)
@@ -59,7 +59,7 @@ func register(entity: StringName, shape: int, bounds: RealmBounds) -> bool:
 
 ## Commits the new broad-phase bounds before returning to the calling group.
 func move(entity: StringName, shape: int, bounds: RealmBounds) -> bool:
-	var id := _key(entity, shape)
+	var id := shape_key(entity, shape)
 	var previous: Proxy = _proxies.get(id)
 	if previous == null:
 		return false
@@ -72,7 +72,7 @@ func move(entity: StringName, shape: int, bounds: RealmBounds) -> bool:
 
 
 func remove(entity: StringName, shape: int) -> bool:
-	var id := _key(entity, shape)
+	var id := shape_key(entity, shape)
 	var proxy: Proxy = _proxies.get(id)
 	if proxy == null:
 		return false
@@ -173,5 +173,5 @@ static func _cells_for(bounds: RealmBounds) -> CellWindow:
 	return window
 
 
-static func _key(entity: StringName, shape: int) -> StringName:
+static func shape_key(entity: StringName, shape: int) -> StringName:
 	return StringName("%s/%d" % [entity, shape])
