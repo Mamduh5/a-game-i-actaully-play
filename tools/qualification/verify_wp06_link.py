@@ -96,9 +96,7 @@ def exchange(exe, root, credentials, name):
         diagnostics_ok = True
         for side in results:
             for diagnostic in side["diagnostics"]:
-                teardown = diagnostic["teardown_site"] and (
-                    diagnostic["phase"] == "disconnected" or expectation == "reject"
-                )
+                teardown = diagnostic["teardown_site"] and diagnostic["phase"] in {"disconnected", "draining"}
                 refusal = expectation == "reject" and diagnostic["handshake_site"] and diagnostic["phase"] == "connecting"
                 diagnostics_ok = diagnostics_ok and (teardown or refusal)
         if expectation == "reject":

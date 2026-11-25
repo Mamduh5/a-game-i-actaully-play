@@ -94,6 +94,7 @@ func _process(_delta: float) -> void:
 	elif not _closing and Time.get_ticks_msec() >= _deadline:
 		_timed_out = true
 		_closing = true
+		print("WP06_LINK_PHASE draining role=", _role)
 		_link.request_close()
 
 
