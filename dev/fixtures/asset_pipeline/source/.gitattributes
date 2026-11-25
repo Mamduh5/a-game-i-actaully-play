@@ -1,0 +1,3 @@
+# These two small fixture masters fit in ordinary Git. Production layered masters use the root policy.
+waystone.aseprite binary -filter -merge
+waystone_alternate.aseprite binary -filter -merge

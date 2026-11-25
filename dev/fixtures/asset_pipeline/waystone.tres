@@ -1,0 +1,45 @@
+[gd_resource type="Resource" script_class="VisualAsset" format=3]
+
+[ext_resource type="Script" path="res://src/presentation/visual_asset.gd" id="1_asset"]
+[ext_resource type="Texture2D" path="res://dev/fixtures/asset_pipeline/derived/waystone.png" id="2_sheet"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_launch"]
+atlas = ExtResource("2_sheet")
+region = Rect2(0, 0, 72, 88)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_active"]
+atlas = ExtResource("2_sheet")
+region = Rect2(72, 0, 72, 88)
+filter_clip = true
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_recovery"]
+atlas = ExtResource("2_sheet")
+region = Rect2(144, 0, 72, 88)
+filter_clip = true
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_cue"]
+animations = [{
+"frames": [{
+"duration": 1.8,
+"texture": SubResource("AtlasTexture_launch")
+}, {
+"duration": 1.2,
+"texture": SubResource("AtlasTexture_active")
+}, {
+"duration": 2.6,
+"texture": SubResource("AtlasTexture_recovery")
+}],
+"loop": false,
+"name": &"cue",
+"speed": 10.0
+}]
+
+[resource]
+script = ExtResource("1_asset")
+visual_id = &"fixture.waystone"
+frames = SubResource("SpriteFrames_cue")
+frame_size = Vector2i(72, 88)
+foot_pixel = Vector2(36, 70)
+sockets = Dictionary[StringName, Vector2]({&"rune": Vector2(-1, -28)})
+layer = 1
