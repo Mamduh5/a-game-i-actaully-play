@@ -47,5 +47,28 @@ static func read_value(file: FileAccess) -> Quantity:
 	return decode(header)
 
 
+## Decodes a caller-defined sequence of framed quantities, with no trailing bytes.
+static func decode_fields(bytes: PackedByteArray, start: int, count: int) -> Array[Quantity]:
+	var fields: Array[Quantity] = []
+	var at := start
+	if at < 0 or at > bytes.size() or count < 1:
+		return []
+	for _index: int in count:
+		if bytes.size() - at < HEADER_SIZE:
+			return []
+		var length := bytes.decode_u32(at + 4)
+		if not _valid_header(bytes.decode_u16(at + 2), length) or length > bytes.size() - at - HEADER_SIZE:
+			return []
+		var end := at + HEADER_SIZE + length
+		var amount := decode(bytes.slice(at, end))
+		if amount == null:
+			return []
+		fields.append(amount)
+		at = end
+	if at != bytes.size():
+		return []
+	return fields
+
+
 static func _valid_header(scale: int, size: int) -> bool:
 	return scale <= Quantity.MAX_SCALE and size > 0 and size <= Quantity.MAX_DIGITS

@@ -105,6 +105,39 @@ static func round_ratio(numerator: Quantity, denominator: Quantity, target: int)
 	return _make_wide(numerator._sign, target, division.whole)
 
 
+## Conservative adjacent grid values for an exact ratio.
+static func outward_ratio(numerator: Quantity, denominator: Quantity, target: int) -> Array[Quantity]:
+	var nearest := round_ratio(numerator, denominator, target)
+	if nearest == null:
+		return []
+	var projected := nearest.multiply(denominator)
+	if projected == null:
+		return []
+	var order := projected.compare(numerator)
+	if order == 0:
+		return [nearest, nearest]
+	var quantum := from_count(1, target)
+	var adjacent := nearest.subtract(quantum) if order > 0 else nearest.add(quantum)
+	if adjacent == null:
+		return []
+	if order > 0:
+		return [adjacent, nearest]
+	return [nearest, adjacent]
+
+
+## Truncated integer quotient and remainder. The remainder follows the dividend's sign.
+static func divide_integers(numerator: Quantity, denominator: Quantity) -> Array[Quantity]:
+	if numerator._scale != 0 or denominator._scale != 0 or denominator._sign <= 0:
+		return []
+	if not numerator.uses_limbs and not denominator.uses_limbs:
+		@warning_ignore("integer_division")
+		var whole := numerator._native / denominator._native
+		var part := numerator._native % denominator._native
+		return [_make_native(numerator._sign, whole, 0), _make_native(numerator._sign, part, 0)]
+	var result := Magnitude.divide(numerator._as_limbs(), denominator._as_limbs())
+	return [_make_wide(numerator._sign, 0, result.whole), _make_wide(numerator._sign, 0, result.remainder)]
+
+
 static func _enough_counts(numerator: Quantity, denominator: Quantity, target: int) -> bool:
 	var shift := target + denominator._scale - numerator._scale
 	var left := numerator._widen_native(maxi(0, shift))
@@ -125,6 +158,31 @@ func _digit_count() -> int:
 
 func magnitude_text() -> String:
 	return Magnitude.digits(_limbs) if uses_limbs else str(_native)
+
+
+func count_at_scale(target: int) -> Quantity:
+	if not _valid_scale(target) or target < _scale:
+		return null
+	var compact := _aligned_native(target)
+	if compact >= 0:
+		return _make_native(_sign, compact, 0)
+	return _make_wide(_sign, 0, _aligned_limbs(target))
+
+
+## An allocation-free extraction for checked native formula paths.
+func native_at_scale(target: int) -> Variant:
+	if target < _scale:
+		return null
+	var compact := _aligned_native(target)
+	return compact * _sign if compact >= 0 else null
+
+
+func absolute() -> Quantity:
+	return _with_sign(absi(_sign))
+
+
+func negated() -> Quantity:
+	return _with_sign(-_sign)
 
 
 func add(other: Quantity) -> Quantity:

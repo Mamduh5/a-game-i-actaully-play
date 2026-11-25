@@ -18,6 +18,8 @@ var _denominator: Quantity
 var _grid: int
 var _occurrences: int
 var _posted := Quantity.from_count(0)
+var _scaled_numerator: int
+var _native_denominator: int
 
 
 static func create(numerator: Quantity, denominator: Quantity) -> QuantityRateCursor:
@@ -30,6 +32,10 @@ static func create(numerator: Quantity, denominator: Quantity) -> QuantityRateCu
 	cursor._numerator = numerator
 	cursor._denominator = denominator
 	cursor._grid = grid
+	var scalar: Variant = numerator.native_at_scale(grid + denominator.scale)
+	if scalar != null and not denominator.uses_limbs:
+		cursor._scaled_numerator = scalar
+		cursor._native_denominator = denominator.native_at_scale(denominator.scale)
 	return cursor
 
 
@@ -62,23 +68,12 @@ func snapshot() -> PackedByteArray:
 static func restore(bytes: PackedByteArray) -> QuantityRateCursor:
 	if bytes.size() < HEADER_SIZE or bytes[0] != VERSION:
 		return null
-	var at := HEADER_SIZE
-	var values: Array[Quantity] = []
-	for _index: int in 3:
-		if bytes.size() - at < QuantityCodec.HEADER_SIZE:
-			return null
-		var length := bytes.decode_u32(at + 4)
-		if length <= 0 or length > Quantity.MAX_DIGITS or length > bytes.size() - at - QuantityCodec.HEADER_SIZE:
-			return null
-		var end := at + QuantityCodec.HEADER_SIZE + length
-		var value := QuantityCodec.decode(bytes.slice(at, end))
-		if value == null:
-			return null
-		values.append(value)
-		at = end
+	var values := QuantityCodec.decode_fields(bytes, HEADER_SIZE, 3)
+	if values.is_empty():
+		return null
 	var count := bytes.decode_s64(3)
 	var cursor := create(values[0], values[1])
-	if cursor == null or count < 0 or at != bytes.size() or bytes.decode_u16(1) != cursor.grid:
+	if cursor == null or count < 0 or bytes.decode_u16(1) != cursor.grid:
 		return null
 	var expected := cursor._projection(count)
 	if expected == null or expected.compare(values[2]) != 0:
@@ -89,5 +84,16 @@ static func restore(bytes: PackedByteArray) -> QuantityRateCursor:
 
 
 func _projection(count: int) -> Quantity:
+	if _native_denominator > 0:
+		@warning_ignore("integer_division")
+		if count <= Quantity.INT_MAX / _scaled_numerator:
+			var dividend := count * _scaled_numerator
+			@warning_ignore("integer_division")
+			var whole := dividend / _native_denominator
+			var part := dividend % _native_denominator
+			var opposite := _native_denominator - part
+			if part > opposite or (part == opposite and whole % 2 == 1):
+				whole += 1
+			return Quantity.from_count(whole, _grid)
 	var total := _numerator.multiply(Quantity.from_count(count))
 	return Quantity.round_ratio(total, _denominator, _grid) if total != null else null
