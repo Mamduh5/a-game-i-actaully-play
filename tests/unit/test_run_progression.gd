@@ -99,8 +99,9 @@ func test_earned_options_freeze_and_a_selected_reward_cannot_be_spent_twice() ->
 	assert_eq(queue.ranks(), {id: 1, alternate: 1})
 
 
-func test_rank_progression_uses_ten_slots_and_stops_ordinary_options_at_the_individual_caps() -> void:
-	var queue := RunRewardQueue.begin(_prepare(_slots(10)), RunRandom.new(207), &"host")
+func test_rank_caps_lead_to_diminishing_overflow_and_then_personal_utility() -> void:
+	var preparation := _prepare(_slots(10))
+	var queue := RunRewardQueue.begin(preparation, RunRandom.new(207), &"host")
 	for tick: int in range(1, 51):
 		var reward := queue.earn(tick)
 		var offer := queue.read_offer(reward)
@@ -113,7 +114,49 @@ func test_rank_progression_uses_ten_slots_and_stops_ordinary_options_at_the_indi
 	assert_eq(queue.ranks().size(), 10)
 	for rank: int in queue.ranks().values():
 		assert_eq(rank, 5)
-	assert_true(queue.read_offer(queue.earn(51)).options.is_empty())
+	for tick: int in range(51, 60):
+		var earned := queue.earn(tick)
+		var offer := queue.read_offer(earned)
+		assert_eq(offer.kind, RunRewardQueue.Kind.OVERFLOW)
+		var stat: StringName = offer.options.keys()[0]
+		assert_eq(queue.select(earned, stat), Selection.APPLIED)
+		assert_eq(queue.overflow_bonus_basis_points(stat), [300, 500, 600][offer.options[stat] - 1])
+	var utility := queue.read_offer(queue.earn(60))
+	assert_eq(utility.kind, RunRewardQueue.Kind.UTILITY)
+	assert_eq(queue.select(utility.ordinal, RunRewardQueue.SHARD_OPTION), Selection.APPLIED)
+	assert_eq(queue.trade_shards().native_at_scale(0), 1)
+	assert_eq(queue.select(utility.ordinal, RunRewardQueue.SHARD_OPTION), Selection.UNKNOWN_REWARD)
+	assert_eq(queue.ranks().size(), 10)
+	var restored := RunRewardQueue.begin(preparation, RunRandom.new(207), &"host")
+	assert_true(restored.restore(queue.checkpoint(), 60, 60))
+	assert_eq(restored.trade_shards().native_at_scale(0), 1)
+	for stat: StringName in RunRewardQueue.OVERFLOW_STATS:
+		assert_eq(restored.overflow_bonus_basis_points(stat), 600)
+
+
+func test_all_stale_options_convert_to_one_shard_without_reroll() -> void:
+	var queue := RunRewardQueue.begin(_prepare(_slots(10)), RunRandom.new(340), &"host")
+	var ordinal := queue.earn(1)
+	var old := queue.read_offer(ordinal)
+	var outstanding := old.options.keys()
+	assert_eq(queue.compensate_if_stale(ordinal), Selection.STALE_OPTION)
+	assert_eq(queue.trade_shards().native_at_scale(0), 0)
+	for tick: int in range(2, 16):
+		var current := queue.read_offer(queue.earn(tick))
+		for id: StringName in current.options:
+			if id in outstanding:
+				assert_eq(queue.select(current.ordinal, id), Selection.APPLIED)
+				outstanding.erase(id)
+				break
+		if outstanding.is_empty():
+			break
+	assert_true(outstanding.is_empty())
+	assert_eq(queue.read_offer(ordinal).options, old.options)
+	assert_eq(queue.select(ordinal, old.options.keys()[0]), Selection.COMPENSATED)
+	assert_eq(queue.trade_shards().native_at_scale(0), 1)
+	assert_null(queue.read_offer(ordinal))
+	assert_eq(queue.compensate_if_stale(ordinal), Selection.UNKNOWN_REWARD)
+	assert_eq(queue.trade_shards().native_at_scale(0), 1)
 
 
 func test_party_xp_carries_shares_levels_and_freezes_separate_seat_choices() -> void:
@@ -188,6 +231,15 @@ func test_native_frontier_reopens_preparation_frozen_offers_selection_and_seeded
 	assert_eq(resumed.grant_xp(&"fresh", Quantity.from_count(145), 3), PartyProgression.Award.APPLIED)
 	assert_eq(party.grant_xp(&"fresh", Quantity.from_count(145), 3), PartyProgression.Award.APPLIED)
 	assert_eq(resumed.frontier(3).image, party.frontier(3).image)
+	var legacy: Dictionary = bytes_to_var(saved["image"])
+	for queue: Dictionary in legacy["queues"].values():
+		queue.erase("overflow")
+		queue.erase("shards")
+		for row: Array in queue["pending"]:
+			row.pop_back()
+	var previous_shape := saved.duplicate()
+	previous_shape["image"] = var_to_bytes(legacy)
+	assert_eq(PartyProgression.reopen(setup, _catalog(), previous_shape).frontier(2).image, earned.frontier.image)
 	var malformed: Dictionary = bytes_to_var(saved["image"])
 	malformed["level"] = 5
 	saved["image"] = var_to_bytes(malformed)

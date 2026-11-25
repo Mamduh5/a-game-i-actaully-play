@@ -100,6 +100,21 @@ func select(bound_seat: StringName, ordinal: int, id: StringName) -> RunRewardQu
 	return queue.select(ordinal, id) if queue != null else RunRewardQueue.Selection.UNKNOWN_REWARD
 
 
+func compensate_if_stale(bound_seat: StringName, ordinal: int) -> RunRewardQueue.Selection:
+	var queue: RunRewardQueue = _queues.get(bound_seat)
+	return queue.compensate_if_stale(ordinal) if queue != null else RunRewardQueue.Selection.UNKNOWN_REWARD
+
+
+func trade_shards(bound_seat: StringName) -> Quantity:
+	var queue: RunRewardQueue = _queues.get(bound_seat)
+	return queue.trade_shards() if queue != null else null
+
+
+func overflow_bonus_basis_points(bound_seat: StringName, stat: StringName) -> int:
+	var queue: RunRewardQueue = _queues.get(bound_seat)
+	return queue.overflow_bonus_basis_points(stat) if queue != null else 0
+
+
 ## Attach to the original host's closed native profile mutation. The store
 ## supplies the atomic durable receipt and compare-and-swap frontier boundary.
 func frontier(closed_tick: int) -> ProfileMutation.Frontier:
