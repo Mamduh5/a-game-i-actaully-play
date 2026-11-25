@@ -212,6 +212,8 @@ Separate replaceable sequenced movement and tick-stamped state deltas from relia
 
 **Responsiveness contract.** On a guest, predict voluntary movement immediately from its own legal sequenced inputs, last confirmed movement stats and known local blockers. On a host snapshot reset to the authoritative pose/tick, drop acknowledged inputs and replay outstanding legal inputs with authoritative statuses and obstacle revision. Smooth only the drawing of small corrections. Snap invalid penetration, major displacement and realm/epoch changes. Forced motion, crowd control, Vault commitment, costs, damage and rewards are authoritative. An optional visual anticipation of an ability cannot grant extra displacement or evade a hit. Interpolate other actors from timestamped samples. Send telegraph origin, geometry, activation and impact times early enough for the tested latency envelope. On a missing baseline resynchronize, record late warnings and test whether counterplay remained possible. Avoid client-specific extensions to a damaging window. [QAS network evidence](QAS.md#qas-interactive)
 
+**WP12 motion checkpoint (`6345160`).** Authoritative motion locks and forced corrections retire pending voluntary intent while preserving issued input sequence. Seat reclaim keeps the last admitted generation and scope across disconnect. Independent checkpoint verification and the remaining guest replication acceptance still gate downstream work. [WP12 evidence](records/WP12.md#motion-lock-and-seat-reclaim-correction)
+
 <a id="tds-security"></a>
 
 ### Native session security (F-15, NF-03)
