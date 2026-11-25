@@ -12,6 +12,7 @@ const INITIAL := NativeJoinChallenge.Purpose.INITIAL
 const RECLAIM := NativeJoinChallenge.Purpose.RECLAIM
 
 var _link := NativeDtlsLink.new()
+var _address := ADDRESS
 var _session: NativeSessionHost
 var _guest_key := CryptoKey.new()
 var _host_id: PackedByteArray
@@ -31,6 +32,10 @@ var _handoff_path: String
 var _credential_path: String
 var _loss_path: String
 var _frames: Dictionary[NativeSessionFrame.Kind, bool] = {}
+var _host_args: PackedStringArray
+var _cycle := 0
+var _repeat := 1
+var _expects_stale := false
 
 
 func _ready() -> void:
@@ -38,12 +43,21 @@ func _ready() -> void:
 	if args.size() == 3 and args[0] == "keygen":
 		_keygen(args[1], args[2])
 		return
+	if args.size() == 4 and args[0] == "pair":
+		set_process(false)
+		var imported := NativeHostPin.enroll(args[2], FileAccess.get_file_as_bytes(args[1]),
+			PAIRED_NAME, args[3].hex_decode())
+		get_tree().quit(0 if imported == OK else 1)
+		return
 	if (args.size() not in [8, 9, 10] or args[0] not in ["host", "guest"]
-			or args[7] not in ["paired", "early", "client-close", "wrong-invite", "abrupt", "reclaim", "unacked"]):
+			or args[7] not in ["paired", "early", "client-close", "wrong-invite", "abrupt", "reclaim", "unacked",
+				"stale-credential"]):
 		_finish(false)
 		return
 	_role = args[0]
 	_mode = args[7]
+	if OS.has_environment("AGIP_WP06_BIND"):
+		_address = OS.get_environment("AGIP_WP06_BIND")
 	if _mode in ["abrupt", "reclaim", "unacked"]:
 		if args.size() < 9 or (_mode in ["abrupt", "unacked"] and _role == "guest" and args.size() != 10):
 			_finish(false)
@@ -55,38 +69,43 @@ func _ready() -> void:
 			if _mode in ["abrupt", "unacked"]:
 				_handoff_path = args[9]
 	var port := args[1].to_int()
-	var certificate := X509Certificate.new()
-	if certificate.load(args[2]) != OK:
-		_finish(false)
-		return
-	var hash := HashingContext.new()
-	hash.start(HashingContext.HASH_SHA256)
-	hash.update(FileAccess.get_file_as_bytes(args[2]))
-	_host_id = hash.finish()
 	_deadline = Time.get_ticks_msec() + (51000 if _mode == "abrupt" else TIMEOUT)
 	if _role == "host":
-		_setup_host(port, certificate, args)
+		_host_args = args
+		_repeat = clampi(OS.get_environment("AGIP_WP06_REPEAT").to_int(), 1, 16)
+		_expects_stale = OS.get_environment("AGIP_WP06_STALE_ARM") == "1"
+		_setup_host()
 	else:
+		var pin := NativeHostPin.reopen(args[2], PAIRED_NAME, args[3].hex_decode())
+		if pin == null:
+			_finish(false)
+			return
+		_host_id = pin.issuer
 		_invitation = FileAccess.get_file_as_bytes(args[5])
-		if _guest_key.load(args[4]) != OK or _link.dial(ADDRESS, port, PAIRED_NAME, certificate) != OK:
+		if _guest_key.load(args[4]) != OK or _link.dial(_address, port, pin.name, pin.certificate()) != OK:
 			_finish(false)
 			return
 		print("WP06_SESSION_PHASE guest-ready")
 
 
-func _setup_host(port: int, certificate: X509Certificate, args: PackedStringArray) -> void:
+func _setup_host() -> void:
+	var args := _host_args
+	var certificate := X509Certificate.new()
 	var key := CryptoKey.new()
 	var guest_public := CryptoKey.new()
-	if key.load(args[3]) != OK or guest_public.load(args[4], true) != OK:
+	_host_id = NativeHostPin.fingerprint(FileAccess.get_file_as_bytes(args[2]))
+	if (_host_id.is_empty() or certificate.load(args[2]) != OK
+			or key.load(args[3]) != OK or guest_public.load(args[4], true) != OK):
 		_finish(false)
 		return
 	var owner := NativeAdmission.new(_host_id, _run_id, EPOCH)
 	_invitation = owner.offer(1, guest_public, Time.get_ticks_msec(), _deadline)
 	_session = NativeSessionHost.new(owner, EPOCH, TIMEOUT)
-	if _session.listen(ADDRESS, port, key, certificate) != OK:
+	if _session.listen(_address, args[1].to_int(), key, certificate) != OK:
 		_finish(false)
 		return
-	if not _write(args[5], _invitation) or not _write(args[6], PackedByteArray([1])):
+	var suffix := ".%d" % _cycle if _repeat > 1 else ""
+	if not _write(args[5] + suffix, _invitation) or not _write(args[6] + suffix, PackedByteArray([1])):
 		_finish(false)
 		return
 	print("WP06_SESSION_PHASE host-ready")
@@ -131,7 +150,8 @@ func _run_host() -> void:
 	var passed := (_frames.is_empty() and _admitted == 0 and _rejected == 1) if _expects_refusal() else (
 		_frames.size() == 2 and _admitted == 1 and _rejected == 0 and _departures == int(_mode == "paired"))
 	if _mode == "abrupt":
-		passed = _frames.size() == 2 and _admitted == 2 and _rejected == 0 and _departures == 1 and _lost == 1
+		passed = (_frames.size() == 2 and _admitted == 2 and _rejected == int(_expects_stale)
+			and _departures == 1 and _lost == 1)
 	if passed and _close_at < 0:
 		print("WP06_SESSION_PHASE boundary-observed")
 		_close_at = Time.get_ticks_msec() + 400
@@ -140,6 +160,16 @@ func _run_host() -> void:
 		_closing = true
 		_session.request_close()
 	if _closing and not _session.is_open():
+		_cycle += 1
+		if passed and _cycle < _repeat:
+			_admitted = 0
+			_departures = 0
+			_frames.clear()
+			_close_at = -1
+			_closing = false
+			_deadline = Time.get_ticks_msec() + TIMEOUT
+			_setup_host()
+			return
 		_finish(passed)
 
 
@@ -215,11 +245,11 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 
 
 func _purpose() -> NativeJoinChallenge.Purpose:
-	return RECLAIM if _mode in ["reclaim", "unacked"] else INITIAL
+	return RECLAIM if _mode in ["reclaim", "unacked", "stale-credential"] else INITIAL
 
 
 func _expects_refusal() -> bool:
-	return _mode in ["early", "wrong-invite"]
+	return _mode in ["early", "wrong-invite", "stale-credential"]
 
 
 func _keygen(role: String, output: String) -> void:
@@ -241,7 +271,7 @@ func _finish(passed: bool) -> void:
 	set_process(false)
 	print("WP06_SESSION_RESULT ", JSON.stringify({"passed": passed, "role": _role,
 		"admitted": _admitted, "rejected": _rejected, "frames": _frames.size(), "departures": _departures,
-		"lost": _lost}))
+		"lost": _lost, "completed_cycles": _cycle}))
 	get_tree().quit(0 if passed else 1)
 
 

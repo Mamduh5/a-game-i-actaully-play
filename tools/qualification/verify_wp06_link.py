@@ -24,9 +24,9 @@ def peer_env(directory):
     return dict(os.environ, APPDATA=str(roaming), LOCALAPPDATA=str(local), GODOT_MCP_RUNTIME="off")
 
 
-def ephemeral_port():
+def ephemeral_port(address=ADDRESS):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as listener:
-        listener.bind((ADDRESS, 0))
+        listener.bind((address, 0))
         return listener.getsockname()[1]
 
 
