@@ -2019,6 +2019,8 @@ When no eligible ordinary acquisition/rank progression remains, reward selection
 
 XP-earned and exceptional additional selections share the same limits. Overflow takes no slots, resets each run, cannot reset its own limits or introduce a new transformation tier. Eligible Evolution/Fusion opportunities still operate. Eventually only utility remains, while levels can continue. Utility may include applicable recovery, temporary protection/enhancement and permitted currency compensation; exact pool is delegated/open. Extended survival does not guarantee unlimited lasting power.
 
+WP19 records its provisional overflow steps and run-only stale-option compensation under OWNER-T04. The values await owner playtesting. [WP19 overflow record](records/WP19.md#durable-rewards-overflow-and-normal-input-checkpoint)
+
 ### 21.4 Fair randomness and no hidden recipe steering
 
 Contextual reward distribution considers open capacity and existing rank opportunities rather than forcing a new power at every reward or flooding a full build with invalid acquisitions. It does not boost the probability of a tracked desired recipe, guarantee a particular build, reroll pending choices or auto-select an Evolution. Explicit prepared-pool offer opportunities and wildcard boundaries remain. PR03 supplies provisional size, card budget and rotation. Unassigned weights remain delegated tuning. [Provisional rules](#gds-rules)
