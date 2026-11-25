@@ -27,6 +27,11 @@ class ReserveDraft:
 	var reserve_spent: Quantity
 	var reserve_after: Quantity
 
+class CapacityDraft:
+	var amount_after: Quantity
+	var accepted: Quantity
+	var remainder: Quantity
+
 
 ## Layer compatibility, ordering and origin arbitration are supplied by the group's owner.
 static func damage(incoming: Quantity, ordered_layers: Array[Quantity], hp: Quantity,
@@ -102,6 +107,32 @@ static func reserve_release(reserve: Quantity, hp: Quantity, max_hp: Quantity) -
 	draft.reserve_spent = healed.hp_restored
 	draft.reserve_after = remainder
 	return draft
+
+
+## An absolute cap change reports the removed capacity separately from damage.
+static func clamp_capacity(amount: Quantity, cap: Quantity) -> CapacityDraft:
+	if not _valid(amount) or not _valid(cap):
+		return null
+	var draft := CapacityDraft.new()
+	draft.amount_after = _minimum(amount, cap)
+	draft.accepted = Quantity.from_count(0)
+	draft.remainder = amount.subtract(draft.amount_after)
+	return draft if draft.remainder != null else null
+
+
+## Deposit already eligible material. Only an accepted amount can be debited
+## from another pool by the owner, for example when strengthening Mirror Guard.
+static func capped_gain(amount: Quantity, cap: Quantity, offer: Quantity) -> CapacityDraft:
+	if not _valid(amount) or not _valid(cap) or not _valid(offer) or amount.compare(cap) > 0:
+		return null
+	var missing := cap.subtract(amount)
+	if missing == null:
+		return null
+	var result := CapacityDraft.new()
+	result.accepted = _minimum(missing, offer)
+	result.amount_after = amount.add(result.accepted)
+	result.remainder = offer.subtract(result.accepted)
+	return result if result.amount_after != null and result.remainder != null else null
 
 
 static func _valid(amount: Quantity) -> bool:
