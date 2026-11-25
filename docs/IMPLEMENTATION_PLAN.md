@@ -1,6 +1,6 @@
 # Full-content prototype implementation plan
 
-**Final pre-implementation corrections for independent review. Production work awaits a separate owner mandate.** This is the delivery sequence for the native Windows full-content prototype of *A Game I Actually Play*. The plan has **8 milestones and 90 work packages** (42 systems, integration and qualification packages plus 48 content packages). Every package starts **NOT STARTED**. The early playable increments test assumptions that could otherwise invalidate dozens of content entries. The delivery target is the complete catalog and **Stable, Complete and Replayable**.
+**Production implementation authorized on `dev` following independent architectural review of `f93725c`.** This is the delivery sequence for the native Windows full-content prototype of *A Game I Actually Play*. The plan has **8 milestones and 90 work packages** (42 systems, integration and qualification packages plus 48 content packages). Package status is tracked below and in `docs/records/<change-id>.md`; packages without a record remain **NOT STARTED**. The early playable increments test assumptions that could otherwise invalidate dozens of content entries. The delivery target is the complete catalog and **Stable, Complete and Replayable**.
 
 | Where to start | Use |
 |---|---|
@@ -304,6 +304,14 @@ The [TDS disposition matrix](TDS.md#tds-findings) retains F-01 through F-19 with
 | APPROVED FOR INTEGRATION → INTEGRATED | The reviewer records approval on the tested SHA, or the writer records why ordinary risk applies. Identify the verified `dev` revision and affected integration retest. A change already on `dev` can reach this status without a branch merge. |
 | COMPLETE | Integrated package meets its own acceptance conditions and required evidence. Track any explicitly later catalog/CR obligation at the owning gate. Only WP42 can record objective candidate acceptance for owner evaluation. |
 | BLOCKED | Identify the failed prerequisite, empirical result or precise outside decision, responsible party and restart condition. Continue disjoint work. |
+
+### Current package progress
+
+Packages not listed below remain **NOT STARTED**.
+
+| Package | Status | Branch / SHA | Writer / Reviewer | Evidence & Record | Next Action / Unlocks |
+|---|---|---|---|---|---|
+| [WP01](#wp01) | **REVIEW REQUIRED** | `dev` / `907b19f` (foundation) | Claude Opus / Antigravity (`PENDING`) | [WP01.md](records/WP01.md) · `.qa-evidence/WP01/` (19/19 GUT unit, failure probe pass, clean-checkout import/export/launch pass, split Player/Dev PCK boundary pass, 15/15 MCP round-trip + rendered screenshots pass) | Reload Antigravity `godot` MCP server to pick up updated `mcp_config.json`; complete Antigravity independent review of WP01 before unlocking `WP02`–`WP05`, `WP14`, `WP15`. |
 
 <a id="plan-promotion"></a>
 
