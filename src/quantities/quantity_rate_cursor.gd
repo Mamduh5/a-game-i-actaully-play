@@ -54,6 +54,23 @@ func next_debit() -> Quantity:
 	return debit
 
 
+func matches_rate(numerator: Quantity, denominator: Quantity) -> bool:
+	return _numerator.compare(numerator) == 0 and _denominator.compare(denominator) == 0
+
+
+## A group advances the detached cursor until its entire draft can publish.
+func copy() -> QuantityRateCursor:
+	var result := QuantityRateCursor.new()
+	result._numerator = _numerator
+	result._denominator = _denominator
+	result._grid = _grid
+	result._occurrences = _occurrences
+	result._posted = _posted
+	result._scaled_numerator = _scaled_numerator
+	result._native_denominator = _native_denominator
+	return result
+
+
 func snapshot() -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(HEADER_SIZE)

@@ -31,7 +31,7 @@ static func at_contact(start_tick: int, proof: RealmCircleTime.Contact) -> Comba
 			return null
 	var instant := CombatInstant.new()
 	instant._tick = start_tick
-	instant._time = proof
+	instant._time = proof.copy()
 	return instant
 
 

@@ -22,7 +22,11 @@ func valid_for(due: CombatInstant) -> bool:
 
 
 func occurrence_key() -> String:
-	return "%d/%d:%s/%d/%d/%d" % [provenance, owner.length(), owner, source_slot, activation, delivery_part]
+	return "%s/%d/%d" % [activation_stream_key(), activation, delivery_part]
+
+
+func activation_stream_key() -> String:
+	return "%d/%d:%s/%d" % [provenance, owner.length(), owner, source_slot]
 
 
 func copy() -> CombatOrigin:

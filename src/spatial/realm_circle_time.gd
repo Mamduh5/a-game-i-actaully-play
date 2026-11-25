@@ -21,6 +21,13 @@ class Contact:
 		earliest = lower
 		latest = upper
 
+	func copy() -> Contact:
+		var result := Contact.new(outcome, earliest, latest)
+		result._exact_ratio = _exact_ratio.duplicate()
+		result._path = _path.duplicate()
+		result._exact_root = _exact_root
+		return result
+
 	func order_against(other: Contact) -> Order:
 		if outcome != Result.HIT or other.outcome != Result.HIT:
 			return Order.UNRESOLVED
