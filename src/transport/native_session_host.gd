@@ -64,16 +64,13 @@ func pump() -> Batch:
 				if not _attach(event.peer, now):
 					batch.rejected += 1
 			NativeDtlsLink.EventKind.DISCONNECT:
-				var lost := _driver.controlled_seat(connection)
-				if batch.admitted.has(connection):
-					batch.admitted.erase(connection)
-				elif lost > 0:
-					batch.lost_seats.append(lost)
+				_record_loss(batch, connection, _driver.controlled_seat(connection))
 				_drop(connection)
 			NativeDtlsLink.EventKind.FRAME:
 				if connection > 0:
 					_dispatch(connection, event.frame, now, batch)
 			NativeDtlsLink.EventKind.REJECTED_FRAME:
+				_record_loss(batch, connection, _driver.controlled_seat(connection))
 				_drop(connection)
 				batch.rejected += 1
 			NativeDtlsLink.EventKind.FAILURE:
@@ -120,6 +117,7 @@ func _drop(connection: int) -> void:
 
 
 func _dispatch(connection: int, frame: NativeSessionFrame, now: int, batch: Batch) -> void:
+	var active_seat := _driver.controlled_seat(connection)
 	var action := _driver.receive(connection, frame, now)
 	if action.replaced_connection > 0:
 		_drop(action.replaced_connection)
@@ -128,6 +126,7 @@ func _dispatch(connection: int, frame: NativeSessionFrame, now: int, batch: Batc
 		if action.voluntary:
 			batch.departures += 1
 		else:
+			_record_loss(batch, connection, active_seat)
 			batch.rejected += 1
 		return
 	if not action.reply.is_empty():
@@ -144,3 +143,10 @@ func _dispatch(connection: int, frame: NativeSessionFrame, now: int, batch: Batc
 		command.seat = action.seat
 		command.frame = action.command
 		batch.commands.append(command)
+
+
+static func _record_loss(batch: Batch, connection: int, seat: int) -> void:
+	if batch.admitted.has(connection):
+		batch.admitted.erase(connection)
+	elif seat > 0:
+		batch.lost_seats.append(seat)

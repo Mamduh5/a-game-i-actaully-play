@@ -3,6 +3,9 @@ extends RefCounted
 ## Dispatches frames from protected peers. The caller assigns each DTLS
 ## connection a fresh local handle and carries replies on that same connection.
 
+const FRAME_WINDOW_MS := 1000
+const DEFAULT_FRAMES_PER_WINDOW := 240
+
 class Peer:
 	var next_operation := NativeAdmissionMessage.Operation.OPEN
 	var deadline: int
@@ -10,6 +13,8 @@ class Peer:
 	var ready := false
 	var reliable_id := 0
 	var sequenced_id := 0
+	var rate_window: int
+	var frames_in_window := 0
 
 class Action:
 	var disconnect := false
@@ -22,12 +27,14 @@ class Action:
 
 var _authority: NativeAdmission
 var _generation: int
+var _frames_per_window: int
 var _peers: Dictionary[int, Peer] = {}
 
 
-func _init(authority: NativeAdmission, generation: int) -> void:
+func _init(authority: NativeAdmission, generation: int, frames_per_window: int = DEFAULT_FRAMES_PER_WINDOW) -> void:
 	_authority = authority
 	_generation = generation
+	_frames_per_window = maxi(frames_per_window, 1)
 
 
 func attach(connection: int, now: int, admission_deadline: int) -> bool:
@@ -36,6 +43,7 @@ func attach(connection: int, now: int, admission_deadline: int) -> bool:
 		return false
 	var peer := Peer.new()
 	peer.deadline = admission_deadline
+	peer.rate_window = now
 	_peers[connection] = peer
 	return true
 
@@ -67,6 +75,8 @@ func controlled_seat(connection: int) -> int:
 func receive(connection: int, frame: NativeSessionFrame, now: int) -> Action:
 	var peer: Peer = _peers.get(connection)
 	if peer == null or frame == null or now < 0 or frame.generation != _generation:
+		return _reject(connection)
+	if not _consume_frame(peer, now):
 		return _reject(connection)
 	if peer.ready:
 		return _command(connection, peer, frame)
@@ -110,6 +120,18 @@ func receive(connection: int, frame: NativeSessionFrame, now: int) -> Action:
 		_:
 			return _reject(connection)
 	return action
+
+
+func _consume_frame(peer: Peer, now: int) -> bool:
+	if now < peer.rate_window:
+		return false
+	if now - peer.rate_window >= FRAME_WINDOW_MS:
+		peer.rate_window = now
+		peer.frames_in_window = 0
+	if peer.frames_in_window >= _frames_per_window:
+		return false
+	peer.frames_in_window += 1
+	return true
 
 
 func _command(connection: int, peer: Peer, frame: NativeSessionFrame) -> Action:
