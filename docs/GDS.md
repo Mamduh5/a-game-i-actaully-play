@@ -2011,6 +2011,8 @@ XP_to_next(L) = P(L_transition) * r^(L - L_transition) for L > L_transition, r >
 
 The actual coefficients are delegated balancing. No extra penalty is triggered merely because world time passes 25:00. Higher authored enemies and exceptional encounters provide more XP; values are not calibrated to the individual player's current build. Shared levels, excess-XP carry, multiple earned choices and frozen queues remain. No XP reset across regions/realms/Collapse.
 
+The WP19 prototype implementation uses provisional coefficients under OWNER-T04 and D1. They are recorded with the posting and transition witnesses and await owner playtesting. [WP19 tuning record](records/WP19.md#preparation-shared-experience-and-ordinary-offers-checkpoint)
+
 ### 21.3 Bounded overflow
 
 When no eligible ordinary acquisition/rank progression remains, reward selections may provide minor run-long statistical improvements plus utility. Improvements diminish and have independent investment caps; examples include damage, maximum HP, defense and compatible frequency. No exact +15% aggregate or upgrade count from examples is locked.

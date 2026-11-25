@@ -35,6 +35,17 @@ func lookup(id: StringName) -> CatalogDefinition:
 	return _entries.get(id) if is_valid() else null
 
 
+func ids_of_kind(kind: CatalogEntry.Kind) -> Array[StringName]:
+	var ids: Array[StringName] = []
+	if not is_valid():
+		return ids
+	for definition: CatalogDefinition in _entries.values():
+		if definition.kind == kind:
+			ids.append(definition.id)
+	ids.sort()
+	return ids
+
+
 func resolve(reference: CatalogDefinition.Reference) -> CatalogDefinition:
 	if reference == null:
 		return null
