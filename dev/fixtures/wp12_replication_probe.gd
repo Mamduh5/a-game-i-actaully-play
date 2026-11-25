@@ -25,6 +25,7 @@ class ProbeAuthority extends RunAuthority:
 		return []
 
 var _movement := GuestMovement.new()
+var _replica := GuestReplica.new()
 var _bridge := HostMovementBridge.new()
 var _authority := ProbeAuthority.new()
 var _peer: ENetPacketPeer
@@ -192,7 +193,7 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 	if wire == null:
 		return false
 	if wire.kind == Kinds.VIEW:
-		return _observe_view(wire.body)
+		return _observe_view(frame, wire.body)
 	var verdict := _movement.receive_frame(frame)
 	if verdict == Accepted.NEED_BASELINE and _baseline_at == 0:
 		_result["missing_baseline_detected"] = true
@@ -204,6 +205,9 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 	if verdict != Accepted.APPLIED:
 		return false
 	if wire.kind == Kinds.BASELINE:
+		var scope := MovementBaseline.read(wire.body)
+		if scope == null or not _replica.install_scope(scope.realm, scope.state):
+			return false
 		_baseline_at = Time.get_ticks_msec()
 		_result["resync_ms"] = _baseline_at - _resync_started
 		var dropped := _movement.issue(PlayerCommand.new(PlayerCommand.MOVE_AXES, 1.0))
@@ -276,21 +280,25 @@ func _send_host(kind: ReplicationMessage.Kind, sequence: int, bytes: PackedByteA
 	return _session.send(_connection, ReplicationMessage.transport_kind(kind), sequence, ReplicationMessage.pack(kind, bytes)) == OK
 
 
-func _observe_view(bytes: PackedByteArray) -> bool:
-	var decoded: Variant = JSON.parse_string(bytes.get_string_from_utf8())
-	if not decoded is Dictionary or decoded.get("actors", {}).keys() != ["visible"]:
+func _observe_view(frame: NativeSessionFrame, bytes: PackedByteArray) -> bool:
+	if _replica.receive_frame(frame) != GuestReplica.Acceptance.APPLIED or _replica.actor_ids() != ["visible"]:
 		return false
-	var cue: Array = decoded.get("warnings", {}).get("eligible-cue", [])
-	if cue.size() != 7 or bytes.get_string_from_utf8().contains("773451"):
+	var cue := _replica.warning_sample("eligible-cue")
+	if (cue == null or _replica.active_warning_ids(cue.activation - 1).has("eligible-cue")
+			or not _replica.active_warning_ids(cue.activation).has("eligible-cue")
+			or _replica.active_warning_ids(cue.impact + 1).has("eligible-cue")):
+		return false
+	var decoded: Variant = JSON.parse_string(bytes.get_string_from_utf8())
+	if not decoded is Dictionary or bytes.get_string_from_utf8().contains("773451"):
 		return false
 	_result["view_sha256"] = _digest(bytes)
-	_result["warning_lead_from_sample_tick"] = String(cue[6]).to_int() - String(decoded["tick"]).to_int()
+	_result["warning_lead_from_sample_tick"] = cue.impact - String(decoded["tick"]).to_int()
 	_result["filtered_view"] = decoded
 	_saw_view = true
 	if _avatar != null:
 		var marker := Line2D.new()
-		marker.points = PackedVector2Array([Vector2(160.0 + float(cue[0]) * 40.0, 310.0),
-			Vector2(160.0 + float(cue[2]) * 40.0, 310.0)])
+		marker.points = PackedVector2Array([Vector2(160.0 + cue.origin.x * 40.0, 310.0),
+			Vector2(160.0 + cue.end.x * 40.0, 310.0)])
 		marker.width = 8.0
 		marker.default_color = Color("ed5769")
 		add_child(marker)

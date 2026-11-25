@@ -192,6 +192,60 @@ func test_ipv6_private_policy_requires_a_complete_ula_hextet() -> void:
 		assert_false(NativeDtlsLink.private_ip(address), address)
 
 
+func test_guest_view_scopes_interpolation_removal_and_warning_windows_to_confirmed_baselines() -> void:
+	var replica := GuestReplica.new()
+	var epoch := LARGE_ID
+	var tick := LARGE_ID
+	var base := 2
+	var view := _view_frame(epoch, base, tick, &"core", [_actor(&"seen", &"core", 2.0)])
+	assert_eq(replica.receive_frame(view), GuestReplica.Acceptance.NEED_BASELINE)
+	assert_true(replica.actor_ids().is_empty())
+	assert_true(replica.install_scope(&"core", _state(epoch, base, 1, tick, 0, 0.0)))
+	assert_eq(replica.receive_frame(view), GuestReplica.Acceptance.APPLIED)
+	assert_eq(replica.actor_pose("seen", tick).x, 2.0)
+	var warning := replica.warning_sample("cue")
+	assert_eq(warning.impact, LARGE_ID + 25)
+	warning.origin.x = 999.0
+	assert_eq(replica.warning_sample("cue").origin.x, 12.0)
+	assert_true(replica.active_warning_ids(tick - 6).is_empty())
+	assert_eq(replica.active_warning_ids(tick - 5), ["cue"])
+	assert_eq(replica.active_warning_ids(tick + 25), ["cue"])
+	assert_true(replica.active_warning_ids(tick + 26).is_empty())
+	var moved := _view_frame(epoch, base, tick + 4, &"core", [_actor(&"seen", &"core", 10.0)])
+	assert_eq(replica.receive_frame(moved), GuestReplica.Acceptance.APPLIED)
+	assert_eq(replica.actor_pose("seen", tick + 1).x, 4.0)
+	assert_eq(replica.actor_pose("seen", tick + 200).x, 10.0)
+	assert_eq(replica.receive_frame(view), GuestReplica.Acceptance.STALE)
+	assert_eq(replica.receive_frame(_view_frame(epoch, base, tick + 5, &"core", [])), GuestReplica.Acceptance.APPLIED)
+	assert_null(replica.actor_pose("seen", tick + 3))
+	assert_eq(replica.receive_frame(_view_frame(epoch, base, tick + 6, &"other", [])), GuestReplica.Acceptance.INVALID)
+	var next := _view_frame(epoch, base + 1, tick + 7, &"other", [_actor(&"seen", &"other", 53.0)])
+	assert_eq(replica.receive_frame(next), GuestReplica.Acceptance.NEED_BASELINE)
+	assert_null(replica.warning_sample("cue"))
+	assert_eq(replica.receive_frame(moved), GuestReplica.Acceptance.STALE)
+	assert_false(replica.install_scope(&"core", _state(epoch, base, 1, tick, 0, 0.0)))
+	assert_true(replica.install_scope(&"other", _state(epoch, base + 1, 2, tick + 7, 0, 0.0)))
+	assert_eq(replica.receive_frame(next), GuestReplica.Acceptance.APPLIED)
+	assert_eq(replica.actor_pose("seen", tick).x, 53.0)
+
+
+func test_view_reader_rejects_imprecise_out_of_range_and_malformed_rows() -> void:
+	var frame := _view_frame(LARGE_ID, 2, LARGE_ID, &"core", [_actor(&"seen", &"core", 2.0)])
+	var wire := ReplicationMessage.read(frame)
+	var decoded: Dictionary = JSON.parse_string(wire.body.get_string_from_utf8())
+	assert_eq(RecipientView.read(wire.body).epoch, LARGE_ID)
+	for invalid: Variant in [float(LARGE_ID), str(Quantity.INT_MAX) + "0", "9223372036854775808", "002", "-1"]:
+		var bad := decoded.duplicate(true)
+		bad["epoch"] = invalid
+		assert_null(RecipientView.read(JSON.stringify(bad).to_utf8_buffer()))
+	for row: Array in [[0.0], [false, 0.0], ["2.0", 0.0], [0.0, 0.0, "hidden"]]:
+		var bad := decoded.duplicate(true)
+		bad["actors"]["seen"] = row
+		assert_null(RecipientView.read(JSON.stringify(bad).to_utf8_buffer()))
+	decoded["explored"] = [[2147483648, 0]]
+	assert_null(RecipientView.read(JSON.stringify(decoded).to_utf8_buffer()))
+
+
 func test_projection_filters_before_serializing_actor_fog_and_timed_warning_rows() -> void:
 	var layout := WorldTopology.generate(22)
 	var world := WorldExploration.create(layout, [&"host", &"guest"])
@@ -250,6 +304,21 @@ static func _axis(x: float) -> PlayerCommand:
 
 static func _movement_wire(epoch: int, baseline: int) -> PackedByteArray:
 	return ReplicationMessage.pack(ReplicationMessage.Kind.MOVEMENT, MovementFrame.pack(epoch, baseline, 3, _axis(1.0)))
+
+
+static func _view_frame(epoch: int, baseline: int, tick: int, realm: StringName,
+		actors: Array[RecipientView.Actor]) -> NativeSessionFrame:
+	var scope := RecipientView.Scope.new()
+	scope.realm = realm
+	scope.seat = &"guest"
+	scope.actors = {&"seen": true}
+	scope.warnings = {&"cue": true}
+	var frame := NativeSessionFrame.new()
+	frame.kind = NativeSessionFrame.Kind.RELIABLE
+	frame.payload = ReplicationMessage.pack(ReplicationMessage.Kind.VIEW,
+		RecipientView.pack(scope, epoch, baseline, tick, 1, "0", {&"guest": &"living"}, actors,
+			[_warning(&"cue", realm, 12.0, LARGE_ID + 25)], null))
+	return frame
 
 
 static func _wall(x: float) -> GuestMovement.Blocker:

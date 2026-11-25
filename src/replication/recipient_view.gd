@@ -26,6 +26,18 @@ class Warning:
 	var activation: int
 	var impact: int
 
+class Snapshot:
+	var epoch: int
+	var baseline: int
+	var tick: int
+	var realm: String
+	var level: int
+	var xp: String
+	var party: Dictionary[String, String] = {}
+	var actors: Dictionary[String, RealmSweep.Point] = {}
+	var warnings: Dictionary[String, Warning] = {}
+	var explored: Array[Vector2i] = []
+
 
 ## Only the approved party summary crosses realm boundaries. A warning carries
 ## its own cue ID and never requires the actor's row or private identity.
@@ -67,6 +79,101 @@ static func pack(scope: Scope, epoch: int, baseline: int, tick: int, shared_leve
 		"actors": visible, "warnings": cues, "explored": cells}
 	var bytes := JSON.stringify(permitted, "", true, true).to_utf8_buffer()
 	return bytes if bytes.size() <= ReplicationMessage.MAX_BODY else PackedByteArray()
+
+
+static func read(bytes: PackedByteArray) -> Snapshot:
+	if bytes.is_empty() or bytes.size() > ReplicationMessage.MAX_BODY:
+		return null
+	var decoded: Variant = JSON.parse_string(bytes.get_string_from_utf8())
+	if not decoded is Dictionary or decoded.size() != 11 or not _number(decoded.get("v")) or decoded["v"] != VERSION:
+		return null
+	var snapshot := Snapshot.new()
+	snapshot.epoch = _unsigned(decoded.get("epoch"))
+	snapshot.baseline = _unsigned(decoded.get("baseline"))
+	snapshot.tick = _unsigned(decoded.get("tick"), RunAuthority.MAX_TICK)
+	snapshot.level = _unsigned(decoded.get("level"))
+	var realm: Variant = decoded.get("realm")
+	var xp: Variant = decoded.get("xp")
+	if (snapshot.epoch <= 0 or snapshot.baseline <= 0 or snapshot.tick < 0 or snapshot.level < 0
+			or not realm is String or realm.is_empty() or not xp is String or not _valid_xp(xp)):
+		return null
+	snapshot.realm = realm
+	snapshot.xp = xp
+	if not _read_actors(snapshot, decoded.get("actors")) or not _read_warnings(snapshot, decoded.get("warnings")):
+		return null
+	var party: Variant = decoded.get("party")
+	var explored: Variant = decoded.get("explored")
+	if not party is Dictionary or not explored is Array:
+		return null
+	for seat: String in party:
+		if seat.is_empty() or not party[seat] is String or not party[seat] in PARTY_STATUS:
+			return null
+		snapshot.party[seat] = party[seat]
+	for cell: Variant in explored:
+		if not cell is Array or cell.size() != 2 or not _cell_coord(cell[0]) or not _cell_coord(cell[1]):
+			return null
+		snapshot.explored.append(Vector2i(int(cell[0]), int(cell[1])))
+	return snapshot
+
+
+static func _read_actors(snapshot: Snapshot, rows: Variant) -> bool:
+	if not rows is Dictionary:
+		return false
+	for id: String in rows:
+		var row: Variant = rows[id]
+		if id.is_empty() or not row is Array or row.size() != 2:
+			return false
+		var point := _read_point(row[0], row[1])
+		if point == null:
+			return false
+		snapshot.actors[id] = point
+	return true
+
+
+static func _read_warnings(snapshot: Snapshot, rows: Variant) -> bool:
+	if not rows is Dictionary:
+		return false
+	for id: String in rows:
+		var row: Variant = rows[id]
+		if id.is_empty() or not row is Array or row.size() != 7 or not _number(row[4]):
+			return false
+		var warning := Warning.new()
+		warning.origin = _read_point(row[0], row[1])
+		warning.end = _read_point(row[2], row[3])
+		warning.radius = float(row[4])
+		warning.activation = _unsigned(row[5], RunAuthority.MAX_TICK)
+		warning.impact = _unsigned(row[6], RunAuthority.MAX_TICK)
+		if (warning.origin == null or warning.end == null or warning.radius <= 0.0 or warning.activation < 0
+				or warning.impact < maxi(snapshot.tick, warning.activation)):
+			return false
+		warning.id = StringName(id)
+		warning.realm = StringName(snapshot.realm)
+		snapshot.warnings[id] = warning
+	return true
+
+
+static func _unsigned(value: Variant, maximum: int = 9223372036854775807) -> int:
+	if not value is String or value.length() > 19 or not _valid_xp(value):
+		return -1
+	var ceiling := str(maximum)
+	if value.length() > ceiling.length() or (value.length() == ceiling.length() and value > ceiling):
+		return -1
+	var number: int = value.to_int()
+	return number if str(number) == value else -1
+
+
+static func _read_point(x: Variant, y: Variant) -> RealmSweep.Point:
+	if not _number(x) or not _number(y):
+		return null
+	return RealmSweep.Point.new(float(x), float(y))
+
+
+static func _number(value: Variant) -> bool:
+	return (value is int or value is float) and is_finite(float(value))
+
+
+static func _cell_coord(value: Variant) -> bool:
+	return _number(value) and value >= -2147483648 and value <= 2147483647 and value == floorf(value)
 
 
 static func _valid_xp(value: String) -> bool:
