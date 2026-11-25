@@ -214,6 +214,8 @@ Separate replaceable sequenced movement and tick-stamped state deltas from relia
 
 **WP12 motion checkpoint (`6345160`).** Authoritative motion locks and forced corrections retire pending voluntary intent while preserving issued input sequence. Seat reclaim keeps the last admitted generation and scope across disconnect. Independent checkpoint verification and the remaining guest replication acceptance still gate downstream work. [WP12 evidence](records/WP12.md#motion-lock-and-seat-reclaim-correction)
 
+**WP12 disclosure checkpoint (`d82cf1a`).** The receiver stages up to 128 KiB per view or baseline, validates each reliable part and applies the complete image through the ordinary epoch/baseline/realm and schema checks. Projection precedes splitting. Independent review and the remaining integrated network witnesses are pending. [WP12 part and peer evidence](records/WP12.md#larger-baseline-and-view-transfers)
+
 <a id="tds-security"></a>
 
 ### Native session security (F-15, NF-03)
