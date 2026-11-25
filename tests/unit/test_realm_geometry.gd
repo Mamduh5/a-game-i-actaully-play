@@ -40,3 +40,27 @@ func test_next_sweep_observes_committed_pose_and_removed_blocker() -> void:
 	var snapshot := geometry.circle_center(&"target", 0)
 	snapshot.y = 20.0
 	assert_eq(geometry.circle_center(&"target", 0).y, 4.0)
+
+
+func test_moving_target_is_indexed_across_the_path_until_commit_or_displacement() -> void:
+	var geometry := RealmGeometry.new(&"outer")
+	var bottom := RealmSweep.Point.new(0.0, 250.0)
+	var top := RealmSweep.Point.new(0.0, -250.0)
+	var left := RealmSweep.Point.new(-250.0, 0.0)
+	var right := RealmSweep.Point.new(250.0, 0.0)
+	assert_true(geometry.add_circle(&"crossing", 0, top, 1.0, BODY))
+	assert_eq(geometry.sweep_circle(&"outer", left, right, 1.0, BODY).contacts.size(), 0)
+	assert_true(geometry.stage_circle_motion(&"crossing", 0, bottom))
+	assert_eq(geometry.circle_center(&"crossing", 0).y, -250.0)
+	var swept := geometry.sweep_circle(&"outer", left, right, 1.0, BODY)
+	assert_eq(swept.contacts.size(), 1)
+	assert_almost_eq(swept.contacts[0].time, 0.5 - 2.0 / sqrt(500000.0), 1e-14)
+	assert_true(geometry.commit_circle_motion(&"crossing", 0))
+	assert_eq(geometry.circle_center(&"crossing", 0).y, 250.0)
+	assert_eq(geometry.sweep_circle(&"outer", left, right, 1.0, BODY).contacts.size(), 0)
+	assert_true(geometry.stage_circle_motion(&"crossing", 0, top))
+	assert_true(geometry.commit_circle_pose(&"crossing", 0, right))
+	assert_false(geometry.commit_circle_motion(&"crossing", 0))
+	var displaced := geometry.sweep_circle(&"outer", left, right, 1.0, BODY)
+	assert_eq(displaced.contacts.size(), 1)
+	assert_almost_eq(displaced.contacts[0].time, 0.996, 1e-14)

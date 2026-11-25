@@ -5,6 +5,7 @@ extends RefCounted
 
 class Shape:
 	var center: RealmSweep.Point
+	var motion_end: RealmSweep.Point
 	var radius: float
 	var edge: RealmOutline.Edge
 	var category: int
@@ -77,8 +78,28 @@ func commit_circle_pose(entity: StringName, slot: int, center: RealmSweep.Point)
 	if not _index.move(entity, slot, bounds):
 		return false
 	shape.center = RealmSweep.Point.new(center.x, center.y)
+	shape.motion_end = null
 	_revision += 1
 	return true
+
+
+## Index a resolved interval trajectory without advancing its canonical start pose.
+## A synchronous displacement may replace that trajectory through commit_circle_pose.
+func stage_circle_motion(entity: StringName, slot: int, finish: RealmSweep.Point) -> bool:
+	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
+	if shape == null or shape.center == null or finish == null:
+		return false
+	var bounds := RealmBounds.from_sweep(shape.center.x, shape.center.y, finish.x, finish.y, shape.radius)
+	if not _index.move(entity, slot, bounds):
+		return false
+	shape.motion_end = RealmSweep.Point.new(finish.x, finish.y)
+	_revision += 1
+	return true
+
+
+func commit_circle_motion(entity: StringName, slot: int) -> bool:
+	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
+	return shape != null and shape.motion_end != null and commit_circle_pose(entity, slot, shape.motion_end)
 
 
 func remove_mutable(entity: StringName, slot: int) -> bool:
@@ -113,7 +134,8 @@ func sweep_circle(realm: StringName, start: RealmSweep.Point, finish: RealmSweep
 			continue
 		var time: float
 		if shape.edge == null:
-			time = RealmSweep.moving_circles(start, finish, radius, shape.center, shape.center, shape.radius)
+			var target_end := shape.center if shape.motion_end == null else shape.motion_end
+			time = RealmSweep.moving_circles(start, finish, radius, shape.center, target_end, shape.radius)
 		else:
 			time = RealmSweep.circle_segment(start, finish, radius, shape.edge.first, shape.edge.last)
 		if not is_finite(time):
