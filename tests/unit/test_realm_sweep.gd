@@ -87,7 +87,14 @@ func test_circle_time_bounds_enclose_diagonal_contact_and_hold_ambiguous_tangenc
 	assert_eq(cardinal.outcome, RealmCircleTime.Result.HIT)
 	assert_true(cardinal.earliest <= 0.625 and cardinal.latest >= 0.625)
 	var oblique := _point(2, 11)
-	assert_eq(proof.measure(from, _point(12, 16), 5, oblique, oblique, 0).outcome,
+	var refined := proof.measure(from, _point(12, 16), 5, oblique, oblique, 0)
+	assert_eq(refined.outcome, RealmCircleTime.Result.HIT)
+	assert_true(refined.earliest <= 0.5 and refined.latest >= 0.5)
+	var same_time := _point(4, 5)
+	var equal := proof.measure(from, _point(8, 0), 5, same_time, same_time, 0)
+	assert_eq(refined.order_against(equal), RealmCircleTime.Order.SAME)
+	var large_oblique := _point(2 * 65536, 11 * 65536)
+	assert_eq(proof.measure(from, _point(12 * 65536, 16 * 65536), 5 * 65536, large_oblique, large_oblique, 0).outcome,
 		RealmCircleTime.Result.UNRESOLVED)
 	assert_eq(proof.measure(center, from, 1, center, center, 0).earliest, 0.0)
 
