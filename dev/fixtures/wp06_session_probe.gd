@@ -9,6 +9,7 @@ const ADMISSION := NativeSessionFrame.Kind.ADMISSION
 const RELIABLE := NativeSessionFrame.Kind.RELIABLE
 const SEQUENCED := NativeSessionFrame.Kind.SEQUENCED
 const INITIAL := NativeJoinChallenge.Purpose.INITIAL
+const RECLAIM := NativeJoinChallenge.Purpose.RECLAIM
 
 var _link := NativeDtlsLink.new()
 var _session: NativeSessionHost
@@ -25,6 +26,10 @@ var _guest_stage := 0
 var _admitted := 0
 var _rejected := 0
 var _departures := 0
+var _lost := 0
+var _handoff_path: String
+var _credential_path: String
+var _loss_path: String
 var _frames: Dictionary[NativeSessionFrame.Kind, bool] = {}
 
 
@@ -33,11 +38,22 @@ func _ready() -> void:
 	if args.size() == 3 and args[0] == "keygen":
 		_keygen(args[1], args[2])
 		return
-	if args.size() != 8 or args[0] not in ["host", "guest"] or args[7] not in ["paired", "early", "client-close"]:
+	if (args.size() not in [8, 9, 10] or args[0] not in ["host", "guest"]
+			or args[7] not in ["paired", "early", "client-close", "wrong-invite", "abrupt", "reclaim", "unacked"]):
 		_finish(false)
 		return
 	_role = args[0]
 	_mode = args[7]
+	if _mode in ["abrupt", "reclaim", "unacked"]:
+		if args.size() < 9 or (_mode in ["abrupt", "unacked"] and _role == "guest" and args.size() != 10):
+			_finish(false)
+			return
+		if _role == "host":
+			_loss_path = args[8]
+		else:
+			_credential_path = args[8]
+			if _mode in ["abrupt", "unacked"]:
+				_handoff_path = args[9]
 	var port := args[1].to_int()
 	var certificate := X509Certificate.new()
 	if certificate.load(args[2]) != OK:
@@ -47,7 +63,7 @@ func _ready() -> void:
 	hash.start(HashingContext.HASH_SHA256)
 	hash.update(FileAccess.get_file_as_bytes(args[2]))
 	_host_id = hash.finish()
-	_deadline = Time.get_ticks_msec() + TIMEOUT
+	_deadline = Time.get_ticks_msec() + (51000 if _mode == "abrupt" else TIMEOUT)
 	if _role == "host":
 		_setup_host(port, certificate, args)
 	else:
@@ -95,6 +111,14 @@ func _run_host() -> void:
 		print("WP06_SESSION_PHASE admitted")
 	_rejected += batch.rejected
 	_departures += batch.departures
+	if not batch.lost_seats.is_empty():
+		_lost += batch.lost_seats.size()
+		if _mode == "abrupt" and _lost == 1 and batch.lost_seats == [1]:
+			_frames.clear()
+			if not _write(_loss_path, PackedByteArray([1])):
+				_finish(false)
+				return
+			print("WP06_SESSION_PHASE host-observed-loss")
 	for command: NativeSessionHost.Command in batch.commands:
 		var frame := command.frame
 		if command.seat != 1 or frame.payload != PackedByteArray([frame.kind]):
@@ -104,8 +128,10 @@ func _run_host() -> void:
 		if _session.send(command.connection, frame.kind, frame.sequence, frame.payload) != OK:
 			_finish(false)
 			return
-	var passed := (_frames.is_empty() and _admitted == 0 and _rejected == 1) if _mode == "early" else (
+	var passed := (_frames.is_empty() and _admitted == 0 and _rejected == 1) if _expects_refusal() else (
 		_frames.size() == 2 and _admitted == 1 and _rejected == 0 and _departures == int(_mode == "paired"))
+	if _mode == "abrupt":
+		passed = _frames.size() == 2 and _admitted == 2 and _rejected == 0 and _departures == 1 and _lost == 1
 	if passed and _close_at < 0:
 		print("WP06_SESSION_PHASE boundary-observed")
 		_close_at = Time.get_ticks_msec() + 400
@@ -126,16 +152,19 @@ func _run_guest() -> void:
 					error = _link.send(event.peer, RELIABLE, EPOCH, 1, PackedByteArray([RELIABLE]))
 				else:
 					error = _link.send(event.peer, ADMISSION, EPOCH, 1,
-						NativeAdmissionMessage.open_for(1, INITIAL, _invitation))
+						NativeAdmissionMessage.open_for(1, _purpose(), _invitation))
 				if error != OK:
 					_finish(false)
 					return
 			NativeDtlsLink.EventKind.FRAME:
-				if _mode == "early" or not _accept(event.peer, event.frame):
+				if _expects_refusal() or not _accept(event.peer, event.frame):
 					_finish(false)
 					return
 			NativeDtlsLink.EventKind.DISCONNECT:
-				_finish(_frames.is_empty() if _mode == "early" else _frames.size() == 2)
+				if _mode == "unacked":
+					_finish(_guest_stage == 2 and _frames.is_empty())
+				else:
+					_finish(_frames.is_empty() if _expects_refusal() else _frames.size() == 2)
 				return
 			_:
 				_finish(false)
@@ -150,7 +179,9 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 			return false
 		_frames[frame.kind] = true
 		if _frames.size() == 2:
-			if _mode == "client-close":
+			if _mode == "abrupt":
+				return _write(_handoff_path, PackedByteArray([1]))
+			elif _mode == "client-close":
 				print("WP06_SESSION_PHASE guest-draining")
 				_link.request_close()
 			else:
@@ -166,16 +197,29 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 	match message.operation:
 		NativeAdmissionMessage.Operation.CHALLENGE:
 			var attempt := message.bytes.decode_s64(NativeJoinChallenge.ATTEMPT_OFFSET)
-			var signed := NativeJoinChallenge.sign_challenge(message.bytes, INITIAL, EPOCH, attempt,
+			var signed := NativeJoinChallenge.sign_challenge(message.bytes, _purpose(), EPOCH, attempt,
 				_host_id, _run_id, _guest_key)
 			return _guest_stage == 1 and _link.send(peer, ADMISSION, EPOCH, 2, NativeAdmissionMessage.proof(signed)) == OK
 		NativeAdmissionMessage.Operation.ACCEPT:
-			return _guest_stage == 2 and message.seat == 1 and _link.send(peer, ADMISSION, EPOCH, 3,
-				NativeAdmissionMessage.acknowledge()) == OK
+			if _guest_stage != 2 or message.seat != 1:
+				return false
+			if not _credential_path.is_empty() and not _write(_credential_path, message.bytes):
+				return false
+			if _mode == "unacked":
+				return _write(_handoff_path, PackedByteArray([1]))
+			return _link.send(peer, ADMISSION, EPOCH, 3, NativeAdmissionMessage.acknowledge()) == OK
 		NativeAdmissionMessage.Operation.READY:
 			return (_guest_stage == 3 and _link.send(peer, RELIABLE, EPOCH, 1, PackedByteArray([RELIABLE])) == OK
 				and _link.send(peer, SEQUENCED, EPOCH, 1, PackedByteArray([SEQUENCED])) == OK)
 	return false
+
+
+func _purpose() -> NativeJoinChallenge.Purpose:
+	return RECLAIM if _mode in ["reclaim", "unacked"] else INITIAL
+
+
+func _expects_refusal() -> bool:
+	return _mode in ["early", "wrong-invite"]
 
 
 func _keygen(role: String, output: String) -> void:
@@ -196,7 +240,8 @@ func _keygen(role: String, output: String) -> void:
 func _finish(passed: bool) -> void:
 	set_process(false)
 	print("WP06_SESSION_RESULT ", JSON.stringify({"passed": passed, "role": _role,
-		"admitted": _admitted, "rejected": _rejected, "frames": _frames.size(), "departures": _departures}))
+		"admitted": _admitted, "rejected": _rejected, "frames": _frames.size(), "departures": _departures,
+		"lost": _lost}))
 	get_tree().quit(0 if passed else 1)
 
 

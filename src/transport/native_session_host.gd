@@ -13,6 +13,7 @@ class Command:
 class Batch:
 	var commands: Array[Command] = []
 	var admitted: Array[int] = []
+	var lost_seats: Array[int] = []
 	var rejected := 0
 	var departures := 0
 	var failure := false
@@ -63,6 +64,11 @@ func pump() -> Batch:
 				if not _attach(event.peer, now):
 					batch.rejected += 1
 			NativeDtlsLink.EventKind.DISCONNECT:
+				var lost := _driver.controlled_seat(connection)
+				if batch.admitted.has(connection):
+					batch.admitted.erase(connection)
+				elif lost > 0:
+					batch.lost_seats.append(lost)
 				_drop(connection)
 			NativeDtlsLink.EventKind.FRAME:
 				if connection > 0:

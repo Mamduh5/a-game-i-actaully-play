@@ -56,8 +56,12 @@ func expired(now: int) -> Array[int]:
 
 
 func can_send(connection: int) -> bool:
+	return controlled_seat(connection) > 0
+
+
+func controlled_seat(connection: int) -> int:
 	var peer: Peer = _peers.get(connection)
-	return peer != null and peer.ready and _authority.owns(connection, _generation, peer.seat)
+	return peer.seat if peer != null and peer.ready and _authority.owns(connection, _generation, peer.seat) else 0
 
 
 func receive(connection: int, frame: NativeSessionFrame, now: int) -> Action:
