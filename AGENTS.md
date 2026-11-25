@@ -6,9 +6,11 @@ Applies to Codex and Google Antigravity throughout this repository. The owner de
 
 ## Current authorization
 
-**Final pre-implementation corrections and independent review preparation.** The owner accepted the revised V42.6/R1 architecture for planning. Gemini's second verdict was **APPROVE WITH MINOR DOCUMENTATION CORRECTIONS**. Codex prepares the corrected six-document snapshot on `dev`. The owner arranges Antigravity/Gemini's independent review. A separate owner mandate recorded here is required to activate any production package.
+**Production implementation authorized.** The owner has authorized production implementation of the V42.6/R1 baseline. The final independent architectural review of the six-document snapshot at `f93725ca4d7ce9d3d1846639b5f613fad3ed5fc1` concluded **APPROVE WITH PACKAGE-SPECIFIC QUALIFICATION GATES**. Development follows the [implementation plan](docs/IMPLEMENTATION_PLAN.md#plan-workflow) under Bounded Autonomous Development. Every package-specific qualification gate remains mandatory, including WP04 numeric adoption, WP05 SQLite adoption, WP06 authenticated native transport and WP18 offscreen equivalence.
 
-The current mandate covers documentation, implementation planning, local documentation commits on `dev` and narrow disposable technical qualification outside the repository. This snapshot stays on `dev`. Production setup, game code, assets, tests and pilot work, dependency changes, external services, spending, remote publication and promotion of this task are outside the current phase.
+**Foundation assignment.** The owner assigned [WP01](docs/IMPLEMENTATION_PLAN.md#wp01) to Claude Opus as its primary writer. Antigravity independently reviews WP01 before any downstream package relies on it. After that foundation approval, Codex and Gemini become the normal implementation and review agents under the writer/reviewer rules below.
+
+The mandate covers production setup, game code, tests, assets, pilot work and the approved pinned development dependencies on `dev` as scheduled by the plan. Remote publication, promotion to `main`, external services, spending, material new runtime dependencies and changes to confirmed mechanics or approved architecture keep their existing approval boundaries.
 
 <a id="agents-branches"></a>
 
