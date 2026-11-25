@@ -216,6 +216,8 @@ Separate replaceable sequenced movement and tick-stamped state deltas from relia
 
 **WP12 disclosure checkpoint (`d82cf1a`).** The receiver stages up to 128 KiB per view or baseline, validates each reliable part and applies the complete image through the ordinary epoch/baseline/realm and schema checks. Projection precedes splitting. Independent review and the remaining integrated network witnesses are pending. [WP12 part and peer evidence](records/WP12.md#larger-baseline-and-view-transfers)
 
+**WP12 writer-verified candidate (`dd14766`, independent review pending).** Scoped native fixtures cover authority-timed warnings, sealed and low-obstacle Vault reconciliation, original-host control reclaim and sustained guest movement with delayed and withheld packets. The final handoff specifies the exact build, measurements and remaining integrated lifecycle and endurance witnesses. [WP12 review handoff](records/WP12.md#sustained-input-and-final-review-handoff)
+
 <a id="tds-security"></a>
 
 ### Native session security (F-15, NF-03)
