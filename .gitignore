@@ -1,0 +1,33 @@
+# Regenerable Godot caches (import cache, UID cache, editor state, export credentials).
+# Source-adjacent *.uid and *.import sidecars are source metadata and stay tracked.
+.godot/
+
+# Export output. The tracked .gdignore keeps the editor from scanning built packs.
+/build/*
+!/build/.gdignore
+
+# Raw local QA evidence. Tracked docs/records/<change-id>.md files hold names and hashes.
+/.qa-evidence/*
+!/.qa-evidence/.gdignore
+!/.qa-evidence/README.md
+
+# Local client/tool state that may embed machine paths.
+/.mcp.json
+/.gut_editor_config.json
+/.gut_editor_shortcuts.cfg
+
+# Credentials and signing material.
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+.env
+.env.*
+
+# Transient files.
+*.tmp
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store
