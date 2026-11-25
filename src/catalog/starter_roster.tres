@@ -1,0 +1,228 @@
+[gd_resource type="Resource" script_class="CatalogBundle" format=3]
+
+[ext_resource type="Script" path="res://src/catalog/catalog_bundle.gd" id="1_bundle"]
+[ext_resource type="Script" path="res://src/catalog/catalog_entry.gd" id="2_entry"]
+
+[sub_resource type="Resource" id="Entry_H01"]
+script = ExtResource("2_entry")
+id = &"H01"
+kind = 0
+lifetime = 1
+targeting = 1
+eligibility = 1
+
+[sub_resource type="Resource" id="Entry_H02"]
+script = ExtResource("2_entry")
+id = &"H02"
+kind = 0
+lifetime = 1
+targeting = 1
+eligibility = 1
+
+[sub_resource type="Resource" id="Entry_H03"]
+script = ExtResource("2_entry")
+id = &"H03"
+kind = 0
+lifetime = 1
+targeting = 1
+eligibility = 1
+
+[sub_resource type="Resource" id="Entry_W01"]
+script = ExtResource("2_entry")
+id = &"W01"
+kind = 1
+lifetime = 1
+targeting = 3
+eligibility = 1
+source_family = &"W01"
+
+[sub_resource type="Resource" id="Entry_W02"]
+script = ExtResource("2_entry")
+id = &"W02"
+kind = 1
+lifetime = 1
+targeting = 3
+eligibility = 1
+source_family = &"W02"
+
+[sub_resource type="Resource" id="Entry_W03"]
+script = ExtResource("2_entry")
+id = &"W03"
+kind = 1
+lifetime = 1
+targeting = 3
+eligibility = 1
+source_family = &"W03"
+
+[sub_resource type="Resource" id="Entry_R01"]
+script = ExtResource("2_entry")
+id = &"R01"
+kind = 2
+lifetime = 1
+targeting = 1
+eligibility = 1
+
+[sub_resource type="Resource" id="Entry_R02"]
+script = ExtResource("2_entry")
+id = &"R02"
+kind = 2
+lifetime = 1
+targeting = 1
+eligibility = 1
+
+[sub_resource type="Resource" id="Entry_R03"]
+script = ExtResource("2_entry")
+id = &"R03"
+kind = 2
+lifetime = 1
+targeting = 1
+eligibility = 1
+
+[sub_resource type="Resource" id="Entry_P01"]
+script = ExtResource("2_entry")
+id = &"P01"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P01"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"twin_blades", &"rank_4", &"razor_momentum"])
+
+[sub_resource type="Resource" id="Entry_P02"]
+script = ExtResource("2_entry")
+id = &"P02"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P02"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"twin_quill", &"rank_4", &"piercing_quill"])
+
+[sub_resource type="Resource" id="Entry_P03"]
+script = ExtResource("2_entry")
+id = &"P03"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P03"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"twin_runes", &"rank_4", &"pressure_charge"])
+
+[sub_resource type="Resource" id="Entry_P04"]
+script = ExtResource("2_entry")
+id = &"P04"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P04"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"crescent_lance", &"rank_4", &"ascending_pierce"])
+
+[sub_resource type="Resource" id="Entry_P05"]
+script = ExtResource("2_entry")
+id = &"P05"
+kind = 3
+lifetime = 2
+targeting = 2
+eligibility = 1
+source_family = &"P05"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"unbroken_rhythm", &"rank_4", &"peak_performance"])
+
+[sub_resource type="Resource" id="Entry_P06"]
+script = ExtResource("2_entry")
+id = &"P06"
+kind = 3
+lifetime = 2
+targeting = 2
+eligibility = 1
+source_family = &"P06"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"adaptive_prediction", &"rank_4", &"convergent_aim"])
+
+[sub_resource type="Resource" id="Entry_P07"]
+script = ExtResource("2_entry")
+id = &"P07"
+kind = 3
+lifetime = 2
+targeting = 2
+eligibility = 1
+source_family = &"P07"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"survival_instinct", &"rank_4", &"recovery_surge"])
+
+[sub_resource type="Resource" id="Entry_P08"]
+script = ExtResource("2_entry")
+id = &"P08"
+kind = 3
+lifetime = 2
+targeting = 2
+eligibility = 1
+source_family = &"P08"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"deepening_cracks", &"rank_4", &"total_exposure"])
+
+[sub_resource type="Resource" id="Entry_P09"]
+script = ExtResource("2_entry")
+id = &"P09"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P09"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"expanding_bloom", &"rank_4", &"bloom_convergence"])
+
+[sub_resource type="Resource" id="Entry_P10"]
+script = ExtResource("2_entry")
+id = &"P10"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P10"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"resonant_fidelity", &"rank_4", &"adaptive_echo"])
+
+[sub_resource type="Resource" id="Entry_P11"]
+script = ExtResource("2_entry")
+id = &"P11"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P11"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"impact_velocity", &"rank_4", &"compression_burst"])
+
+[sub_resource type="Resource" id="Entry_P12"]
+script = ExtResource("2_entry")
+id = &"P12"
+kind = 3
+lifetime = 2
+targeting = 3
+eligibility = 1
+source_family = &"P12"
+ranks = Array[StringName]([&"rank_1", &"rank_2", &"proportional_wrath", &"rank_4", &"expanding_wrath"])
+
+[resource]
+resource_name = "Starter roster"
+script = ExtResource("1_bundle")
+revision = &"V42.6-R1-starter-1"
+entries = Array[ExtResource("2_entry")]([SubResource("Entry_H01"), SubResource("Entry_H02"), SubResource("Entry_H03"), SubResource("Entry_W01"), SubResource("Entry_W02"), SubResource("Entry_W03"), SubResource("Entry_R01"), SubResource("Entry_R02"), SubResource("Entry_R03"), SubResource("Entry_P01"), SubResource("Entry_P02"), SubResource("Entry_P03"), SubResource("Entry_P04"), SubResource("Entry_P05"), SubResource("Entry_P06"), SubResource("Entry_P07"), SubResource("Entry_P08"), SubResource("Entry_P09"), SubResource("Entry_P10"), SubResource("Entry_P11"), SubResource("Entry_P12")])
+display_names = Dictionary[StringName, String]({
+&"H01": "The Undying",
+&"H02": "The Acrobat",
+&"H03": "The Conductor",
+&"W01": "Sword",
+&"W02": "Bow",
+&"W03": "Magic Staff",
+&"R01": "Bleed",
+&"R02": "Lightning",
+&"R03": "Force",
+&"P01": "Spinning Blade",
+&"P02": "Sketch Familiar",
+&"P03": "Runic Mine",
+&"P04": "Spectral Lance",
+&"P05": "Battle Tempo",
+&"P06": "Sharpsight",
+&"P07": "Vital Exchange",
+&"P08": "Fracture",
+&"P09": "Death Bloom",
+&"P10": "Echo Strike",
+&"P11": "Collision Burst",
+&"P12": "Reprisal Pulse"
+})

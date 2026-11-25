@@ -147,7 +147,8 @@ static func reopen(setup: RunSetup, catalog: DefinitionCatalog, saved: Dictionar
 			or not bytes is PackedByteArray or bytes.is_empty() or bytes.size() > ProfileMutation.MAX_BYTES):
 		return null
 	var image: Variant = bytes_to_var(bytes)
-	if not image is Dictionary or not image.get("preparation") is Dictionary:
+	if (not image is Dictionary or not image.get("preparation") is Dictionary
+			or image["preparation"].size() != setup.initial_realms.size()):
 		return null
 	var preparations: Dictionary[StringName, RunPreparation] = {}
 	for seat: StringName in setup.initial_realms:
@@ -164,7 +165,7 @@ static func reopen(setup: RunSetup, catalog: DefinitionCatalog, saved: Dictionar
 func _restore(image: Dictionary, closed_tick: int) -> bool:
 	if (closed_tick < 0 or closed_tick > RunAuthority.MAX_TICK or image.get("tick") != closed_tick
 			or image.get("version") != CHECKPOINT_VERSION or image.get("identity") != _identity
-			or image.get("preparation") != _preparation or not image.get("level") is int
+			or not image.get("level") is int
 			or not image.get("awarded_at") is int or image["awarded_at"] < 0 or image["awarded_at"] > closed_tick):
 		return false
 	var level: int = image["level"]

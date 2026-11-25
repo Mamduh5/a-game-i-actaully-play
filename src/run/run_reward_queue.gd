@@ -222,7 +222,7 @@ func _eligible_cards() -> Array[StringName]:
 		if not id.is_empty() and _next_rank(id) > 0:
 			candidates.append(id)
 	var owned: Array[StringName] = _ranks.keys()
-	owned.sort()
+	owned.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
 	for id: StringName in owned:
 		if not id in prepared and _next_rank(id) > 0:
 			candidates.append(id)

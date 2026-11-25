@@ -5,6 +5,33 @@ const Eligibility := CatalogEntry.Eligibility
 const Selection := RunRewardQueue.Selection
 
 
+func test_authored_starter_roster_and_pinned_card_order() -> void:
+	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
+	assert_not_null(bundle)
+	if bundle == null:
+		return
+	var catalog := bundle.compile()
+	assert_true(catalog.is_valid())
+	assert_eq(RunPreparation.available(catalog, Kind.HERO, {}), [&"H01", &"H02", &"H03"])
+	assert_eq(RunPreparation.available(catalog, Kind.WEAPON, {}), [&"W01", &"W02", &"W03"])
+	assert_eq(RunPreparation.available(catalog, Kind.RUNE, {}), [&"R01", &"R02", &"R03"])
+	var powers := RunPreparation.available(catalog, Kind.POWER, {})
+	assert_eq(powers.size(), 12)
+	assert_eq(powers[0], &"P01")
+	assert_eq(powers[-1], &"P12")
+	assert_eq(catalog.lookup(&"P07").ranks[4], &"recovery_surge")
+	assert_eq(bundle.display_names[&"H02"], "The Acrobat")
+	var reordered := bundle.entries.duplicate()
+	reordered.reverse()
+	var reversed := DefinitionCatalog.compile(bundle.revision, reordered)
+	var slots := _slots()
+	var normal := RunPreparation.select(catalog, &"H01", &"W01", [&"", &""], slots, {})
+	var reverse := RunPreparation.select(reversed, &"H01", &"W01", [&"", &""], slots, {})
+	var first := RunRewardQueue.begin(normal, RunRandom.new(10), &"guest")
+	var second := RunRewardQueue.begin(reverse, RunRandom.new(10), &"guest")
+	assert_eq(first.read_offer(first.earn(1)).options.keys(), second.read_offer(second.earn(1)).options.keys())
+
+
 func test_preparation_enforces_fixed_slot_counts_distinct_runes_and_profile_access() -> void:
 	var catalog := _catalog()
 	assert_eq(RunPreparation.available(catalog, Kind.POWER, {}).size(), 12)

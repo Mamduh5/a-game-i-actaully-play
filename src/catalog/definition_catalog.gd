@@ -42,7 +42,7 @@ func ids_of_kind(kind: CatalogEntry.Kind) -> Array[StringName]:
 	for definition: CatalogDefinition in _entries.values():
 		if definition.kind == kind:
 			ids.append(definition.id)
-	ids.sort()
+	ids.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
 	return ids
 
 

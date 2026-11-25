@@ -46,7 +46,7 @@ static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: S
 	for id: StringName in unlocked:
 		if unlocked[id]:
 			result._unlocked.append(id)
-	result._unlocked.sort()
+	result._unlocked.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
 	return result
 
 

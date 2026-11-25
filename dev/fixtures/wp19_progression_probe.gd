@@ -4,14 +4,7 @@ extends Node2D
 const SEAT := &"solo"
 const REALM := &"fixture_realm"
 const PLAYER := &"fixture_player"
-const NAMES: Dictionary[StringName, String] = {
-	&"H01": "The Undying", &"H02": "The Acrobat", &"H03": "The Conductor",
-	&"W01": "Sword", &"W02": "Bow", &"W03": "Magic Staff",
-	&"R01": "Bleed", &"R02": "Lightning", &"R03": "Force",
-	&"P01": "Spinning Blade", &"P02": "Sketch Familiar", &"P03": "Runic Mine", &"P04": "Spectral Lance",
-	&"P05": "Battle Tempo", &"P06": "Sharpsight", &"P07": "Vital Exchange", &"P08": "Fracture",
-	&"P09": "Death Bloom", &"P10": "Echo Strike", &"P11": "Collision Burst", &"P12": "Reprisal Pulse",
-}
+const STARTER_ROSTER := preload("res://src/catalog/starter_roster.tres")
 
 class FixtureAuthority extends RunAuthority:
 	var controls := PlayerControlState.new()
@@ -33,7 +26,7 @@ class FixtureAuthority extends RunAuthority:
 var _authority := FixtureAuthority.new()
 var _router := PlayerInputRouter.new()
 var _panel := RunProgressionPanel.new()
-var _catalog := _compile_fixture_catalog()
+var _catalog := STARTER_ROSTER.compile()
 var _profile := ProfileStore.new()
 var _profile_root: DirAccess
 var _setup := RunSetup.new()
@@ -67,7 +60,7 @@ func _ready() -> void:
 	_panel.preparation_requested.connect(_start)
 	_panel.choice_requested.connect(_choose)
 	_panel.dismissed.connect(_panel.hide)
-	_panel.show_preparation(_catalog, {}, NAMES)
+	_panel.show_preparation(_catalog, {}, STARTER_ROSTER.display_names)
 	_capture("preparation.png")
 
 
@@ -120,7 +113,7 @@ func _show_next_offer() -> void:
 	for ordinal: int in [1, 2]:
 		var offer := _party.offer(SEAT, ordinal)
 		if offer != null:
-			_panel.show_offer(offer, NAMES)
+			_panel.show_offer(offer, STARTER_ROSTER.display_names)
 			_capture("reward-%d.png" % ordinal)
 			return
 	_panel.hide()
@@ -171,23 +164,3 @@ func _capture(filename: String) -> void:
 	await RenderingServer.frame_post_draw
 	if get_viewport().get_texture().get_image().save_png(evidence.path_join(filename)) != OK:
 		push_error("WP19 fixture evidence could not be saved")
-
-
-static func _compile_fixture_catalog() -> DefinitionCatalog:
-	var entries: Array[CatalogEntry] = []
-	for id: StringName in NAMES:
-		var entry := CatalogEntry.new()
-		entry.id = id
-		entry.source_family = id
-		entry.eligibility = CatalogEntry.Eligibility.STARTER
-		entry.targeting = CatalogEntry.Targeting.NONE
-		entry.lifetime = CatalogEntry.Lifetime.PREPARATION
-		match String(id).left(1):
-			"H": entry.kind = CatalogEntry.Kind.HERO
-			"W": entry.kind = CatalogEntry.Kind.WEAPON
-			"R": entry.kind = CatalogEntry.Kind.RUNE
-			"P":
-				entry.kind = CatalogEntry.Kind.POWER
-				entry.ranks = [&"rank1", &"rank2", &"rank3", &"rank4", &"rank5"]
-		entries.append(entry)
-	return DefinitionCatalog.compile(&"wp19_input_fixture", entries)

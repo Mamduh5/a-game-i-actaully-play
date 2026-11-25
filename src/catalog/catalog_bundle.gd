@@ -4,6 +4,7 @@ extends Resource
 
 @export var revision: StringName
 @export var entries: Array[CatalogEntry] = []
+@export var display_names: Dictionary[StringName, String] = {}
 
 
 func compile() -> DefinitionCatalog:
