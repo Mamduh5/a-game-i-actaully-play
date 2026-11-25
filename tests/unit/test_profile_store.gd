@@ -55,3 +55,51 @@ func test_unrecognized_schema_is_quarantined_without_modification() -> void:
 	var before := FileAccess.get_sha256(path)
 	assert_eq(store.open("future", root), Result.QUARANTINED)
 	assert_eq(FileAccess.get_sha256(path), before)
+
+
+func test_recognized_header_with_no_identity_row_is_quarantined() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var folder := DirAccess.create_temp("agip-missing-identity")
+	var root := folder.get_current_dir()
+	var store := ProfileStore.new()
+	assert_eq(store.open("empty", root), Result.OPENED)
+	assert_true(store.close())
+	var path := root.path_join("profile-empty/profile.db")
+	var connection := _raw_connection(path)
+	assert_true(bool(connection.call(&"query", "DELETE FROM profile_identity")))
+	assert_true(bool(connection.call(&"close_db")))
+	var before := FileAccess.get_sha256(path)
+	assert_eq(store.open("empty", root), Result.QUARANTINED)
+	assert_eq(store.diagnostic(), "")
+	assert_eq(FileAccess.get_sha256(path), before)
+
+
+func test_foreign_wal_database_keeps_its_bytes_and_journal_mode() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var folder := DirAccess.create_temp("agip-foreign-wal")
+	var root := folder.get_current_dir()
+	var directory := root.path_join("profile-foreign")
+	assert_eq(DirAccess.make_dir_recursive_absolute(directory), OK)
+	var path := directory.path_join("profile.db")
+	var connection := _raw_connection(path)
+	assert_true(bool(connection.call(&"query", "PRAGMA journal_mode=WAL")))
+	assert_true(bool(connection.call(&"query", "CREATE TABLE foreign_state (payload TEXT)")))
+	assert_true(bool(connection.call(&"query", "INSERT INTO foreign_state VALUES ('unchanged')")))
+	assert_true(bool(connection.call(&"close_db")))
+	var before := FileAccess.get_sha256(path)
+	assert_eq(ProfileStore.new().open("foreign", root), Result.QUARANTINED)
+	assert_eq(FileAccess.get_sha256(path), before)
+	connection = _raw_connection(path)
+	assert_true(bool(connection.call(&"query", "PRAGMA journal_mode")))
+	assert_eq(connection.get(&"query_result")[0]["journal_mode"], "wal")
+	assert_true(bool(connection.call(&"close_db")))
+
+
+func _raw_connection(path: String) -> Object:
+	var connection: Object = ClassDB.instantiate(&"SQLite")
+	connection.set(&"path", path)
+	connection.set(&"verbosity_level", 0)
+	assert_true(bool(connection.call(&"open_db")))
+	return connection

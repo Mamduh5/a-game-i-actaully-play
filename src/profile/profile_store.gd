@@ -87,12 +87,15 @@ func _acquire(connection: Object, profile_id: String) -> OpenResult:
 		return _failure(connection)
 	if not _recognized_header(version, app_id):
 		return OpenResult.QUARANTINED
-	if version == SCHEMA_VERSION:
-		var identity_result := _check_identity(connection, profile_id)
-		if identity_result != OpenResult.OPENED:
-			return identity_result
+	var preflight := _check_empty_schema(connection) if version == 0 else _check_identity(connection, profile_id)
+	if preflight != OpenResult.OPENED:
+		return preflight
+	var journal: Variant = _value(connection, "PRAGMA journal_mode", "journal_mode")
+	if journal == null:
+		return _failure(connection)
+	if journal != "delete":
+		return OpenResult.QUARANTINED
 	if (not _query(connection, "PRAGMA locking_mode=EXCLUSIVE")
-			or not _query(connection, "PRAGMA journal_mode=DELETE")
 			or not _query(connection, "PRAGMA synchronous=EXTRA")
 			or not _query(connection, "PRAGMA trusted_schema=OFF")):
 		return _failure(connection)
@@ -116,11 +119,9 @@ func _claim(connection: Object, profile_id: String) -> OpenResult:
 	if not _recognized_header(version, app_id):
 		return OpenResult.QUARANTINED
 	if version == 0:
-		var tables: Variant = _value(connection, "SELECT count(*) AS objects FROM sqlite_schema", "objects")
-		if tables == null:
-			return _failure(connection)
-		if tables != 0:
-			return OpenResult.QUARANTINED
+		var schema := _check_empty_schema(connection)
+		if schema != OpenResult.OPENED:
+			return schema
 		if (not _query(connection, "CREATE TABLE profile_identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
 				+ "profile_id TEXT NOT NULL, lease_marker INTEGER NOT NULL CHECK(lease_marker IN (0,1))) STRICT")
 				or not _query(connection, "INSERT INTO profile_identity VALUES (1, ?, 0)", [profile_id])
@@ -138,10 +139,17 @@ func _claim(connection: Object, profile_id: String) -> OpenResult:
 
 
 func _check_identity(connection: Object, profile_id: String) -> OpenResult:
-	var saved: Variant = _value(connection, "SELECT profile_id FROM profile_identity WHERE singleton=1", "profile_id")
-	if saved == null and not str(connection.get(&"error_message")).is_empty():
+	if not _query(connection, "SELECT profile_id FROM profile_identity WHERE singleton=1"):
 		return _failure(connection)
-	return OpenResult.OPENED if saved is String and saved == profile_id else OpenResult.QUARANTINED
+	var rows: Array = connection.get(&"query_result")
+	return OpenResult.OPENED if rows.size() == 1 and rows[0].get("profile_id") == profile_id else OpenResult.QUARANTINED
+
+
+func _check_empty_schema(connection: Object) -> OpenResult:
+	var objects: Variant = _value(connection, "SELECT count(*) AS objects FROM sqlite_schema", "objects")
+	if objects == null:
+		return _failure(connection)
+	return OpenResult.OPENED if objects == 0 else OpenResult.QUARANTINED
 
 
 func _failure(connection: Object) -> OpenResult:
