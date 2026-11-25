@@ -39,13 +39,38 @@ class Snapshot:
 	var explored: Array[Vector2i] = []
 
 
+## The run supplies visibility at the actual corpse and at eligible living
+## teammate viewpoints. The guest can request a teammate ID, not a realm or pose.
+static func spectator_scope(corpse: Scope, follow: StringName, living: Dictionary[StringName, Scope],
+		party: Dictionary[StringName, StringName]) -> Scope:
+	if (corpse == null or corpse.seat.is_empty() or corpse.realm.is_empty()
+			or party.get(corpse.seat, &"") != &"down"):
+		return null
+	var permitted := corpse
+	if not follow.is_empty() and follow != corpse.seat and party.get(follow, &"") == &"living":
+		var teammate: Scope = living.get(follow)
+		if teammate != null and teammate.seat == follow and not teammate.realm.is_empty():
+			permitted = teammate
+	var scope := Scope.new()
+	scope.seat = corpse.seat
+	scope.realm = permitted.realm
+	scope.actors = permitted.actors.duplicate()
+	scope.warnings = permitted.warnings.duplicate()
+	return scope
+
+
 ## Only the approved party summary crosses realm boundaries. A warning carries
 ## its own cue ID and never requires the actor's row or private identity.
 static func pack(scope: Scope, epoch: int, baseline: int, tick: int, shared_level: int, shared_xp: String,
 		party: Dictionary[StringName, StringName], actors: Array[Actor], warnings: Array[Warning],
-		exploration: WorldExploration, limit: int = ReplicationMessage.MAX_BODY) -> PackedByteArray:
+		exploration: WorldExploration, limit: int = ReplicationMessage.MAX_BODY,
+		follow: StringName = &"", living: Dictionary[StringName, Scope] = {}) -> PackedByteArray:
 	if (scope == null or scope.seat.is_empty() or scope.realm.is_empty() or epoch <= 0 or baseline <= 0
 			or tick < 0 or tick > RunAuthority.MAX_TICK or shared_level < 0 or not _valid_xp(shared_xp)):
+		return PackedByteArray()
+	if party.get(scope.seat, &"") == &"down":
+		scope = spectator_scope(scope, follow, living, party)
+	elif not follow.is_empty():
 		return PackedByteArray()
 	var visible: Dictionary[String, Array] = {}
 	for actor: Actor in actors:

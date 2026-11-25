@@ -296,6 +296,45 @@ func test_large_disclosures_apply_atomically_and_reject_a_gap_or_an_older_transf
 	assert_eq(replica.receive_frame(_reliable_frame(segments[-1])), GuestReplica.Acceptance.STALE)
 
 
+func test_spectating_preserves_recipient_ownership_and_cannot_request_hidden_space() -> void:
+	var corpse := RecipientView.Scope.new()
+	corpse.seat = &"guest"
+	corpse.realm = &"core"
+	corpse.actors = {&"body_neighbor": true}
+	var teammate := RecipientView.Scope.new()
+	teammate.seat = &"host"
+	teammate.realm = &"other"
+	teammate.actors = {&"visible_neighbor": true}
+	teammate.warnings = {&"teammate_cue": true}
+	var living: Dictionary[StringName, RecipientView.Scope] = {&"host": teammate}
+	var party: Dictionary[StringName, StringName] = {&"guest": &"down", &"host": &"living"}
+	var actors: Array[RecipientView.Actor] = [_actor(&"visible_neighbor", &"other", 5),
+		_actor(&"hidden_neighbor", &"other", 773451), _actor(&"body_neighbor", &"core", 8)]
+	var cues: Array[RecipientView.Warning] = [_warning(&"teammate_cue", &"other", 7, LARGE_ID + 25),
+		_warning(&"hidden_cue", &"other", 773451, LARGE_ID + 25)]
+	var scope := RecipientView.spectator_scope(corpse, &"host", living, party)
+	assert_eq(scope.seat, &"guest")
+	assert_eq(scope.realm, &"other")
+	var projected := RecipientView.pack(corpse, 1, 2, LARGE_ID, 1, "0", party, actors, cues, null,
+		ReplicationMessage.MAX_BODY, &"host", living)
+	assert_false(projected.get_string_from_utf8().contains("773451"))
+	var view := RecipientView.read(projected)
+	assert_eq(view.actors.keys(), ["visible_neighbor"])
+	assert_eq(view.warnings.keys(), ["teammate_cue"])
+	scope.actors.clear()
+	assert_eq(teammate.actors.size(), 1)
+	for attempted: StringName in [&"", &"other", &"guest", &"hidden_neighbor"]:
+		var fallback := RecipientView.spectator_scope(corpse, attempted, living, party)
+		assert_eq(fallback.realm, &"core")
+		assert_eq(fallback.actors.keys(), [&"body_neighbor"])
+	party[&"host"] = &"down"
+	assert_eq(RecipientView.spectator_scope(corpse, &"host", living, party).realm, &"core")
+	party[&"guest"] = &"living"
+	assert_null(RecipientView.spectator_scope(corpse, &"host", living, party))
+	assert_true(RecipientView.pack(corpse, 1, 2, LARGE_ID, 1, "0", party, actors, cues, null,
+		ReplicationMessage.MAX_BODY, &"host", living).is_empty())
+
+
 func test_projection_filters_before_serializing_actor_fog_and_timed_warning_rows() -> void:
 	var layout := WorldTopology.generate(22)
 	var world := WorldExploration.create(layout, [&"host", &"guest"])
