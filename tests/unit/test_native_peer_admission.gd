@@ -46,6 +46,10 @@ func test_protected_dispatch_gates_commands_on_complete_admission_and_fences_dup
 	assert_null(driver.receive(13, _wire(RELIABLE, 1, PackedByteArray([7])), 13).command)
 	assert_not_null(driver.receive(13, _wire(SEQUENCED, 2, PackedByteArray([8])), 14).command)
 	assert_null(driver.receive(13, _wire(SEQUENCED, 1, PackedByteArray([8])), 15).command)
+	var departure := driver.receive(13, _wire(ADMISSION, 4, NativeAdmissionMessage.leave()), 16)
+	assert_true(departure.disconnect and departure.voluntary)
+	assert_false(authority.owns(13, 2, 1))
+	assert_false(driver.can_send(13))
 
 
 func _wire(kind: NativeSessionFrame.Kind, sequence: int, payload: PackedByteArray) -> NativeSessionFrame:

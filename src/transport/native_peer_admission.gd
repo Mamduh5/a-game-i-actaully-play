@@ -13,6 +13,7 @@ class Peer:
 
 class Action:
 	var disconnect := false
+	var voluntary := false
 	var replaced_connection: int
 	var reply: PackedByteArray
 	var reply_sequence: int
@@ -112,6 +113,14 @@ func _command(connection: int, peer: Peer, frame: NativeSessionFrame) -> Action:
 		return _reject(connection)
 	var action := Action.new()
 	match frame.kind:
+		NativeSessionFrame.Kind.ADMISSION:
+			var message := NativeAdmissionMessage.decode(frame.payload)
+			if frame.sequence != 4 or message == null or message.operation != NativeAdmissionMessage.Operation.LEAVE:
+				return _reject(connection)
+			detach(connection)
+			action.disconnect = true
+			action.voluntary = true
+			return action
 		NativeSessionFrame.Kind.RELIABLE:
 			if frame.sequence <= peer.reliable_id:
 				return action

@@ -24,6 +24,7 @@ var _closing := false
 var _guest_stage := 0
 var _admitted := 0
 var _rejected := 0
+var _departures := 0
 var _frames: Dictionary[NativeSessionFrame.Kind, bool] = {}
 
 
@@ -32,7 +33,7 @@ func _ready() -> void:
 	if args.size() == 3 and args[0] == "keygen":
 		_keygen(args[1], args[2])
 		return
-	if args.size() != 8 or args[0] not in ["host", "guest"] or args[7] not in ["paired", "early"]:
+	if args.size() != 8 or args[0] not in ["host", "guest"] or args[7] not in ["paired", "early", "client-close"]:
 		_finish(false)
 		return
 	_role = args[0]
@@ -93,6 +94,7 @@ func _run_host() -> void:
 	if not batch.admitted.is_empty():
 		print("WP06_SESSION_PHASE admitted")
 	_rejected += batch.rejected
+	_departures += batch.departures
 	for command: NativeSessionHost.Command in batch.commands:
 		var frame := command.frame
 		if command.seat != 1 or frame.payload != PackedByteArray([frame.kind]):
@@ -102,8 +104,8 @@ func _run_host() -> void:
 		if _session.send(command.connection, frame.kind, frame.sequence, frame.payload) != OK:
 			_finish(false)
 			return
-	var passed := (_frames.size() == 2 and _admitted == 1 and _rejected == 0) if _mode == "paired" else (
-		_frames.is_empty() and _admitted == 0 and _rejected == 1)
+	var passed := (_frames.is_empty() and _admitted == 0 and _rejected == 1) if _mode == "early" else (
+		_frames.size() == 2 and _admitted == 1 and _rejected == 0 and _departures == int(_mode == "paired"))
 	if passed and _close_at < 0:
 		print("WP06_SESSION_PHASE boundary-observed")
 		_close_at = Time.get_ticks_msec() + 400
@@ -133,7 +135,7 @@ func _run_guest() -> void:
 					_finish(false)
 					return
 			NativeDtlsLink.EventKind.DISCONNECT:
-				_finish(_frames.size() == 2 if _mode == "paired" else _frames.is_empty())
+				_finish(_frames.is_empty() if _mode == "early" else _frames.size() == 2)
 				return
 			_:
 				_finish(false)
@@ -148,8 +150,12 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 			return false
 		_frames[frame.kind] = true
 		if _frames.size() == 2:
-			print("WP06_SESSION_PHASE guest-draining")
-			_link.request_close()
+			if _mode == "client-close":
+				print("WP06_SESSION_PHASE guest-draining")
+				_link.request_close()
+			else:
+				print("WP06_SESSION_PHASE guest-requested-leave")
+				return _link.send(peer, ADMISSION, EPOCH, 4, NativeAdmissionMessage.leave()) == OK
 		return true
 	if frame.sequence != _guest_stage + 1:
 		return false
@@ -190,7 +196,7 @@ func _keygen(role: String, output: String) -> void:
 func _finish(passed: bool) -> void:
 	set_process(false)
 	print("WP06_SESSION_RESULT ", JSON.stringify({"passed": passed, "role": _role,
-		"admitted": _admitted, "rejected": _rejected, "frames": _frames.size()}))
+		"admitted": _admitted, "rejected": _rejected, "frames": _frames.size(), "departures": _departures}))
 	get_tree().quit(0 if passed else 1)
 
 

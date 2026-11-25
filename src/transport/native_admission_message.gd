@@ -2,7 +2,7 @@ class_name NativeAdmissionMessage
 extends RefCounted
 ## Primitive admission payload inside the dedicated reliable frame channel.
 
-enum Operation { OPEN = 1, CHALLENGE = 2, PROOF = 3, ACCEPT = 4, ACK = 5, READY = 6 }
+enum Operation { OPEN = 1, CHALLENGE = 2, PROOF = 3, ACCEPT = 4, ACK = 5, READY = 6, LEAVE = 7 }
 
 const VERSION := 1
 const HEADER := 2
@@ -53,6 +53,10 @@ static func ready() -> PackedByteArray:
 	return PackedByteArray([VERSION, Operation.READY])
 
 
+static func leave() -> PackedByteArray:
+	return PackedByteArray([VERSION, Operation.LEAVE])
+
+
 static func decode(payload: PackedByteArray) -> NativeAdmissionMessage:
 	if payload.size() < HEADER or payload[0] != VERSION:
 		return null
@@ -78,7 +82,7 @@ static func decode(payload: PackedByteArray) -> NativeAdmissionMessage:
 				return null
 			message.seat = payload[2]
 			message.bytes = payload.slice(3)
-		Operation.ACK, Operation.READY:
+		Operation.ACK, Operation.READY, Operation.LEAVE:
 			if payload.size() != HEADER:
 				return null
 		_:

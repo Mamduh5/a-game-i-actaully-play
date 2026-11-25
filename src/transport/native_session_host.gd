@@ -14,6 +14,7 @@ class Batch:
 	var commands: Array[Command] = []
 	var admitted: Array[int] = []
 	var rejected := 0
+	var departures := 0
 	var failure := false
 
 var _link := NativeDtlsLink.new()
@@ -118,7 +119,10 @@ func _dispatch(connection: int, frame: NativeSessionFrame, now: int, batch: Batc
 		_drop(action.replaced_connection)
 	if action.disconnect:
 		_drop(connection)
-		batch.rejected += 1
+		if action.voluntary:
+			batch.departures += 1
+		else:
+			batch.rejected += 1
 		return
 	if not action.reply.is_empty():
 		if _link.send(_peers[connection], NativeSessionFrame.Kind.ADMISSION,

@@ -75,6 +75,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--client-close", action="store_true", help="Include the direct guest-side ENet close diagnostic arm")
     args = parser.parse_args()
     exe, logs = args.release.resolve(strict=True), args.output.resolve()
     logs.mkdir(parents=True, exist_ok=False)
@@ -84,7 +85,8 @@ def main():
         keygen(exe, secrets / "guest", logs, "guest")
         shutil.copyfile(secrets / "host" / "host.crt", secrets / "guest" / "paired.crt")
         shutil.copyfile(secrets / "guest" / "guest.pub", secrets / "host" / "guest.pub")
-        report = {mode: exchange(exe, secrets, logs, mode) for mode in ("paired", "early")}
+        modes = ("paired", "early", "client-close") if args.client_close else ("paired", "early")
+        report = {mode: exchange(exe, secrets, logs, mode) for mode in modes}
     (logs / "summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({mode: result["passed"] for mode, result in report.items()}))
     if not all(result["passed"] for result in report.values()):
