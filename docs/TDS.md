@@ -1,6 +1,6 @@
 # Technical Design Specification
 
-**Final pre-implementation review snapshot · V42.6/R1 and owner supplement.** The owner accepted the revised architecture for planning after the first review. Gemini's second review approved it with four minor documentation corrections. Their dispositions and outstanding qualification gates appear in §12. Antigravity/Gemini's review of this corrected snapshot and a separate production mandate remain pending.
+**V42.6/R1 and owner supplement.** The owner accepted the revised architecture for planning after the first review. Gemini's second review approved it with four minor documentation corrections. Their dispositions and outstanding qualification gates appear in §12. The final architectural review of `f93725c` approved the corrected snapshot with package-specific gates. The owner authorized production implementation on `dev`. [Authorization](../AGENTS.md#agents-phase)
 
 Use the GDD for intent, GDS for behavior, owner policy and catalog, TDS for architecture, QAS for evidence, AGENTS for authority, and the plan for sequencing. A failed empirical gate reopens the affected mechanism and its consumers. Changing a confirmed rule or material architecture requires the approval recorded in the agent guide. [GDD](GDD.md) · [GDS](GDS.md#gds-owner) · [QAS](QAS.md) · [Agent guide](../AGENTS.md) · [Implementation plan](IMPLEMENTATION_PLAN.md#plan-graph)
 
@@ -51,6 +51,8 @@ OWNER-T02 approves one authoritative simulation per run, in the solo process or 
 Use explicit typed calls for decisions with a result, such as a cost validation. Queue causally related work under the authority. Use signals for notifications to views after a state change. Scene signal arrival order, node paths, animation callbacks and network packet order are unsuitable tie-breakers for gameplay. Give transient instances a run-scoped identity and lifecycle number. Distinguish those from catalog identity, player identity, connection ID and the source family used for reaction eligibility.
 
 Keep inspectable nodes at scene boundaries. Put calculations that need no scene tree in small typed objects/functions. Per-run services belong to the run and are released together. Process-wide ownership is appropriate for the loaded catalog and access to the current local profile. This limits accidental state carryover when returning to preparation. Use a single writer for each mutable aggregate. Profile I/O receives immutable transaction data so an incomplete write cannot mutate a live scene.
+
+**WP02 writer-verified, independent review pending.** The authority stages typed envelopes for the next open tick, publishes detached results after canonical admission and resolution, and captures the engine-pinned RNG and sequence frontier at closure. A locally bound seat is checked separately from the envelope. The rendered fixture's fixed 60 Hz driver produced equivalent closed traces across measured 30 and 120 FPS runs and after a process restart. [Implementation, limits and evidence](records/WP02.md)
 
 <a id="tds-combat"></a>
 
@@ -424,7 +426,7 @@ Keep the player-facing Simple Run Summary to outcome, survival duration, final l
 
 **Already approved by the owner.** Godot 4.7 stable, typed GDScript, a single repository and native Windows PC as primary. Preserve practical browser compatibility. Codex is primary, Google Antigravity secondary/reviewer. The approved tools are Godot MCP Toolkit and Server 1.1.2, GUT 9.7.1, Godot Debugger/Profiler, Krita 5.3.4.1, Aseprite 1.3.18.6, ImageMagick 7.1.2-36, FFmpeg/FFprobe 8.1, Git/selective Git LFS and ChatGPT Images/Gemini assistance. Bounded Autonomous Development and the full-content acceptance standard are approved. The owner reports both agents' MCP operation, CLI, exports, GUT and core asset utilities verified in disposable projects. Production integration, compatibility at game scale and achieved performance are unverified.
 
-**Decision status.** OWNER-T01–T04 bind the product and QA contracts. The owner approved T01–T10 as the working baseline for planning. Their implementation, cost and failure properties still require the indicated evidence. T05 additionally carries the dependency gate below. Antigravity/Gemini reviews this combined baseline. A production mandate remains a separate decision.
+**Decision status.** OWNER-T01–T04 bind the product and QA contracts. The owner approved T01–T10 as the working baseline and authorized production implementation after Antigravity/Gemini reviewed the corrected snapshot. The implementation, cost and failure properties still require the indicated evidence. T05 additionally carries the dependency gate below. [Authorization and review policy](../AGENTS.md#agents-phase)
 
 | ID and decision | Alternatives and recommendation rationale | Gameplay, maintenance and agent operation | Risk and required validation | Status |
 |---|---|---|---|---|
