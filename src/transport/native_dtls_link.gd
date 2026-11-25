@@ -17,6 +17,7 @@ class Event:
 var _host: ENetConnection
 var _server := false
 var _peers: Dictionary[ENetPacketPeer, bool] = {}
+var _departing: Dictionary[ENetPacketPeer, bool] = {}
 var _drain_deadline := -1
 
 
@@ -79,8 +80,9 @@ func pump() -> Array[Event]:
 				observed.kind = EventKind.CONNECT
 			ENetConnection.EVENT_DISCONNECT:
 				_peers.erase(observed.peer)
+				_departing.erase(observed.peer)
 				observed.kind = EventKind.DISCONNECT
-				if not _server and _drain_deadline >= 0:
+				if not _server:
 					# This client has one peer. Finish after its disconnect is acknowledged.
 					events.append(observed)
 					_host.flush()
@@ -88,7 +90,7 @@ func pump() -> Array[Event]:
 					return events
 			ENetConnection.EVENT_RECEIVE:
 				var payload := observed.peer.get_packet()
-				if _drain_deadline >= 0:
+				if _drain_deadline >= 0 or _departing.has(observed.peer):
 					continue
 				observed.frame = NativeSessionFrame.read(payload, raw[3])
 				observed.kind = EventKind.FRAME if observed.frame != null else EventKind.REJECTED_FRAME
@@ -106,7 +108,7 @@ func pump() -> Array[Event]:
 
 func send(peer: ENetPacketPeer, kind: NativeSessionFrame.Kind, generation: int, sequence: int,
 		payload: PackedByteArray) -> Error:
-	if _host == null or _drain_deadline >= 0 or not _peers.has(peer):
+	if _host == null or _drain_deadline >= 0 or not _peers.has(peer) or _departing.has(peer):
 		return ERR_UNCONFIGURED
 	var bytes := NativeSessionFrame.pack(kind, generation, sequence, payload)
 	if bytes.is_empty():
@@ -115,13 +117,20 @@ func send(peer: ENetPacketPeer, kind: NativeSessionFrame.Kind, generation: int, 
 	return peer.send(NativeSessionFrame.channel(kind), bytes, flags)
 
 
+func request_peer_close(peer: ENetPacketPeer) -> void:
+	if not _peers.has(peer) or _departing.has(peer):
+		return
+	_departing[peer] = true
+	peer.peer_disconnect()
+
+
 func request_close() -> void:
 	if _host == null or _drain_deadline >= 0:
 		return
 	if _server:
 		_host.refuse_new_connections(true)
 	for peer: ENetPacketPeer in _peers:
-		peer.peer_disconnect()
+		request_peer_close(peer)
 	_drain_deadline = Time.get_ticks_msec() + DRAIN_LIMIT_MS
 
 
@@ -137,6 +146,7 @@ func _close() -> void:
 	_host.destroy()
 	_host = null
 	_peers.clear()
+	_departing.clear()
 	_drain_deadline = -1
 
 
