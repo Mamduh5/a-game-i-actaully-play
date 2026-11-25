@@ -1,8 +1,8 @@
 # Game Design Document (GDD)
 
 **Project:** New Unwritten / unfinished-world fantasy game; final commercial title open.  
-**Approved design baseline:** Through V42.6, with latest revisions taking precedence.  
-**Document edition:** Rebuilt V42.6 / R1, 2026-11-25.  
+**Approved design baseline:** V42.6 and subsequent owner decisions OWNER-T01–T04.\
+**Document edition:** V42.6 / R1 with the planning-baseline supplement, 2026-11-25.\
 **Companion specification:** [GDS.md](GDS.md).  
 **Purpose:** Preserve the game's vision, intended player experience, content identities, design rationale, scope and quality priorities. The GDS defines exact gameplay behavior, interactions and provisional numerical targets.
 
@@ -45,7 +45,7 @@ This is a separate product direction from the old Jangan Lari reference project 
 
 ### 1.2 Platform and presentation direction
 
-PC is the stronger first priority. PC browser delivery is acceptable, mobile support remains desired, and the exact launch platforms are not finalized. The camera is top-down or oblique top-down with a 2.5D impression. Sprites and layered artwork can express that appearance; the design does not require a true 3D engine.
+The prototype targets native Windows PC, with browser compatibility where practical. Mobile support remains a longer-term desire. Commercial launch platforms remain open. The camera is top-down or oblique top-down with a 2.5D impression. Sprites and layered artwork can express that appearance; the design does not require a true 3D engine.
 
 A commercially finalized title has not been approved. **The Unfinished World** is the narrative foundation; **The Unfinished Canvas** is the final arena. Neither should silently become the game's official name merely because it appears prominently in mock text.
 
@@ -116,7 +116,7 @@ No automatic respec removes acquired-power commitment. Fusion is not a slot-comp
 
 ### 3.1 Before a run: intention without a guaranteed outcome
 
-Preparation gives the player a hero, an independently selected main weapon, two fixed global rune slots and a candidate power pool. The candidate pool defines ordinary opportunities, not starting ownership. Leaving wildcard space permits broader discoveries; filling the pool deliberately avoids forced unknown substitutions. Exact pool size remains open.
+Preparation gives the player a hero, an independently selected main weapon, two fixed global rune slots and a candidate power pool. The candidate pool defines ordinary opportunities, not starting ownership. Leaving wildcard space permits broader discoveries; filling the pool deliberately avoids forced unknown substitutions. The prototype pool size and fresh-profile eligibility are adjustable under PR02–PR03. [GDS prototype rules](GDS.md#gds-rules)
 
 Knowledge and permanent ownership are different. A player may know an Evolution clue without having verified its recipe, discover a hero without purchasing it yet, or unlock a power for future reward eligibility without starting a run with it. This separation supports curiosity, planning and progression without promising a predetermined build.
 
@@ -245,7 +245,7 @@ Range, projectile speed, accuracy, coverage and cadence are separate. Earned pre
 
 ### 6.1 Five global runes and ten combinations
 
-Runes are selected before the run and apply to compatible owned attacks. They are not randomly equipped from level-up cards and do not require manual assignment to each weapon. Two fixed distinct slots create a deliberate combination choice. Permanent progression expands rune choices, not slot count. Whether the preparation interface must require both slots filled is an explicitly recorded wording gap, not a third-slot opportunity.
+Runes are selected before the run and apply to compatible owned attacks. They are not randomly equipped from level-up cards and do not require manual assignment to each weapon. Two fixed distinct slots create a deliberate combination choice. Permanent progression expands rune choices, not slot count. Historical wording left empty slots ambiguous. PR01 provisionally permits them. [GDS prototype rules](GDS.md#gds-rules)
 
 | Rune | Identity | Availability |
 |---|---|---|
@@ -477,7 +477,7 @@ In the fiction, victory preserves this manifestation of the world. Subsequent jo
 
 Cooperation means occupying one persistent run with shared time, shared eligible XP and applicable exploration knowledge, not controlling an identical build. Each player chooses their own hero, weapon and runes; earns and selects their own power choices; maintains their own combat ownership; and spends their own Trade Shards.
 
-Players may separate across ordinary regions or special realms. They can explore different opportunities and reunite, but separation does not lower encounter difficulty. **Global Party Scaling is locked to the initial party size.** A lone explorer in a larger party faces that party's scaling; death or temporary disconnection does not weaken the surviving enemies. The maximum supported party size remains an open product detail; the four-player balance examples are not a newly imposed cap.
+Players may separate across ordinary regions or special realms. They can explore different opportunities and reunite, but separation does not lower encounter difficulty. **Global Party Scaling is locked to the initial party size.** A lone explorer in a larger party faces that party's scaling; death or temporary disconnection does not weaken the surviving enemies. The permanent party limit remains open. PR07 calls for native tests at one, two, three and four players. [GDS prototype rules](GDS.md#gds-rules)
 
 There are no compulsory tank, healer or damage-dealer roles. Protective heroes, support interactions and varied builds should help cooperation, while every hero remains independently viable in solo play. Beneficial cooperation is not automatically compensated by increasing enemies to match a strong party's damage output.
 
@@ -487,7 +487,7 @@ The latest approved encounter policy gives nearby participating party members ev
 
 This is separate from global shared XP and from final-boss party victory. It is also separate from personal mastery: a teammate cannot automatically discover an Evolution for someone who never acquired it, or complete another player's individual weapon technique by dealing the killing blow.
 
-Combat attribution still needs one legitimate damage or elimination owner for personal effects such as Life Harvest or Death Bloom. An ally's entitlement to encounter loot is not permission to duplicate that ally's kill-trigger reactions. Exact proximity boundaries, departed participants and disconnection/death edge cases are deliberately open.
+Combat attribution still needs one legitimate damage or elimination owner for personal effects such as Life Harvest or Death Bloom. An ally's entitlement to encounter loot is not permission to duplicate that ally's kill-trigger reactions. PR05 gives the prototype an adjustable local boundary and departure, death and disconnection rules. Final victory remains shared with eligible dead members. [GDS cooperative play](GDS.md#gds-coop)
 
 ### 10.3 Revival should create rescue decisions
 
@@ -505,7 +505,7 @@ By contrast, ordinary automatic attacks and autonomous companion attacks stop wh
 
 ### 10.5 Connection and session clarity
 
-A temporary disconnect is not free protection. The character remains vulnerable under the established grace rules rather than receiving an autonomous fighting AI. Reconnection, host loss, late joining and final timeout details are documented as open where the available historical contract is not complete. This design pair does not prescribe networking topology or convert those unanswered product questions into technical assumptions.
+Friends can play the full cooperative game over native LAN or direct IP (OWNER-T02). While the host continues, a disconnected guest stays at their actual position, vulnerable, and counts toward survival for a limited grace period. If the original host becomes unavailable, play suspends. Only that host may resume the reconciled run within the recovery window. If safe recovery fails, the run ends interrupted and earned permanent rewards follow the settlement policy. [GDS session policies](GDS.md#gds-owner)
 
 ## 11. Inhabitants, events and meaningful optional work
 <a id="gdd-inhabitants"></a>
@@ -586,6 +586,8 @@ Repeatable objectives offer currency, XP, Trade Shards and compatible run benefi
 | Trade Shards | Personal in-run merchant and compatible service spending | Starts at zero and expires at run end. |
 
 The latest approved economy rewards actual accomplishments throughout a run. Time alone produces no currency multiplier. Someone who achieves exceptional endurance and eventually loses can earn more than someone who completes a short victory. The winner still receives substantial additional completion benefits.
+
+Important permanent rewards are committed as they are earned. Ordinary enemy currency can be batched briefly. An ordinary defeat or graceful completion settles all eligible earnings. After a crash, outstanding authorized rewards can be reconciled across sessions, with any unrecoverable amount disclosed. [GDS reward durability](GDS.md#gds-durability)
 
 Repeated genuine Hunter kills retain full authored XP, currency and exceptional rewards. The design explicitly rejected anti-farming reductions based on kill count. Repeated resurrection of the same enemy remains different: it preserves one progression entitlement while permitting qualifying kill reactions on new combat lives.
 
@@ -817,7 +819,7 @@ NPCs can disagree without rendering every canonical fact arbitrary. Lore discove
 ## 17. Full-content prototype and quality standard
 <a id="gdd-prototype"></a>
 
-**Authority:** V42.3-V42.4 supersede the earlier reduced-content prototype proposals. Exact acceptance contract and derived checks: [GDS - prototype](GDS.md#gds-prototype).
+V42.3–V42.4 establish full-content scope and the owner reconfirmed the acceptance categories and complete runs. [GDS catalog](GDS.md#gds-prototype) · [QAS readiness gate](QAS.md#qas-gate)
 
 ### 17.1 The selected scope
 
@@ -849,13 +851,15 @@ Environmental catalogs, optional-event archetypes, NPC service systems, progress
 
 All content must be reachable through legitimate progression. It need not be unlocked on a fresh profile or appear simultaneously in every run. A rare Fusion that has impossible prerequisites is not complete merely because its name is in a menu.
 
-### 17.2 Stable, complete and replayable
+### 17.2 Stable, Complete and Replayable
 
 Acceptance requires repeatable solo and co-op runs with consistent gameplay and no critical failures. Defects that block acceptance include reproducible game-breaking crashes, lost or duplicated progression, impossible victory caused by a bug, unobtainable approved Evolutions/Fusions, broken revival/co-op and unintended infinite interactions.
 
 Provisional balance, readable placeholder art, limited narrative detail, minor visual defects and legitimately overpowered builds do not automatically block prototype acceptance. Unequal weapon performance is not inherently a defect, though consistently nonviable choices or invalidated alternatives require attention under viability-first balance.
 
-The available discussion references twelve approved acceptance categories and a coverage table whose full contents are not recoverable. The GDS therefore provides **explicitly labeled derived operational checks**, not a fabricated quotation of the missing twelve-item list. These checks test the approved mechanics and make the prototype expectation useful without misrepresenting the source.
+The owner reconfirmed twelve V42.4 acceptance categories. In order, they cover **content completeness, core combat, build freedom, synergy consistency, world exploration, enemy behavior, catastrophic escalation, victory and defeat, cooperative gameplay, persistence and recovery, gameplay stability, and replayability**. [QAS acceptance categories](QAS.md#qas-acceptance)
+
+Seven complete-run conditions demonstrate the experience across runs. They cover **fresh-account solo victory, cooperative victory, early final victory, extended Collapse survival, advanced build development, defeat followed by subsequent runs, and disconnection and recovery**. The owner reconfirmed these names and coverage. The detailed evidence definitions are the current QAS. [QAS complete runs](QAS.md#qas-runs)
 
 ### 17.3 What the prototype should demonstrate
 
@@ -865,23 +869,24 @@ A party can separate, share eligible progression, preserve personal build owners
 
 Different hero, weapon and rune foundations must feel mechanically different. At least actual experiences across all approved content, including complete Evolution and Fusion prerequisite paths, must be demonstrable; adding a placeholder label for an unimplemented system is not full-content completeness.
 
-Useful playtesting may occur before full scope is complete. The full-content acceptance standard is not an instruction to withhold all intermediate play or create a technical roadmap here. Developers and agents decide implementation sequencing separately.
+Agents play and verify systems as soon as they can exercise them. Substantial owner evaluation of balance, readability and enjoyment follows the full-content readiness gate. [Implementation plan](IMPLEMENTATION_PLAN.md) · [QAS readiness gate](QAS.md#qas-gate)
 
 ## 18. Document ownership, open work and change discipline
 <a id="gdd-authority"></a>
 
-### 18.1 Read this pair together
+### 18.1 Document authority
 
 | Document | Authority |
 |---|---|
 | GDD | Game identity, intended experience, philosophies, thematic content and scope. |
-| GDS | Specific gameplay behavior, complete mechanical catalogs, formulas, eligibility, provisional targets and open-detail register. |
-| Technical designs and code | Implement approved behavior; they do not silently redefine it. |
+| [GDS](GDS.md#gds-authority) | Specific gameplay behavior, catalogs, formulas, eligibility, provisional rules and historical gaps. |
+| [TDS](TDS.md#tds-decisions) | Approved working architecture, technical invariants, dependency decisions and failure handling. |
+| [QAS](QAS.md#qas-gate) | Verification, regression, evidence and readiness. |
+| [AGENTS](../AGENTS.md#agents-phase) | Current mandate, responsibilities, approvals and repository conduct. |
+| [Implementation plan](IMPLEMENTATION_PLAN.md) | Package ordering, dependencies, delivery gates and progress. |
 | Old research, project notes and previous specifications | Historical context only where not superseded; conflicts must be reviewed rather than merged blindly. |
 
-These are freshly authored documents based on recoverable decisions, not a split copy of the rejected previous Markdown. The GDS records named earlier handoffs and decision IDs so future agents can distinguish direct approval, provisional balance and incomplete source detail.
-
-This pair does not choose an engine, network stack, repository structure, technical roadmap or sprint backlog. It also does not assert implementation status, completed testing or perfect coverage of conversation turns absent from the recoverable record.
+Apply the latest explicit owner decision within its scope, then use the document that governs the question. Preserve confirmed mechanics when deciding a technical or planning detail. Record a material conflict and its sources before changing a requirement. GDS §29 traces provisional decisions and remaining gaps.
 
 ### 18.2 The eight deferred groups
 
@@ -896,7 +901,7 @@ This pair does not choose an engine, network stack, repository structure, techni
 | UI/UX/accessibility refinement | Exact layout, device support, display limits and optional advanced assistance. |
 | Detailed narrative | Personal histories, dialogue, historical eras and additional revelations after prototype stability. |
 
-The GDS expands these into individually identifiable open questions, including source gaps. These items are not permission to revisit already approved fundamentals without agreement, nor a claim that every one must block initial implementation. Technical agents should record necessary provisional assumptions rather than present them as owner-approved design.
+The GDS distinguishes deferred work, historical gaps, delegated balance and the versioned prototype choices already made under OWNER-T04. Each genuinely unresolved detail needed for play receives a documented compatible rule and verification case before use. [GDS open register](GDS.md#gds-open)
 
 ### 18.3 Preserve decisions while allowing learning
 

@@ -1,17 +1,17 @@
 # Game Design Specification (GDS)
 
 **Project:** The new Unwritten / unfinished-world PvE game; commercial title not finalized.  
-**Design baseline:** Approved decisions through V42.6, including later explicit revisions.  
-**Document edition:** Rebuilt V42.6 / R1, 2026-11-25.  
+**Design baseline:** V42.6 plus owner decisions OWNER-T01–T04 and reconfirmed V42.4 acceptance coverage.\
+**Document edition:** V42.6 / R1 with the planning-baseline supplement, 2026-11-25.\
 **Companion:** [Game Design Document](GDD.md).  
-**Purpose:** Define player-visible behavior, content, numerical starting targets, interaction requirements and gameplay acceptance checks. This is not an engine selection, architecture freeze, implementation plan or instruction to modify a repository.
+**Purpose:** Define player-visible behavior, content, starting values, interaction requirements and gameplay acceptance checks. [Current authorization](../AGENTS.md#agents-phase)
 
 > This is a new compilation. The previously generated `game-design-specification.md` was not used as its source or copied into these documents. The recoverable approved discussion and earlier design handoffs form the source basis.
 
 
 ## Contents
 
-- [Document authority and reading contract](#gds-authority)
+- [Document authority and reading contract](#gds-authority) · [Owner decisions](#gds-owner) · [Provisional rules PR01–PR12](#gds-rules) · [Reconciliation register](#gds-reconciliation)
 - [1. Product and session contract](#gds-session)
 - [2. Controls, movement and targeting](#gds-controls)
 - [3. Combat events, inheritance and causal resolution](#gds-combat)
@@ -56,7 +56,7 @@
 ## Document authority and reading contract
 <a id="gds-authority"></a>
 
-The GDD owns the experience, intent, thematic identity and design priorities. This GDS owns specific gameplay behavior and the content definitions below. Technical specifications may choose how to realize these rules; they may not silently change them. A newer explicit owner decision overrides these documents and must subsequently be recorded in both where relevant.
+The GDD governs experience, intent, thematic identity and design priorities. This GDS governs gameplay and content. Apply the latest explicit owner decision within its scope and record it in the governing section. For an uncovered conflict affecting confirmed gameplay, preserve the confirmed rule, record both sources and obtain owner disposition before changing it. For genuinely unresolved details use OWNER-T04. The TDS governs architecture, the QAS governs verification, AGENTS governs authority to act and the implementation plan governs delivery. [Document responsibilities](GDD.md#gdd-authority)
 
 Status vocabulary:
 
@@ -65,22 +65,35 @@ Status vocabulary:
 | **CONFIRMED** | An approved mechanical or content decision preserved in the recoverable record. |
 | **BALANCE TARGET** | A numerical value approved for initial testing, not a measured or release-validated value. |
 | **DELEGATED TUNING** | A coefficient may be chosen provisionally during balancing without reopening the underlying mechanic. |
+| **PROVISIONAL PROTOTYPE RULE** | A versioned, adjustable behavior for a genuine gap under OWNER-T04. Each entry identifies the source, choice, rationale, adjustment and test. Its final design status awaits owner playtesting. |
 | **OPEN - DEEP DETAIL** | A specific behavior or authoring detail was deliberately left unresolved. It is not permission to invent a new permanent rule. |
 | **OPEN - SOURCE GAP** | A prior approval references material not visible in the recoverable source. The approval is preserved, but its missing contents are not fabricated. |
 | **DERIVED** | A calculation, consistency consequence or test case derived from approved rules, not a new decision. |
 | **SUPERSEDED** | A prior direction explicitly replaced by a later approval. It must not return accidentally. |
 
-Unqualified operative requirements in the main specification are CONFIRMED, except that numerical starting values are BALANCE TARGETS and explicitly labeled gaps remain open. Recommendations that were never selected, missing interactive widgets, fictional UI statistics and alternative options are not requirements.
+Unqualified operative requirements in the main specification are CONFIRMED, except that numerical starting values are BALANCE TARGETS and registered prototype rules and open details retain their indicated status. Recommendations that were never selected, missing interactive widgets, fictional UI statistics and alternative options are not requirements.
 
 ### Source basis and traceability
 
 - **DISC:** The available approval dialogue, principally V21-V42.6 and its visible earlier decisions. Version references such as `V39.12` identify the approved discussion, not software versions.
-- **M15:** `game-design-master-v15.1-full-discussion.md`, inspected directly. This preserves early product decisions, preparation pools, reward freezing, gateway behavior, revival, disconnects and combat ownership through V15.1. Its own early reconstruction limitations remain applicable.
+- **M15:** `game-design-master-v15.1-full-discussion.md`, recoverable in this repository with `git show 0f1c618:game-design-master-v15.1-full-discussion.md`. This preserves early product decisions, preparation pools, reward freezing, gateway behavior, revival, disconnects and combat ownership through V15.1. Its own early reconstruction limitations remain applicable.
 - **E010:** `new-game-design-source-of-truth-v0.10.md`, inspected directly for early design intent and cost semantics, with later decisions taking precedence.
 - **P27:** The confirmed product-constraints section of `A-Game-I-Actually-Play_Technical-Architecture-Blueprint_V27-draft.md`, inspected directly. Its engine shortlist, networking architecture, software contracts and milestones are proposals, not requirements imported here.
+- **Owner planning supplement, 2026-11-25:** Accepts the revised architecture as a working baseline for planning, records OWNER-T01–T04 and reconfirms the V42.4 categories and complete-run conditions. It adds no production verification evidence.
 - Legacy mobile/PvP tank notes, research recommendations and old implementation backlogs do not override the new PvE/co-op design.
 
-This compilation preserves supported decisions rather than claiming to be a verbatim export of every conversation turn. Early V0-V10 numbering is incomplete; V15.2-V20 is not available as a full decision transcript. Where later approvals or source handoffs preserve a rule, that rule is included. Missing exact content is registered at the end. No live repository comparison has been performed.
+This compilation preserves supported decisions rather than claiming to be a verbatim export of every conversation turn. Early V0-V10 numbering is incomplete; V15.2-V20 is not available as a full decision transcript. Where later approvals or source handoffs preserve a rule, that rule is included. Missing exact content is registered at the end.
+
+<a id="gds-owner"></a>
+
+### Owner decisions after V42.6
+
+| Decision | Governing gameplay requirement | Working contract |
+|---|---|---|
+| OWNER-T01 · Original-host recovery | Suspend on loss of the original host. Allow 180 seconds for its return and up to 30 additional seconds to synchronize after a timely return. Only the recovered original authority may resume after reconciliation. If recovery fails, end the interrupted run, preserve settled progression and reconcile recoverable authorized rewards. Automatic host migration and invented victory payouts are excluded. | [Cooperative play](#gds-coop) · [Recovery protocol](TDS.md#tds-host) |
+| OWNER-T02 · Prototype connectivity | Native Windows LAN/direct IP is sufficient for full cooperative gameplay. Practical browser compatibility is secondary. Browser multiplayer, mandatory accounts or relays, dedicated hosting and convenient Internet matchmaking fall outside the readiness requirement. | [Transport and authority](TDS.md#tds-network) |
+| OWNER-T03 · Hybrid durability | Commit important permanent rewards immediately. Batch ordinary enemy currency within a bounded interval. Settle all eligible earnings at ordinary defeat or graceful completion. Reconcile recoverable outstanding grants idempotently across sessions. | [Currency and crash exposure](#gds-durability) · [Issuance and receipt protocol](TDS.md#tds-save) |
+| OWNER-T04 · Provisional rules | Agents may record and test a temporary compatible rule for a genuinely unresolved detail. The grant covers the decision process. Individual defaults remain provisional and confirmed gameplay takes precedence. | [Prototype rule register](#gds-rules) · [QA triage](QAS.md#qas-triage) |
 
 ### Non-negotiable interpretation
 
@@ -93,11 +106,11 @@ A source-specific limit applies only to the relevant mechanic. Statements such a
 
 **Basis:** M15 sections 1-4, 11, 19; V21-V26; V33; V37; V40; V42.
 
-The game is a top-down/oblique, sprite-based, 2.5D-feeling fantasy PvE roguelite supporting solo and friend-based cooperative runs. It is a distinct product from the existing Jangan Lari reference game, not a mandate to replace that game's runtime or reproduce the earlier Diep-like tank/PvP concept. PC is the stronger priority; PC browser is acceptable and mobile support is desired. Exact initial distribution platforms remain open. The art direction does not mandate a true 3D engine.
+The game is a top-down/oblique, sprite-based, 2.5D-feeling fantasy PvE roguelite supporting solo and friend-based cooperative runs. It is a distinct product from the existing Jangan Lari reference game, not a mandate to replace that game's runtime or reproduce the earlier Diep-like tank/PvP concept. Native Windows PC is the prototype target. Browser compatibility is desirable where practical and mobile support remains a longer-term desire. Commercial release platforms remain open. The art direction does not mandate a true 3D engine.
 
 A normal run consists of preparation, physical exploration, automatic combat with manual hero actions, individual build development, optional encounters and regional bosses, and a voluntary final encounter. At world time **25:00**, World Collapse begins and the normal final gateway becomes available. The player can travel to the gateway and seek victory, or continue surviving the escalating world. There is no automatic defeat timer, shrinking playable boundary or maximum catastrophic tier.
 
-The target for a typical successful Normal Mode run is **25-40 minutes**. Early victories and substantially longer adventures are valid. An authored early-access discovery may permit an intentional final-arena transition before 25:00; it is not guaranteed in every procedural world and skips the Collapse escape stage. The exact early-access content is open.
+The target for a typical successful Normal Mode run is **25-40 minutes**. Early victories and substantially longer adventures are valid. An authored early-access discovery may permit an intentional final-arena transition before 25:00; it is not guaranteed in every procedural world and skips the Collapse escape stage. PR04 provides the prototype discovery route and its accessibility controls. [Provisional rules](#gds-rules)
 
 ### 1.1 Run preparation
 
@@ -121,21 +134,21 @@ The initial full-content roster is **9 heroes, 9 weapons, 5 runes, 18 acquired p
 
 Powers cannot be sold, removed, replaced or swapped to reclaim capacity during a normal run. Evolutions and Fusions cannot be toggled off or reverted. A fused component cannot be reacquired separately or used in a second simultaneous Fusion. Multiple disjoint Fusions may coexist; recursive Fusion tiers are not part of the approved design.
 
-**Clarification retained as open:** the capacity is unquestionably two rune slots. Early wording allowed "up to two" and later roster discussions said "exactly two." Whether deliberately empty rune slots must be allowed is not consistently resolved. Do not add a third slot or permit duplicates while resolving that preparation-UI question. The **810** loadout figure is derived for fully populated two-rune loadouts: `9 heroes * 9 weapons * C(5,2)`.
+Early wording allowed "up to two" while later roster discussions said "exactly two." Two distinct slots are confirmed. PR01 governs whether either may be empty in this prototype. Fully populated loadouts give **810** combinations using `9 heroes * 9 weapons * C(5,2)`. [Provisional rules](#gds-rules)
 
 ### 1.3 Prepared candidate pools and discovery
 
-The candidate reward pool is distinct from the ten powers actually acquired. Preparing a power makes it eligible to be offered; it does not grant ownership during the run. The candidate-pool size is not fixed by this specification. Earlier examples of 20 or 50 spaces were not approvals.
+The candidate reward pool is distinct from the ten powers actually acquired. Preparing a power makes it eligible to be offered; it does not grant ownership during the run. PR03 sets the provisional pool size. Earlier examples of 20 or 50 spaces were illustrative.
 
-Filled preparation spaces refer to known and otherwise eligible content. Blank spaces are genuine wildcards drawn from eligible broader content **when a reward is generated**, not a hidden list rolled at run start. A fully filled prepared pool receives no forced wildcard substitutions. A declined prepared power may appear again. Eligible prepared powers should receive eventual offer opportunities given sufficient progression, without a promise of automatic acquisition or of being seen before an early defeat. Exact scheduling remains open.
+Filled preparation spaces refer to known and otherwise eligible content. Blank spaces are genuine wildcards drawn from eligible broader content **when a reward is generated**, not a hidden list rolled at run start. A fully filled prepared pool receives no forced wildcard substitutions. A declined prepared power may appear again. Eligible prepared powers should receive eventual offer opportunities given sufficient progression, without a promise of automatic acquisition or of being seen before an early defeat. PR03 sets the current offer schedule. [Provisional rules](#gds-rules)
 
-Seeing an ordinary power can record knowledge of it; acquisition is not required merely to recognize it. **Knowledge is not ownership:** for the six expanded powers, the approved discovery accomplishment and permanent-currency unlock govern future availability. The relationship between wildcard encounter knowledge and those specific unlock accomplishments must not silently make every locked power purchasable merely by seeing it. This boundary is explicitly listed for deeper clarification.
+Seeing an ordinary power can record knowledge of it; acquisition is not required merely to recognize it. **Knowledge is not ownership:** for the six expanded powers, the approved discovery accomplishment and permanent-currency unlock govern future availability. The relationship between wildcard encounter knowledge and those specific unlock accomplishments must not silently make every locked power purchasable merely by seeing it. PR02 defines fresh-profile access and preserves the six named discovery and ownership paths. [Provisional rules](#gds-rules)
 
 ### 1.4 Reward generation and choices
 
 Each level grants one ordinary power selection. Shared party XP produces shared levels, but each player receives their own choices. Ordinary event/secret power rewards and appropriate merchant rewards use the same preparation and eligibility framework. Explicitly designated special events may offer outside-pool content; ordinary rewards may not silently do so.
 
-Options are generated and frozen **when the reward is earned**, not when its panel opens. Players may accumulate multiple pending rewards and choose later in real time. Opening, closing, relocating, changing a build or dying cannot reroll them. The eligible Evolution rotation advances on reward generation. Multiple eligible standard Evolutions rotate through **one bonus Evolution option per ordinary selection**; the player chooses one reward total. Fusion becomes eligible in subsequent reward selections without a consumable catalyst. The exact shared presentation budget when both Fusion and Evolution candidates are eligible is open; do not invent multiple free selections.
+Options are generated and frozen **when the reward is earned**, not when its panel opens. Players may accumulate multiple pending rewards and choose later in real time. Opening, closing, relocating, changing a build or dying cannot reroll them. The eligible Evolution rotation advances on reward generation. Multiple eligible standard Evolutions rotate through **one bonus Evolution option per ordinary selection**; the player chooses one reward total. Fusion becomes eligible in subsequent reward selections without a consumable catalyst. Declined eligible transformations can return. PR03 specifies the prototype card budget and separate rotations when both kinds qualify. Recheck the required retained catalyst property before selection. [Provisional rules](#gds-rules)
 
 Owned eligible powers appear as next-rank upgrades rather than duplicate acquisitions. A max-rank, conflicting or otherwise invalid choice cannot be taken. At full capacity, rank upgrades, eligible transformations and applicable alternatives remain available. If all choices in an old frozen reward become unusable, convert the reward to non-power compensation rather than rerolling its original options. Exact compensation is delegated tuning, with category details open where they change reward identity.
 
@@ -253,7 +266,7 @@ Use the following gameplay order for each originating combat event:
 
 A dead target cannot receive new ordinary statuses or displacement. Recorded death state can still satisfy an eligible elimination rule. Secondary effects cannot retroactively change completed damage, install a barrier against the hit that created it or resurrect an ordinary dead character through healing.
 
-Same-hit new statuses do not satisfy pre-existing-status conditions by default. Multiple compatible reactions may occur from one hit. Where reactions consume the same finite resource/status, use authored priority and a stable tie-breaker, revalidate remaining eligibility and never double-spend. Priority is not a player-programmed reaction queue. Exact order between a parent hit and its separately generated lightning event, and the visibility of a newly applied status to that child, must follow the pre-existing-state rule without silently bypassing it; the unresolved ancestry boundary is recorded in the open register.
+Same-hit new statuses do not satisfy pre-existing-status conditions by default. Multiple compatible reactions may occur from one hit. Where reactions consume the same finite resource/status, use authored priority and a stable tie-breaker, revalidate remaining eligibility and never double-spend. Priority is not a player-programmed reaction queue. Exact order between a parent hit and its separately generated lightning event, and the visibility of a newly applied status to that child, must follow the pre-existing-state rule without silently bypassing it; PR10 specifies the provisional ancestry comparison. Use PR12 for otherwise tied finite claims. [Provisional rules](#gds-rules)
 
 No universal reaction cooldown or arbitrary universal chain-depth cutoff is introduced. Each effect declares valid continuation, consumption, cooldown, lifetime or other termination conditions. Intentional every-hit reactions and legitimate recursive elimination chains remain supported. Invalid zero-resource self-generation is not permitted. Visual batching and audio suppression must not silently remove genuine gameplay outcomes.
 
@@ -280,7 +293,7 @@ Validate alive/eligible character state, cooldown readiness, mandatory resources
 
 Supported explicit payment scopes are per activation, per channel/pulse interval, per target only when stated, and follow-up activation. A sword hitting ten enemies pays one per-activation price, not ten. Mana depletion after commitment does not cancel an already paid attack; a later child checks its own affordability, and child failure does not undo its parent. Base weapons have no mandatory mana/ammunition expenditure; compatible modifications may add real costs and do not become free when unaffordable.
 
-HP payments bypass barriers and ordinary damage mitigation, can be lethal when permitted and do not count as hostile damage. Actual HP paid determines sacrifice-based benefits. The early explicit lethal-payment exception remains: if paying the activation's HP price kills the caster, the affected cast ends; generic commitment does not allow that self-killed cast to complete. Previously committed unrelated effects follow post-death rules. Automatic potentially fatal HP-cost activations are suppressed during the special revival-protection window, not cast for free. Harmonic Burst remains usable at zero Resonance under V39.20; exact zero-charge delivery is open.
+HP payments bypass barriers and ordinary damage mitigation, can be lethal when permitted and do not count as hostile damage. Actual HP paid determines sacrifice-based benefits. The early explicit lethal-payment exception remains: if paying the activation's HP price kills the caster, the affected cast ends; generic commitment does not allow that self-killed cast to complete. Previously committed unrelated effects follow post-death rules. Automatic potentially fatal HP-cost activations are suppressed during the special revival-protection window, not cast for free. Harmonic Burst remains usable at zero Resonance under V39.20. PR09 supplies its provisional zero-charge delivery. [Provisional rules](#gds-rules)
 
 Momentum Charge is spent by the next eligible weapon activation, not every beam tick. Chorus Charge is consumed by its eligible distinct-source activation. Bloom Reserve specifically requires a successful eligible automatic attack, not merely a miss-prone activation; its earlier hit condition is not removed by the generic resource table. Crimson Fortification consumes real reserves only on valid fortification. Exact aggregation of multiple independent optional costs remains a deep-detail item.
 
@@ -397,7 +410,7 @@ A post-death owned Bleed kill can produce eligible Death Bloom under the later c
 
 The session is a self-contained solo or friend-co-op run, not an MMO. Teammates may split across regions and special realms. They share world time, catastrophic tier, eligible XP/levels, explored geography and applicable world outcomes. They have individual heroes, weapons, rune choices, candidate pools, acquired powers, rewards, charges, permanent unlocks, Codex verification and Trade Shard wallets.
 
-Global Party Scaling uses the party size locked at run initialization. Separation, death and temporary disconnection do not weaken enemies. Maximum supported party size, joining after start, permanent departure and reconnection deadlines are not numerically specified. Four-player tables are examples of the formula, not an approved party cap.
+Global Party Scaling uses the party size locked at run initialization. Separation, death and temporary disconnection do not weaken enemies. PR07 distinguishes the one-to-four-player verification envelope and prototype admission from the open permanent party limit. PR06 governs guest survivor grace. Original-host return has its own deadline. [Provisional rules](#gds-rules) · [Owner decisions](#gds-owner)
 
 No ordinary hostile player-to-player collision damage or forced displacement is introduced. Friendly-fire restrictions remain applicable to owned hazards; a full per-effect friendly-fire policy is an open implementation-facing gameplay matrix. Protected NPC rules remain independent.
 
@@ -407,7 +420,7 @@ The latest V42.2 decision applies to regional boss blessings, events, quest enco
 
 Shared XP remains shared. Shared discovered geography remains shared knowledge, not universal physical loot entitlement. Final boss victory is the explicit party-wide exception, including dead eligible party members. Individual mastery, personal Evolution acquisition, bargain acceptance and permanent ownership remain subject to their own requirements; proximity does not acquire another player's Evolution or prove a personal weapon challenge.
 
-Exact proximity boundaries, departure/return, dead participants, disconnected participants and persistent world-quest details are **OPEN - DEEP DETAIL**, explicitly deferred by the owner. Do not quietly reintroduce minimum damage or global reward distribution to solve them.
+PR05 sets the provisional local footprint, departure/return and dead/disconnected eligibility at settlement. Persistent non-encounter world quests still need objective-specific rules. [Provisional rules](#gds-rules)
 
 ### 5.3 Kill, assist and participation are different
 
@@ -435,11 +448,13 @@ A body stays where it fell: no carrying, dragging, pushing or convenience telepo
 
 Dead players can view their corpse or a living teammate across regions, communicate and use permitted party pings, inspect revive wait/progress and choose their own earned frozen rewards. They cannot independently scout hidden geography, attack, interact or gain omniscient offscreen information.
 
-A disconnected character remains at the last valid world position, stationary and fully vulnerable. No invulnerability, safe relocation, automatic disappearance or AI survival pilot is implied. Committed attacks follow ordinary persistence. Alive reconnection resumes control at the actual location; dead reconnection returns to the dead-player experience.
+A disconnected character remains at the last valid world position, stationary and fully vulnerable. No invulnerability, safe relocation, automatic disappearance or AI survival pilot is implied. Committed attacks follow ordinary persistence. A guest killed while disconnected leaves a normal corpse with its usual timer and rescue eligibility. Alive reconnection resumes control at the actual location; dead reconnection returns to the dead-player experience.
 
 A disconnected living character counts toward party survival only during a limited reconnection grace period. After that period they can remain physically alive but no longer prevent a wipe. If a connected living player remains, the run continues. If no connected survivor remains, an unexpired living-disconnect grace can temporarily sustain the session; once no eligible survivor remains, apply terminal rules. This is not a post-death revival grace or a pause.
 
-Disconnect duration, auto-attack initiation while disconnected, host-loss behavior, exact boundary races and late-join rules remain open. P27 records an earlier no-host-migration/recovery direction but not its complete rules; this document does not fabricate a networking/recovery protocol. If future co-op-only powers are authored, they retain their slots and become dormant without a qualifying connected teammate, with no automatic solo substitute; none is silently added to the 18-power catalog. Explicit co-op-only powers are excluded from deliberately solo preparation/reward pools. Most assist-oriented designs should retain useful solo-compatible behavior when individually authored; that guideline does not grant an unapproved fallback to a deliberately co-op-exclusive power.
+PR06 provisionally fixes the guest survivor window, new automatic/manual commitments and its deadline tie. Expiry alone neither kills the guest nor precludes reconnecting to a still-active run. PR07 governs reclaiming the initialized seat. Loss of the original host suspends play under OWNER-T01 while host continuity and state are checked. [Provisional rules](#gds-rules) · [Owner decisions](#gds-owner)
+
+If future co-op-only powers are authored, they retain their slots and become dormant without a qualifying connected teammate, with no automatic solo substitute; none is silently added to the 18-power catalog. Explicit co-op-only powers are excluded from deliberately solo preparation/reward pools. Most assist-oriented designs should retain useful solo-compatible behavior when individually authored; that guideline does not grant an unapproved fallback to a deliberately co-op-exclusive power.
 
 ## 6. Hero catalog
 <a id="gds-heroes"></a>
@@ -469,7 +484,7 @@ Primal Instinct and Close Call may both activate when their separate evasion con
 
 **Identity:** Qualifying ability interactions generate resources for linked attacks. **Passive: Resonance.** Eligible interactions accumulate charges; **initial target: maximum 5**. Not every contact or repeated effect automatically qualifies.
 
-**Manual: Harmonic Burst.** Converts available charges into additional linked attacks through authored eligibility. V39.20 preserves usability at zero charges; a zero-charge cast is not rejected solely for lacking optional charges. A valid cast that hits nothing still commits applicable cost/cooldown. The precise charge-generation catalog, base zero-charge effect, linked delivery and consumption coefficients remain open/delegated rather than inferred.
+**Manual: Harmonic Burst.** Converts available charges into additional linked attacks through authored eligibility. V39.20 preserves usability at zero charges; a zero-charge cast is not rejected solely for lacking optional charges. A valid cast that hits nothing still commits applicable cost/cooldown. PR09 supplies the provisional zero-charge effect. Remaining charge-generation, linked-delivery and consumption details retain their open or delegated status. [Provisional rules](#gds-rules)
 
 Resonance is hero-owned, separate from Architect Structural Resonance, Arcane Tether Resonant Current, and any similarly named effect. Legitimate rune, summon and Fusion interactions may participate when explicitly compatible, without creating artificial attack-source identities.
 
@@ -867,7 +882,7 @@ The Rank 5 behavior explicitly modifies the earlier consistent-damage baseline. 
 Survival Instinct weakens as HP recovers. Recovery Surge is not automatic healing or lethal prevention; eligible offense must still occur. Exact threshold/rearm behavior remains authored.
 
 <a id="evolution-e07a"></a>
-**E07A - Crimson Reservoir. Recipe: Vital Exchange 5 + Reprisal Pulse.** Store eligible excess offensive healing in a capped reserve for later HP restoration. The reserve is not a damage-absorbing barrier, does not directly pay HP costs and does not automatically save a lethal hit. Its release conditions/rate remain **OPEN - DEEP DETAIL**, explicitly deferred earlier. Preserve baseline healing and rank milestones.
+**E07A - Crimson Reservoir. Recipe: Vital Exchange 5 + Reprisal Pulse.** Store eligible excess offensive healing in a capped reserve for later HP restoration. The reserve is not a damage-absorbing barrier, does not directly pay HP costs and does not automatically save a lethal hit. Preserve baseline healing and rank milestones. PR08 supplies the provisional release conditions, rate and barrier replacement test. [Provisional rules](#gds-rules)
 
 <a id="evolution-e07b"></a>
 **E07B - Sanguine Fury. Recipe: Vital Exchange 5 + Battle Tempo.** Qualifying actual offensive healing generates bounded temporary offensive charge, strengthening compatible attacks while preserving HP restoration. Later V39.19 fixes actual HP restored as the default; unused theoretical overheal does not automatically charge it. Normal offensive snapshots apply. No unlimited charge accumulation.
@@ -1042,7 +1057,7 @@ Sword/Spear/Daggers/Whip gain compatible reach/geometry; Staff sigil radius; War
 **E15A - Kinetic Expansion. Recipe: Spatial Reach 5 + Momentum Charge.** An eligible attack releasing full Momentum Charge receives additional compatible spatial amplification; its charged shockwave also benefits. This is a movement-earned expanded activation, not universal constant extra damage.
 
 <a id="evolution-e15b"></a>
-**E15B - Expanding Domain. Recipe: Spatial Reach 5 + Lingering Essence.** Compatible persistent attack fields gradually expand during their active lifetime to a maximum. Geometry genuinely changes, but expansion neither adds damage ticks nor extends lifetime. Baseline spatial benefits remain global. Dynamic expansion is an explicit exception to activation-fixed geometry; exact Outer Edge reference geometry is an open evaluation detail.
+**E15B - Expanding Domain. Recipe: Spatial Reach 5 + Lingering Essence.** Compatible persistent attack fields gradually expand during their active lifetime to a maximum. Geometry genuinely changes, but expansion neither adds damage ticks nor extends lifetime. Baseline spatial benefits remain global. Dynamic expansion is an explicit exception to activation-fixed geometry; PR10 defines the provisional Outer Edge comparison. [Provisional rules](#gds-rules)
 
 **Discovery - Beyond the Boundary:** damage a required distinct-enemy count through one eligible area attack, achievable with starter Sword/Staff or previously available attacks.
 
@@ -1189,7 +1204,7 @@ Multiple links keep their shared per-target damage accounting. Interior pulses a
 
 **Thermal Transmission:** A qualifying Thermal Shock on an enemy intersecting an active owned Binding Circuit sends damaging magical thermal pulses along compatible actual links. Physical obstructions can stop propagation. A pulse must genuinely encounter a valid target.
 
-**Elemental Transfer:** An eligible Eternal Ember heat pulse against a target on a link can conduct a bounded Burn portion to other Chilled enemies genuinely reached. Ordinary Thermal Transmission does not transfer Burn. Source Burn/intensity and Chill duration remain intact; copied potency, duration and ownership obey transfer restrictions. Transfer cannot automatically refresh a stronger existing Burn.
+**Elemental Transfer:** An eligible Eternal Ember heat pulse against a target on a link can conduct a bounded Burn portion to other Chilled enemies genuinely reached. Ordinary Thermal Transmission does not transfer Burn. Source Burn/intensity and Chill duration remain intact; copied potency, duration and ownership obey transfer restrictions. Transfer cannot automatically refresh a stronger existing Burn. PR10 specifies the provisional equal/weaker/stronger comparison per owner. [Provisional rules](#gds-rules)
 
 | Preserved | Integrated / new |
 |---|---|
@@ -1308,7 +1323,7 @@ Physical exploration reveals map geometry; discovered geometry persists during t
 
 Layered Discovery supports observation, experimentation, knowledge and emergent interactions. Visual cracks, unusual vegetation, water concealment, inscriptions, contextual audio, NPC clues, mechanisms, enemy-caused destruction and unusual compatible reactions can reveal optional content. No automatic undiscovered-secret icon or "secret nearby" announcement. Specialization can open optional alternatives but mandatory paths cannot require a specific hero/rune/power. Prior knowledge may help across runs without guaranteeing the same location.
 
-Completed mechanisms and opened shortcuts persist. Backtracking does not reset defeated entities or completed events, although normal new spawning continues. The earlier rule that abandoned incomplete puzzle state resets remains subject to the open definition of area abandonment in split co-op; do not reset a teammate's active puzzle simply because one player leaves.
+Completed mechanisms and opened shortcuts persist. Backtracking does not reset defeated entities or completed events, although normal new spawning continues. PR11 defines when the last relevant occupant has abandoned an incomplete resettable puzzle. [Provisional rules](#gds-rules)
 
 ### 11.4 Special realms
 
@@ -1321,7 +1336,7 @@ Completed mechanisms and opened shortcuts persist. Backtracking does not reset d
 
 These are independent optional interconnected environments, not one-room loot pockets or compulsory locked trials. Players can enter/leave independently through valid exits without completing every encounter. World time and shared XP continue across realms. Existing builds/resources carry over under normal lifecycle rules. Combat requires compatible spatial presence; links/attacks cannot connect across dimensions merely because XP is shared.
 
-Corpses remain in their real realm, requiring physical rescue. Revealed entrances provide applicable shared knowledge. Collapse applies globally; realms are not indefinite sanctuaries, and valid exits remain reachable. Existing realm content/puzzles may continue; new optional event starts are disabled after Collapse, subject to the existing-content interpretation recorded as open.
+Corpses remain in their real realm, requiring physical rescue. Revealed entrances provide applicable shared knowledge. Collapse applies globally; realms are not indefinite sanctuaries, and valid exits remain reachable. Existing realm content/puzzles may continue; new optional event starts are disabled after Collapse, with PR11 distinguishing dormant trials, continuing activities and exits.
 
 ### 11.5 World Collapse and the final gateway
 
@@ -1335,7 +1350,7 @@ Overworld AI, spawns, projectiles, hazards and pending catastrophe activity stop
 
 Progressive Reality Fracturing creates localized reality fissures, gravity anomalies, temporary unstable geometry, distorted ground and traveling storms while scenery visibly deteriorates. Ground/obstacle damage and control follow actual compatibility, not invisible universal punishment. Essential routes, final gateway access and body-rescue routes remain physically possible. No shrinking boundary or automatic destruction of all remaining secrets. Hazard overlaps must preserve readable warnings and feasible escape geometry.
 
-Existing events can continue; no new optional challenge/support event begins after 25:00. Accepted NPC interactions/services and existing mechanisms remain available. This restriction does not stop Hunter arrivals, combat drops or automatic catastrophic hazards, which are continuing world escalation rather than optional event activation. Exact semantics for newly discovering a dormant puzzle after Collapse remain flagged rather than silently overridden.
+Existing events can continue; no new optional challenge/support event begins after 25:00. Accepted NPC interactions/services and existing mechanisms remain available. This restriction does not stop Hunter arrivals, combat drops or automatic catastrophic hazards, which are continuing world escalation rather than optional event activation. PR11 governs a previously dormant trial discovered during Collapse. [Provisional rules](#gds-rules)
 
 ## 12. Regional enemies and elites
 <a id="gds-enemies"></a>
@@ -1491,7 +1506,7 @@ Adaptive Assembly was not selected. The boss does not gain an automatic reinforc
 
 ### 13.1 Scaling and rewards
 
-All regional bosses participate in full catastrophic maximum-HP/damage scaling and compatible bounded speed/control-resistance escalation, global party scaling and their regional baseline. Existing absolute current HP is preserved at upgrades; real healing may fill the larger maximum. Committed attacks keep snapshots. Defeated regional bosses do not respawn because a new tier begins. Blessings remain fully available without repeat-kill penalties or mandatory boss completion. Exact local participation boundaries remain open under V42.2.
+All regional bosses participate in full catastrophic maximum-HP/damage scaling and compatible bounded speed/control-resistance escalation, global party scaling and their regional baseline. Existing absolute current HP is preserved at upgrades; real healing may fill the larger maximum. Committed attacks keep snapshots. Defeated regional bosses do not respawn because a new tier begins. Blessings remain fully available without repeat-kill penalties or mandatory boss completion. The prototype applies PR05 to V42.2 participation. [Provisional rules](#gds-rules)
 
 ## 14. Universal invaders and catastrophe Hunters
 <a id="gds-hunters"></a>
@@ -1606,7 +1621,7 @@ Defeating the Creator completes the run immediately under the terminal causal ru
 
 Every victory grants authored common currency, rare currency and a substantial completion bonus. First victory records its achievement and unlocks foundational challenges plus access to additional discoverable content. Unique hero, weapon, build and condition accomplishments can grant permanent rewards. There is no mandatory hidden true ending or requirement to repeat victories to make the first genuine.
 
-Earned permanent currencies/discoveries survive defeat under the **later V40.13 economy**, while victory-only payouts require victory. Temporary powers/ranks/Evolutions/Fusions, blessings, Catastrophe Essence, bargains and Trade Shards reset at run end. Exact victory quantities, detailed unlock contents and disconnected-recipient handling remain open/delegated.
+Earned permanent currencies/discoveries survive defeat under the **later V40.13 economy**, while victory-only payouts require victory. Temporary powers/ranks/Evolutions/Fusions, blessings, Catastrophe Essence, bargains and Trade Shards reset at run end. Victory quantities and further reward details remain delegated or open. PR05 sets prototype disconnected-recipient eligibility. OWNER-T03 protects delivery of recoverable authorized awards across sessions. [Provisional rules](#gds-rules) · [Reward durability](#gds-durability)
 
 ## 16. Environmental objects, momentum and hazards
 <a id="gds-environment"></a>
@@ -1908,6 +1923,8 @@ New qualifying kills and valid world activity may generate bounded resources wit
 
 **Basis:** M15 preparation/discovery rules where not superseded; V33.8; V36; V37.9, V37.17, V37.22, V37.30; V40.3-V40.17; V42.
 
+<a id="gds-durability"></a>
+
 ### 20.1 Three currency roles
 
 | Currency | Purpose | End-of-run treatment |
@@ -1917,6 +1934,8 @@ New qualifying kills and valid world activity may generate bounded resources wit
 | Trade Shards | In-run merchant/services economy | Start at zero, separate personal wallets; unspent shards expire at run end. |
 
 The older M15 blanket rule that exploration special currency is unsecured until victory is **superseded by the later approved V40.13 permanent-currency retention rules**. Victory-only payouts are still unearned until victory; retaining earned currency does not award a lost run the Creator's completion bonus. No automatically assumed fourth banked/unsecured currency is added.
+
+**Reward durability (OWNER-T03).** Record important permanent progression immediately, including eligible discoveries, personal recipe verification, purchases and victory entitlements. Ordinary enemy currency may accumulate briefly. The current **provisional maximum is five seconds** from the oldest pending earning during active play. Ordinary defeat and graceful completion settle all eligible earnings. An abrupt crash can lose ordinary earnings still awaiting durable commitment. For an outstanding authorized grant, reconcile the original issuer's record with the recipient's durable receipt after reconnect or in a later session. Redelivery applies each grant at most once. If all authoritative evidence needed for an award has been lost, disclose what cannot be recovered, including any unknown amount. [Persistence contract](TDS.md#tds-save)
 
 Trade Shards arise from eligible enemy defeats, exploration and events. Eligible shared rewards credit individual wallets; one player cannot involuntarily spend another's. No conversion into permanent currencies. Permanent currencies do not directly buy extra power selections during an active run. Services may offer discovery opportunities without constituting shard-to-permanent-currency exchange.
 
@@ -1953,7 +1972,7 @@ Heroes, weapons, expanded runes and the six expanded acquired powers follow appr
 | Momentum Charge | Unbroken Motion. |
 | Converging Strikes | Unified Offensive. |
 
-The first twelve power designs are the initial catalog, but not all were explicitly granted to every new profile immediately: V30.1 described early availability plus discoveries across runs. Their exact initial pool/unlock allocation remains open. This specification does not silently make all 18 starter rewards or invent twelve unapproved unlock quests.
+The first twelve power designs are the initial catalog, but not all were explicitly granted to every new profile immediately: V30.1 described early availability plus discoveries across runs. PR02 makes their prototype availability explicit while preserving the distinct unlock conditions for P13–P18. [Provisional rules](#gds-rules)
 
 ### 20.4 Permanent statistical upgrades
 
@@ -2000,7 +2019,7 @@ XP-earned and exceptional additional selections share the same limits. Overflow 
 
 ### 21.4 Fair randomness and no hidden recipe steering
 
-Contextual reward distribution considers open capacity and existing rank opportunities rather than forcing a new power at every reward or flooding a full build with invalid acquisitions. It does not boost the probability of a tracked desired recipe, guarantee a particular build, reroll pending choices or auto-select an Evolution. Explicit prepared-pool offer opportunities and wildcard boundaries remain. Final pool sizes, card count, weights and fair scheduling are open quantitative design details.
+Contextual reward distribution considers open capacity and existing rank opportunities rather than forcing a new power at every reward or flooding a full build with invalid acquisitions. It does not boost the probability of a tracked desired recipe, guarantee a particular build, reroll pending choices or auto-select an Evolution. Explicit prepared-pool offer opportunities and wildcard boundaries remain. PR03 supplies provisional size, card budget and rotation. Unassigned weights remain delegated tuning. [Provisional rules](#gds-rules)
 
 ## 22. Challenges, records and balance validation
 <a id="gds-challenges"></a>
@@ -2340,28 +2359,39 @@ The Stranger is **The Discarded Creation**: rejected as flawed, incompletely era
 
 Include the core world, progression, co-op, environmental, NPC, discovery, combat, Collapse, victory/defeat, persistent progression and functional UI systems described here. Full content means functional distinct mechanics, not mere icons or menu entries. It does not make every procedural landmark or NPC appear in one run, make locked content immediately owned by a fresh account, or require finishing every future dialogue/quest variant before acceptance.
 
+<a id="gds-acceptance"></a>
+
 ### 27.2 Stable, Complete and Replayable
 
 Acceptance requires repeated solo and cooperative complete runs with consistent combat/progression/revival/outcomes and playable performance. Approved content must be genuinely obtainable under its requirements, not only accessible through a developer-only shortcut. Fresh-account victory and viable starter builds remain design goals. Different coherent builds must be playable; not every combination must have equal effectiveness.
 
-The visible approval record referred to **12 acceptance categories and required playtesting coverage**, but did not display that exact list. The following is a **DERIVED operational organization of supported acceptance requirements**, not a claim to reproduce the missing twelve-item table verbatim:
+The owner reconfirmed the following V42.4 category names and coverage. The examples describe player-observable outcomes. The QAS governs the evidence and pass criteria. [Acceptance categories](QAS.md#qas-acceptance)
 
-| QA domain | Derived acceptance evidence |
-|---|---|
-| 1. Complete run loop | Preparation, play, gateway, final boss, win/loss, results and another run function. |
-| 2. Content accessibility | All approved roster entries and recipes have valid acquisition/eligibility paths. |
-| 3. Build progression | Pools, frozen selections, ranks, capacity, Evolutions/Fusions and overflow obey rules. |
-| 4. Combat correctness | Geometry, event eligibility, defense, snapshots, costs and ownership are consistent. |
-| 5. Legitimate complex chains | Supported rune/power/Fusion chains work without duplicated effects or runaway invalid loops. |
-| 6. Enemy/ecosystem behavior | Factions, elites, bosses and Hunters express their actual identities and warnings. |
-| 7. Exploration/environment | Generated routes, secrets, puzzles, objects and optional realms remain functional/reachable. |
-| 8. Cooperative continuity | Shared progression/separation, local reward eligibility, death, revival and reconnect rules operate consistently. |
-| 9. Persistence/economy | Earned progress is retained correctly; no duplicate rewards, losses or reset exploits. |
-| 10. Escalation/endgame | Approved timing/scaling, independent final-boss difficulty and terminal outcomes function. |
-| 11. Functional readability/control | Rebindable inputs, nonblocking choices, essential HUD and actual hazards are readable. |
-| 12. Replayability/stability | Repeated complete sessions remain stable enough for meaningful player refinement. |
+| ID | Confirmed acceptance category | Gameplay outcome |
+|---|---|---|
+| AC01 | Content completeness | Every approved entry has a legal acquisition or encounter path and its distinct behavior works. |
+| AC02 | Core combat | Geometry, costs, timing, ownership and defenses resolve consistently. |
+| AC03 | Build freedom | Heroes, weapons, runes, ranks, frozen offers, Evolutions, Fusions and overflow support different coherent builds. |
+| AC04 | Synergy consistency | Eligible reactions and long chains work. Each qualifying effect spends or grants its resource once. |
+| AC05 | World exploration | Traversable routes connect regions, secrets, puzzles, objects and optional realms. |
+| AC06 | Enemy behavior | Factions, ordinary enemies, elites, bosses, manifestations and Hunters express their authored behaviors and warnings. |
+| AC07 | Catastrophic escalation | The clock, tier escalation and Hunter rewards hold throughout extended play. Final-boss difficulty remains independent of tier. |
+| AC08 | Victory and defeat | Preparation, final transition, terminal result, settlement and return to preparation form a complete loop. |
+| AC09 | Cooperative gameplay | Players can separate, share XP, earn local rewards, rescue, reconnect and finish together. |
+| AC10 | Persistence and recovery | Settled progress survives interruptions. Recoverable grants reach the correct recipient once. |
+| AC11 | Gameplay stability | Repeated sessions remain responsive with readable hazards, remapped controls, an operable HUD and non-blocking choices. |
+| AC12 | Replayability | Subsequent runs offer varied routes and coherent builds with the proper persistent and run-scoped state. |
 
-Exact device/FPS/latency targets, sample sizes, pass rates and technical test methods are open. These are gameplay evidence categories, not a prescribed test framework or production-release certification.
+Seven complete-run conditions are required across the evidence set. A run can cover several conditions when its observed path meets each one. [Complete-run evidence](QAS.md#qas-runs)
+
+| ID | Confirmed condition | ID | Confirmed condition |
+|---|---|---|---|
+| CR1 | Fresh-account solo victory | CR5 | Advanced build development |
+| CR2 | Cooperative victory | CR6 | Defeat followed by subsequent runs |
+| CR3 | Early final victory | CR7 | Disconnection and recovery |
+| CR4 | Extended Collapse survival | | |
+
+The category names and coverage are owner-confirmed. QAS IDs, test methods and device measurements belong to the working verification specification. Historical table wording and thresholds remain unrecovered (S04).
 
 ### 27.3 Acceptance blockers and non-blockers
 
@@ -2438,7 +2468,7 @@ These describe observable behavior to verify, not tests already executed or a te
 | QA61 | Dense personal/party attack effects | Critical enemy tells/player position remain readable; cosmetic reduction does not delete combat. |
 | QA62 | Finish or lose a run | Simple correct summary, retained earned permanent rewards, no unearned victory payout. |
 
-No runtime tests, player validation or repository verification have been performed by creating this document. These scenarios are a specification deliverable.
+QA01–QA62 define required behavior. Production verdicts require evidence from the build under test. [QAS scenario mappings](QAS.md#qas-scenarios)
 
 ## 28. Revision and supersession register
 <a id="gds-revisions"></a>
@@ -2501,7 +2531,9 @@ These entries are deliberately separated from confirmed behavior. They do not re
 | D7 - Detailed UX/accessibility | Final layouts, accessibility refinements, history retention and optional later informational assistance. |
 | D8 - Detailed story | Character biographies, names, eras, inscriptions, dialogue and deeper revelations after stable prototype. |
 
-### 29.2 Specific unresolved mechanical boundaries
+### 29.2 Mechanical boundaries from the R1 open register
+
+The O IDs preserve the original questions. Read each alongside any applicable PR in §29.4 and the owner decisions. A rule can resolve one part for the prototype while other parts remain open. For essential uncovered details, record a compatible choice and test before use. [Prototype rules](#gds-rules) · [Owner decisions](#gds-owner)
 
 | ID | Open point | What is already fixed |
 |---|---|---|
@@ -2533,7 +2565,7 @@ These entries are deliberately separated from confirmed behavior. They do not re
 | O26 | Shield durability, shield contact trigger permissions and ground/AoE obstruction classes | Real interception distinct from defense/barriers; no automatic omnidirectional immunity. |
 | O27 | Exact projectile/beam overlap rules at extreme attack frequency and active-entity limits | No arbitrary loss of valid attacks; authored source limits and real per-target cadence. |
 | O28 | Fate of pending costs/child events at rare same-time death, expiry and revive boundaries | Immediate death; current causal-group completion; no ordinary healing resurrection. |
-| O29 | Disconnect automatic recasting, grace duration, host-loss and reconnect races | Character remains vulnerable; finite survivor grace; no automatic reset/invulnerability. |
+| O29 | Guest recasting, survivor grace and reconnect races | Vulnerable guest and finite survivor grace are confirmed. PR06 supplies the prototype window and boundary rule. Original-host recovery is settled by OWNER-T01. |
 | O30 | Maximum party size, late join/permanent leave and challenge access | Party scaling locked at initialization; four is an example, not approved cap. |
 | O31 | V42.2 participation radius, late exit, dead/disconnected eligibility and claim timing | Nearby inclusion with no damage minimum; shared XP and final victory distinct. |
 | O32 | Local-event participant wave adaptation after global party-scaling adoption | Do not replace or weaken global baseline; no hidden duplicate scaling. |
@@ -2555,11 +2587,48 @@ These entries are deliberately separated from confirmed behavior. They do not re
 | S01 | Full early V0-V10 transcript and V15.2-V20 decision sequence unavailable | Use directly inspected handoff rules and later explicit approvals; no fabricated version ledger or missing session policy. |
 | S02 | V41.7 approved a nine-hero origin table not actually rendered in the visible record | Preserve characterization decision; do not invent biographies or pretend all origins were recovered. |
 | S03 | V40.19.8 manual-ability numeric table not visible | Retain contextual 6-24-second typical category and visible passive targets; actual ability numbers remain tuning/source gap. |
-| S04 | V42.4 references twelve acceptance categories and coverage not displayed | Preserve quality standard and visible blockers; mark reconstructed QA organization as derived. |
+| S04 | The original V42.4 tables were absent from the historical compilation. The owner reconfirmed the 12 category names and seven complete-run conditions. | Use AC01–AC12 and CR1–CR7 in §27.2. Original phrasing, table structure and any unstated thresholds remain unrecovered. |
 | S05 | Multiple historical interactive charts/sliders rendered empty | Use selected textual formulas/values only; do not treat unavailable widget state as a decision. |
-| S06 | Earlier host-loss/recovery/shared challenge-access references preserved only partially in P27/later text | Record the boundary as open, do not create architecture or a recovery protocol. |
+| S06 | P27 retained partial host-loss and shared challenge-access references. OWNER-T01 now supplies the working original-host policy. | Apply the 180/30-second recovery policy prospectively. Other historical terms and precise shared challenge-access terms remain unrecovered. Preserve §22.1 personal ownership boundaries. |
 
-The rejected last consolidated Markdown is intentionally not used to fill these gaps. A future recovery of original approval text can close a source-gap entry without a new design interview; an actual new behavior requires an explicit design update.
+The rejected last consolidated Markdown is intentionally not used to fill these gaps. Recovered source text can close a historical gap. New owner decisions or provisional behaviors take effect under their own provenance.
+
+<a id="gds-rules"></a>
+<a id="gds-provisional"></a>
+
+### 29.4 Provisional prototype rules under OWNER-T04
+
+**Register revision 1 for the planning baseline.** Each row carries the status **provisional, awaiting owner playtesting**. The choices below apply to the named gaps for the prototype. The O and S entries preserve their provenance. Verify the selected behavior against its confirmed constraint before relying on it. Pin the rules revision to the run, recovery data and test evidence. Record changes to a choice, rationale or adjustment point in this register, increment its revision and rerun the affected witnesses. Preserve already-issued entitlements on existing profiles. [Owner decisions](#gds-owner) · [QAS triage](QAS.md#qas-triage)
+
+| ID and source | Selected behavior and adjustment point | Rationale and confirmed constraint | Required witnesses |
+|---|---|---|---|
+| <a id="pr01"></a> PR01 · O01, §1.2 | Permit zero, one or two filled slots in preparation. Adjust the empty-slot policy. | Resolves conflicting historical wording while preserving two fixed slots, distinct runes and pre-run selection. | Accept all three counts. Reject duplicates, a third slot and ordinary mid-run replacement. |
+| <a id="pr02"></a> PR02 · O03–O04, §§9.1, 20.3 | P01–P12 start known and eligible to prepare. P13–P18 require named discovery plus purchase or an expressly authorized direct unlock. Adjust starter eligibility by ID. | Provides viable fresh builds while preserving expanded power gates and separate knowledge, ownership and run acquisition. | Fresh profile shows twelve available and zero acquired. A mere sighting cannot unlock an expanded power. Exercise its actual discovery and later legal acquisition. |
+| <a id="pr03"></a> PR03 · O02, O05, §§1.3–1.4, 9–10 | Ten candidate spaces. Offer up to three distinct legal ordinary choices. When eligible, add the single rotating Standard Evolution card. If Fusions qualify, also show one separately rotating Fusion card. Each queue advances at eligible reward generation. Every offer permits one total pick. Adjust pool size, ordinary count, combined presentation and seeded fair scheduling for continuously eligible prepared entries. | Preserves earn-time freezing, eventual eligible offers, declines and actual retained catalyst properties. Wildcards draw only in blank spaces at earning. A simultaneous Fusion opportunity leaves the confirmed Evolution rotation intact. | Earn successive rewards with multiple eligible forms, with both bonus types and with exhausted pools. Decline, open saved offers out of order and recheck newly incompatible components without a reroll. Exercise a preserved evolved catalyst and a lost required property. |
+| <a id="pr04"></a> PR04 · O35, §§1, 11.2–11.5 | In one in eight **eligible Silent Observatory layouts**, a discoverable inscription and two reachable rotating conduits can reveal an early gateway. Align both and intentionally enter before 25:00. Adjust conditional module weight, clues and mechanism composition. | Makes early access rare, reachable by ordinary movement and interaction, discoverable without a marker and optional. The Observatory itself is variable. The ordinary gateway still opens at 25:00. | Play a baseline starter on a qualifying seed using visible clues. Contrast a seed without the module. Demonstrate legal early entry and victory, whole-party transfer, carried corpses and no Collapse escape. |
+| <a id="pr05"></a> PR05 · O31, O39, §§5.2, 15.7 | Use the encounter footprint plus a 200-movement-unit margin in its realm, inclusive at completion. A nearby living connected arrival qualifies immediately. Previously present participants whose bodies remain inside qualify through death or temporary disconnect, through guest grace if disconnected. A departing participant must return by settlement. For final victory, include the initialized roster, including disconnected members, and deliver personal grants as needed. Adjust the local margin, settlement membership and disconnected-victory policy separately. | V42.2 includes late arrivals with zero damage. Geography, shared XP, personal mastery and party-wide victory have different eligibility. Confirmed final victory includes eligible dead teammates. | Test boundary/just outside, late arrival, support only, departure/return, dead and disconnected body, remote absence, party-wide victory and later delivery exactly once. |
+| <a id="pr06"></a> PR06 · O29, M15 §§21.2–21.3, §5.5 | Give a disconnected guest 60 seconds of active logical run time from recorded loss for survival eligibility. Stop new automatic/manual commitments. Continue already committed effects. An accepted valid reconnect exactly at the deadline precedes the survivor check. Adjust grace and tie order independently of OWNER-T01. | Preserves the stationary, damageable guest, ordinary corpse/rescue, finite wipe protection and alive/dead return. Expiry leaves physical state and earned entitlements intact. A still-active run can accept a later reconnect. | Test lethal damage during grace, expiry with/without another survivor, alive/dead return and exact boundary. Original-host suspension freezes the guest's logical clock. |
+| <a id="pr07"></a> PR07 · O30, O42, §§5.1, 23.5 | Verify native solo and two, three and four initialized players. During the run reconnects may reclaim existing seats. New entrants can join a subsequent run. Version the tested envelope and admission policy separately. | Four enables split-realm and multi-rescuer tests. The permanent product limit stays open. Global scaling uses initialized party size. | Independent profiles/processes at each size, locked party scaling after loss, two rescuers, cross-realm outcomes and later admission of a new player. |
+| <a id="pr08"></a> PR08 · O15–O16, E07A, F06 | Every logical second a living injured Reservoir owner restores the least of reserve, missing HP and 5% of max HP. Debit actual restoration. Check a new Mirror Guard barrier's whole-instance replacement eligibility before spending reserve to fortify it. Adjust cadence, rate and replacement comparator. | Gives eligible stored excess a bounded recovery use. Preserve paid HP costs, lethal outcomes and strongest replacement rules. A rejected barrier spends nothing. | Test injured, full and dead owners, partial reserve, accepted/rejected barriers, hostile depletion and Aegis healing without reserve recursion. |
+| <a id="pr09"></a> PR09 · O20, S03, H03 | At zero charges, Harmonic Burst can cast its normal first local magical link toward one legally reached target, with zero bonus links. A legally committed empty cast spends the applicable cost/cooldown and may miss. Adjust base geometry/potency and charged additions. | Preserves confirmed zero-charge usability, optional charges and a single authored ability. The original numeric table is unavailable. | Test zero/positive charge, clear and blocked lines, empty cast, retained cooldown and non-negative charge. |
+| <a id="pr10"></a> PR10 · O10, O12, O18, §§3.4, 8, E15B, F03 | For a child lightning hit on the parent's target, use its pre-parent-impact status set and recheck ownership/consumption. For other targets use their pre-child state. Keep each accepted Bleed stack's snapshot to cap. On ordinary Burn refresh preserve owned snapshot, intensity and cadence. Compare same-owner Burn transfer by next unmitigated tick at current intensity. Only a strictly stronger transfer can replace potency for its bounded remaining duration. Outer Edge compares the same pose/time and other modifiers with and without the coverage expansion tested. Version each comparator separately. | Preserves ownership, cadence, actual added coverage and pre-existing status conditions. Weaker/equal transfer cannot refresh Burn. | Test same/different target, consumed stacks, weaker/equal/stronger transfer per owner, and interior/edge contacts while other geometry changes. |
+| <a id="pr11"></a> PR11 · O33–O34, §§11.3–11.6 | An incomplete resettable puzzle resets when the last relevant occupant leaves its authored area. A dormant optional trial cannot start during Collapse. Existing mechanisms, active trials and all exits remain usable. Adjust area and start/continuation classifications per module. | Preserves a split teammate's ongoing activity, persistent completed shortcuts and safe route availability. | Have two occupants leave separately. Revisit a completed shortcut, compare dormant/active trials across 25:00 and leave through the ordinary exit. |
+| <a id="pr12"></a> PR12 · O28, §3.4 | Resolve competing same-instant finite claims by authored priority, earlier logical commitment, then persisted canonical origin (preparation seat or authored world spawn provenance, source slot, activation ordinal, delivery sub-index). Normalize the admitted root set before debiting it. Adjust only genuinely tied claim priorities. | Assigns one expenditure/lethal owner while preserving independently committed mutual outcomes. Runtime IDs, traversal and packet order cannot decide a tied claim. | Reverse traversal/arrival, renumber runtime instances, exhaust one barrier/charge and reproduce the same per-origin debits, single elimination and mutual-lethal verdict. |
+
+<a id="gds-reconciliation"></a>
+
+### 29.5 Gameplay-facing reconciliation register
+
+| Affected sections | Prior wording or gap | Authority and disposition |
+|---|---|---|
+| GDD §§1, 10, 17–18 and GDS §§1, 5, 30 | Initial delivery, host loss and technical ownership appeared open. | OWNER-T01/T02 establish original-host recovery and native LAN/direct IP. GDD keeps commercial launch and the eventual party maximum open. The TDS owns the approved working architecture and AGENTS the phase. |
+| GDD §§10, 12 and GDS §§5, 15, 20 | Retention at victory/defeat was explicit, but crash exposure, lost acknowledgments and later delivery were absent. | OWNER-T03 adds immediate important settlement, bounded ordinary batches, full graceful settlement and cross-session recovery. Five seconds is provisional. PR05 covers disconnected membership. |
+| GDD §§3, 6 and GDS §§1, 9–10, 20–21 | Pool size, empty slots, starting powers and simultaneous bonus cards appeared wholly undecided. | OWNER-T04, O01–O05 and PR01–PR03 supply prototype settings. M15 §§15–16 and later recipes retain frozen rotation, one choice, catalyst legality and personal unlocks. |
+| GDD §10 and GDS §§5, 13, 15, 23 | Local eligibility, grace, late joining and the status of the four-player example were ambiguous for the prototype. | V42.2 and M15 §21 govern inclusion and guest behavior. PR05–PR07 fill only the adjustable boundaries. The partial S06 record remains separate. |
+| GDS §§1, 11, 29 | Early access, puzzle abandonment and dormant trials during Collapse lacked a specific playable rule. | OWNER-T04, O33–O35 and PR04/PR11 select a reachable conditional layout and a split-party lifecycle. Gateway availability, body transfer and essential paths stay governed by §11. |
+| GDS §§3, 6, 8–10, 29 | Open edge cases covered zero-charge Burst, reserve release, status/geometry comparators and finite claims. | OWNER-T04 and PR08–PR10/PR12 supply testable defaults. GDS §3.4 and source-specific damage, barriers, status ownership and recipe inheritance remain binding. S03's original ability values are missing. |
+| GDD §17 and GDS §§27, 29 | A derived list stood in for missing V42.4 names. | Owner reconfirmation restores twelve categories and seven complete-run conditions. S04 retains its historical limitation. QA01–QA62 remain derived gameplay scenarios. |
+| GDD §18 and GDS authority, §§28–30 | Historical edition statements and the two-document authority map predated the planning mandate. | Use the six-document authority split and record future changes with source and scope. Remaining historical gaps are S01–S03, S05 and the residual parts of S04/S06. |
 
 ## 30. Decision coverage map and glossary
 <a id="gds-traceability"></a>
@@ -2624,4 +2693,4 @@ The rejected last consolidated Markdown is intentionally not used to fill these 
 
 Preserve the versioned decision basis when changing a mechanic. Identify whether a change is numerical tuning, a resolved open detail, a recovered source, a content addition or an actual superseding design decision. Update the GDD when experience/vision changes and the GDS when behavior changes. Do not treat old research, a technical agent's preferred architecture or this document's derived QA checklist as permission to alter approved gameplay.
 
-This rebuild ends at approved V42.6. It does not authorize new story chapters, another progression tier, extra rune/power slots, a different prototype scope, an engine/network stack or a repository migration.
+The design baseline comprises V42.6 and the recorded owner supplement. The current mandate covers technical finalization, documentation reconciliation and implementation planning. Beginning production requires further owner authorization. [Current phase](../AGENTS.md#agents-phase)
