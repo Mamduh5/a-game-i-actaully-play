@@ -323,6 +323,8 @@ Packages not listed below remain **NOT STARTED**.
 
 WP04, WP06 and WP07 are active on disjoint implementation scopes. WP14 is ready for independent review. WP09 and WP13 still require WP04, WP12 requires WP06 and WP08 and WP16 require WP07.
 
+The clean integration retest used a fresh archive of `387f5417286abf2f72163e49509048cfac48b9a3`, isolated profile roots, the pinned Godot 4.7 stable console and the full GUT unit suite. Import passed with MCP runtime off. GUT passed 78/78 tests and 830 assertions. The report is `.qa-evidence/dev-retest-387f541-987e6671/gut.xml` with SHA-256 `de623304eb68583b8bbd587fadf4eed85a6252d6525880f3f90e2aca44dbcf2b`. Resume the mixed-rate numeric and geometry work in parallel with the WP06 closure/reclaim investigation and the WP14 review. Package-specific evidence and qualification gates are recorded above.
+
 <a id="plan-promotion"></a>
 
 ### Local promotion for owner access
