@@ -52,5 +52,41 @@ func test_authored_polygon_bakes_once_into_a_far_realm_and_indexes_all_edges() -
 	assert_almost_eq(first, 65.0 / 128.0, 1e-12)
 
 
+func test_certified_circle_times_order_distinct_roots_with_the_same_rounded_time() -> void:
+	var proof := RealmCircleTime.new()
+	var n := float(1 << 48)
+	var from := _point(0, 0)
+	var to := _point(4 * n, 0)
+	var first := proof.measure(from, to, 0, _point(n, 0), _point(3 * n - 1, 0), 0)
+	var second := proof.measure(from, to, 0, _point(n + 1, 0), _point(3 * n - 2, 0), 0)
+	var equal := proof.measure(from, to, 0, _point(2 * n, 0), _point(2 * n - 2, 0), 0)
+	assert_eq(n / (2 * n + 1), (n + 1) / (2 * n + 3))
+	assert_eq(first.outcome, RealmCircleTime.Result.HIT)
+	assert_eq(second.outcome, RealmCircleTime.Result.HIT)
+	assert_eq(first.earliest, second.earliest)
+	assert_eq(first.latest, second.latest)
+	assert_eq(first.order_against(second), RealmCircleTime.Order.BEFORE)
+	assert_eq(second.order_against(first), RealmCircleTime.Order.AFTER)
+	assert_eq(first.order_against(equal), RealmCircleTime.Order.SAME)
+
+
+func test_circle_time_bounds_enclose_diagonal_contact_and_hold_ambiguous_tangency() -> void:
+	var proof := RealmCircleTime.new()
+	var from := _point(0, 0)
+	var to := _point(8, 8)
+	var center := _point(5, 5)
+	var diagonal := proof.measure(from, to, 1, center, center, 0)
+	var expected := (5.0 - 1.0 / sqrt(2.0)) / 8.0
+	assert_eq(diagonal.outcome, RealmCircleTime.Result.HIT)
+	assert_true(diagonal.earliest <= expected and expected <= diagonal.latest)
+	assert_eq(diagonal.order_against(diagonal), RealmCircleTime.Order.UNRESOLVED)
+	var off_path := _point(5, -5)
+	assert_eq(proof.measure(from, to, 1, off_path, off_path, 0).outcome, RealmCircleTime.Result.MISS)
+	var tangent := _point(5, 1)
+	assert_eq(proof.measure(from, _point(8, 0), 1, tangent, tangent, 0).outcome,
+		RealmCircleTime.Result.UNRESOLVED)
+	assert_eq(proof.measure(center, from, 1, center, center, 0).earliest, 0.0)
+
+
 func _point(x: float, y: float) -> RealmSweep.Point:
 	return RealmSweep.Point.new(x, y)

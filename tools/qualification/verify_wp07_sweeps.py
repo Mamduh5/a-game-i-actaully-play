@@ -108,23 +108,43 @@ def main():
         )
     if "ERROR:" in log.read_text(encoding="utf-8", errors="replace"):
         raise ValueError("Native runtime reported an error")
-    actual = json.loads(result.read_text(encoding="utf-8"))
+    native = json.loads(result.read_text(encoding="utf-8"))
+    actual = [row["time"] for row in native]
     with localcontext() as context:
         context.prec = 85
         projected = [ideal(row) for row in cases]
         (output / "reference.json").write_text(json.dumps(projected, default=str), encoding="utf-8")
         worst = D(0)
-        for index, (observed, expected) in enumerate(zip(actual, projected, strict=True)):
+        certified = {kind: {"hits": 0, "misses": 0, "unresolved": 0} for kind in ("circle", "segment")}
+        for index, (row, expected) in enumerate(zip(native, projected, strict=True)):
+            observed = row["time"]
             if (observed == -1) != (expected is None):
                 raise ValueError(f"Contact classification mismatch at vector {index}")
             if expected is not None:
                 worst = max(worst, abs(D.from_float(float(observed)) - expected))
                 if abs(D.from_float(float(observed)) - expected) > D("2e-12"):
                     raise ValueError(f"Contact time mismatch at vector {index}")
+            proof = row.get("proof")
+            if proof is None:
+                continue
+            counts = certified[cases[index]["kind"]]
+            if proof["outcome"] == 0:
+                if expected is not None:
+                    raise ValueError(f"False certified miss at vector {index}")
+                counts["misses"] += 1
+            elif proof["outcome"] == 1:
+                if expected is None or not D.from_float(proof["lower"]) <= expected <= D.from_float(proof["upper"]):
+                    raise ValueError(f"Contact outside certified bounds at vector {index}")
+                counts["hits"] += 1
+            elif proof["outcome"] == 2:
+                counts["unresolved"] += 1
+            else:
+                raise ValueError(f"Invalid certification at vector {index}")
         if not actual[-2] < actual[-1] or not projected[-2] < projected[-1]:
             raise ValueError("Far-realm order did not survive")
     print(json.dumps({"cases": len(cases), "contacts": sum(time is not None for time in projected),
-                      "maximum_time_error": str(worst), "far_order": actual[-2:]}, indent=2))
+                      "maximum_time_error": str(worst), "far_order": actual[-2:],
+                      "certified": certified}, indent=2))
 
 
 if __name__ == "__main__":

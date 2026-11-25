@@ -37,10 +37,10 @@ static func from_sweep(x0: float, y0: float, x1: float, y1: float, radius: float
 		return from_edges(minf(x0, x1), minf(y0, y1), maxf(x0, x1), maxf(y0, y1))
 	var scratch := PackedByteArray()
 	scratch.resize(8)
-	return from_edges(_outward(minf(x0, x1) - radius, false, scratch),
-		_outward(minf(y0, y1) - radius, false, scratch),
-		_outward(maxf(x0, x1) + radius, true, scratch),
-		_outward(maxf(y0, y1) + radius, true, scratch))
+	return from_edges(adjacent(minf(x0, x1) - radius, false, scratch),
+		adjacent(minf(y0, y1) - radius, false, scratch),
+		adjacent(maxf(x0, x1) + radius, true, scratch),
+		adjacent(maxf(y0, y1) + radius, true, scratch))
 
 
 func overlaps(other: RealmBounds) -> bool:
@@ -48,7 +48,7 @@ func overlaps(other: RealmBounds) -> bool:
 
 
 ## One adjacent IEEE double beyond the rounded radius expansion.
-static func _outward(value: float, upward: bool, scratch: PackedByteArray) -> float:
+static func adjacent(value: float, upward: bool, scratch: PackedByteArray) -> float:
 	if not is_finite(value):
 		return value
 	if value == 0.0:

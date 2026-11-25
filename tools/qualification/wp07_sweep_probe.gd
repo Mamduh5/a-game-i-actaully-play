@@ -16,7 +16,8 @@ func _initialize() -> void:
 	if not cases is Array:
 		quit(2)
 		return
-	var results: Array[float] = []
+	var results: Array[Dictionary] = []
+	var proof := RealmCircleTime.new()
 	for row: Dictionary in cases:
 		var start := _point(row["start"])
 		var finish := _point(row["finish"])
@@ -24,14 +25,20 @@ func _initialize() -> void:
 		var b := _point(row["b"])
 		var radius: float = row["radius"]
 		var time: float
+		var checked: RealmCircleTime.Contact
 		if row["kind"] == "segment":
 			time = RealmSweep.circle_segment(start, finish, radius, a, b)
+			checked = proof.measure_segment(start, finish, radius, a, b)
 		else:
 			time = RealmSweep.moving_circles(start, finish, radius, a, b, row["other_radius"])
+			checked = proof.measure(start, finish, radius, a, b, row["other_radius"])
 		if not is_finite(time):
 			quit(1)
 			return
-		results.append(time)
+		var result := {"time": time}
+		if checked != null:
+			result["proof"] = {"outcome": checked.outcome, "lower": checked.earliest, "upper": checked.latest}
+		results.append(result)
 	output.store_string(JSON.stringify(results, "", true, true))
 	output.close()
 	print("WP07_SWEEP_CASES ", results.size())

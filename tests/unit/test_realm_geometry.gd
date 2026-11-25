@@ -64,3 +64,79 @@ func test_moving_target_is_indexed_across_the_path_until_commit_or_displacement(
 	var displaced := geometry.sweep_circle(&"outer", left, right, 1.0, BODY)
 	assert_eq(displaced.contacts.size(), 1)
 	assert_almost_eq(displaced.contacts[0].time, 0.996, 1e-14)
+
+
+func test_certified_sweep_preserves_an_unresolved_tangent_and_orders_far_walls() -> void:
+	var geometry := RealmGeometry.new(&"outer")
+	var far := 1_000_000_000_000.0
+	var start := RealmSweep.Point.new(far, -far)
+	var finish := RealmSweep.Point.new(far + 64.0, -far)
+	for slot: int in [1, 0]:
+		var wall := RealmOutline.Edge.new()
+		var x := far + 16.0 + float(slot) / 1024.0
+		wall.first = RealmSweep.Point.new(x, -far - 4.0)
+		wall.last = RealmSweep.Point.new(x, -far + 4.0)
+		assert_true(geometry.add_segment(&"wall", slot, wall, BLOCKER, true))
+	assert_true(geometry.add_circle(&"tangent", 0, RealmSweep.Point.new(far + 32.0, -far + 0.125), 0.0, BODY))
+	var result := geometry.certify_circle_sweep(&"outer", start, finish, 0.125, BODY | BLOCKER)
+	assert_eq(result.contacts.size(), 2)
+	assert_eq(result.unresolved.size(), 1)
+	assert_eq(result.unresolved[0].entity, &"tangent")
+	var first := result.contacts[0] if result.contacts[0].shape == 0 else result.contacts[1]
+	var second := result.contacts[1] if result.contacts[0].shape == 0 else result.contacts[0]
+	assert_eq(first.proof.order_against(second.proof), RealmCircleTime.Order.BEFORE)
+
+
+func test_displacement_stops_at_thin_wall_and_commits_before_the_child_query() -> void:
+	var geometry := RealmGeometry.new(&"outer")
+	var far := 1_000_000_000_000.0
+	var start := RealmSweep.Point.new(far, -far)
+	var finish := RealmSweep.Point.new(far + 64.0, -far)
+	assert_true(geometry.add_circle(&"mover", 0, start, 0.125, BODY))
+	var edge := RealmOutline.Edge.new()
+	edge.first = RealmSweep.Point.new(far + 16.0, -far - 4.0)
+	edge.last = RealmSweep.Point.new(far + 16.0, -far + 4.0)
+	assert_true(geometry.add_segment(&"door", 1, edge, BLOCKER, false))
+	assert_true(geometry.add_segment(&"door", 0, edge, BLOCKER, false))
+	var result := geometry.displace_circle(&"mover", 0, finish, BLOCKER)
+	assert_not_null(result)
+	if result == null:
+		return
+	assert_eq(result.revision, 4)
+	assert_eq(result.stopped_by.size(), 2)
+	assert_eq(result.stopped_by[0].shape, 0)
+	assert_eq(result.stopped_by[1].shape, 1)
+	assert_lt(result.finish.x, far + 15.875)
+	assert_almost_eq(result.finish.x - far, 15.875, 0.001)
+	assert_eq(geometry.circle_center(&"mover", 0).x, result.finish.x)
+	assert_true(geometry.remove_mutable(&"door", 0))
+	assert_true(geometry.remove_mutable(&"door", 1))
+	var next := geometry.displace_circle(&"mover", 0, finish, BLOCKER)
+	assert_eq(next.revision, 7)
+	assert_eq(next.finish.x, finish.x)
+	assert_true(next.stopped_by.is_empty())
+	assert_eq(result.stopped_by.size(), 2)
+
+
+func test_displacement_can_retreat_from_initial_overlap_and_holds_ambiguous_path() -> void:
+	var geometry := RealmGeometry.new(&"outer")
+	var start := RealmSweep.Point.new(-0.5, 0.0)
+	assert_true(geometry.add_circle(&"mover", 0, start, 1.0, BODY))
+	var edge := RealmOutline.Edge.new()
+	edge.first = RealmSweep.Point.new(0.0, -8.0)
+	edge.last = RealmSweep.Point.new(0.0, 8.0)
+	assert_true(geometry.add_segment(&"wall", 0, edge, BLOCKER, true))
+	var into := geometry.displace_circle(&"mover", 0, RealmSweep.Point.new(0.5, 0.0), BLOCKER)
+	assert_not_null(into)
+	assert_eq(into.finish.x, start.x)
+	assert_eq(into.revision, 2)
+	assert_eq(into.stopped_by[0].proof.latest, 0.0)
+	var retreat := geometry.displace_circle(&"mover", 0, RealmSweep.Point.new(-4.0, 0.0), BLOCKER)
+	assert_not_null(retreat)
+	assert_eq(retreat.finish.x, -4.0)
+	assert_eq(retreat.revision, 3)
+	assert_true(retreat.stopped_by.is_empty())
+	assert_true(geometry.add_circle(&"tangent", 0, RealmSweep.Point.new(-6.0, 1.0), 0.0, BLOCKER))
+	assert_null(geometry.displace_circle(&"mover", 0, RealmSweep.Point.new(-10.0, 0.0), BLOCKER))
+	assert_eq(geometry.revision, 4)
+	assert_eq(geometry.circle_center(&"mover", 0).x, -4.0)
