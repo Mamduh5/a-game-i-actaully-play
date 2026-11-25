@@ -74,6 +74,12 @@ func _after_change(ideal: QuantityFraction, represented: Quantity, direction: in
 		var fast := _exact.add_compact_error(ideal, represented, direction)
 		if fast != null:
 			return QuantityErrorBounds.new(fast)
+	elif _anchor == null and represented.scale <= BOUND_SCALE:
+		# Translation by an exact grid amount commutes with directed rounding.
+		# After replay expires, no reduced fraction needs to be kept for this term.
+		var fast := _accumulate_directed(ideal, represented, direction)
+		if fast != null:
+			return fast
 	var represented_ratio := QuantityFraction.from_amount(represented)
 	if represented_ratio == null:
 		return null
@@ -83,13 +89,24 @@ func _after_change(ideal: QuantityFraction, represented: Quantity, direction: in
 	return _accumulate(error if direction > 0 else error.opposite())
 
 
+func _accumulate_directed(ideal: QuantityFraction, represented: Quantity, direction: int) -> QuantityErrorBounds:
+	var directed := ideal.outward(BOUND_SCALE)
+	if directed.size() != 2:
+		return null
+	var lower := directed[0].subtract(represented) if direction > 0 else represented.subtract(directed[1])
+	var upper := directed[1].subtract(represented) if direction > 0 else represented.subtract(directed[0])
+	if lower == null or upper == null:
+		return null
+	return _from_bounds(_lower.add(lower), _upper.add(upper))
+
+
 ## Sign of ideal remaining capacity after a prospective, positive exact debit.
 func certify_after(remaining: Quantity, incoming: QuantityFraction) -> Sign:
 	if remaining == null or incoming == null or incoming.numerator.sign_value < 0:
 		return Sign.UNKNOWN
+	if _certifies_above_native(remaining, incoming):
+		return Sign.ABOVE
 	if _exact != null:
-		if _certifies_above_native(remaining, incoming):
-			return Sign.ABOVE
 		return _exact_sign(_exact, remaining, incoming)
 	var directed := incoming.outward(BOUND_SCALE)
 	if directed.size() != 2:
@@ -239,14 +256,22 @@ func _certifies_above_native(remaining: Quantity, incoming: QuantityFraction) ->
 	var remaining_count: int = remaining.native_at_scale(remaining.scale)
 	var incoming_count: int = incoming.numerator.native_at_scale(0)
 	var divisor: int = incoming.divisor.native_at_scale(0)
-	var absolute_error: int = absi(_exact.numerator.native_at_scale(0))
-	var error_divisor: int = _exact.divisor.native_at_scale(0)
+	var possible_deficit: int
+	var error_divisor: int
+	if _exact != null:
+		possible_deficit = maxi(0, -_exact.numerator.native_at_scale(0))
+		error_divisor = _exact.divisor.native_at_scale(0)
+	else:
+		if _lower.uses_limbs or _lower.scale >= Quantity.INT_POWERS.size():
+			return false
+		possible_deficit = maxi(0, -_lower.native_at_scale(_lower.scale))
+		error_divisor = Quantity.INT_POWERS[_lower.scale]
 	@warning_ignore("integer_division")
 	var remaining_floor := remaining_count / Quantity.INT_POWERS[remaining.scale]
 	@warning_ignore("integer_division")
 	var incoming_ceil := incoming_count / divisor + int(incoming_count % divisor != 0)
 	@warning_ignore("integer_division")
-	var error_ceil := absolute_error / error_divisor + int(absolute_error % error_divisor != 0)
+	var error_ceil := possible_deficit / error_divisor + int(possible_deficit % error_divisor != 0)
 	return remaining_floor > incoming_ceil and remaining_floor - incoming_ceil > error_ceil
 
 

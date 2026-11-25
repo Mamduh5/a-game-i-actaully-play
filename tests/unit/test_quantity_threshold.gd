@@ -155,6 +155,45 @@ func test_expired_barrier_replay_keeps_certified_overflow_and_stops_ambiguous_hp
 	assert_eq(hp.amount.compare(Quantity.from_count(20)), 0)
 
 
+func test_certified_heal_preserves_recovery_cap_and_positive_excess() -> void:
+	var one := Quantity.from_count(1)
+	var hp := QuantityLayerLedger.Pool.new(one, QuantityErrorBounds.new())
+	for debit: int in [2, 3]:
+		var raw := _fraction(debit, 9)
+		var posted := QuantityThresholdDebit.resolve(hp.amount, hp.error, raw, _quantize(raw))
+		hp = QuantityLayerLedger.Pool.new(posted.remaining, posted.error)
+	var full := _fraction(5, 9)
+	var quantum := _fraction(1, 4_000_000)
+	var lower := full.plus(quantum.opposite())
+	var upper := full.plus(quantum)
+	var under := QuantityLayerLedger.recovery(lower, _quantize(lower), hp, one, true)
+	var equal := QuantityLayerLedger.recovery(full, _quantize(full), hp, one, true)
+	var excess := QuantityLayerLedger.recovery(upper, _quantize(upper), hp, one, true)
+	assert_not_null(under)
+	assert_not_null(equal)
+	assert_not_null(excess)
+	if under == null or equal == null or excess == null:
+		return
+	assert_eq(under.hp.amount.compare(Quantity.from_count(99999975, 8)), 0)
+	assert_eq(under.eligible_excess.amount.sign_value, 0)
+	assert_eq(equal.hp.amount.compare(one), 0)
+	assert_eq(equal.adjustment.compare(Quantity.from_count(-1, 6)), 0)
+	assert_eq(equal.eligible_excess.amount.sign_value, 0)
+	assert_eq(excess.hp.amount.compare(one), 0)
+	assert_eq(excess.eligible_excess.amount.compare(Quantity.from_count(1, 6)), 0)
+	assert_eq(excess.eligible_excess.error.certify_after(excess.eligible_excess.amount, quantum), QuantityErrorBounds.Sign.EQUAL)
+	assert_eq(excess.hp_restored.add(excess.eligible_excess.amount).compare(excess.offered), 0)
+	var discarded := QuantityLayerLedger.recovery(upper, _quantize(upper), hp, one, false)
+	assert_eq(discarded.eligible_excess.amount.sign_value, 0)
+	assert_eq(discarded.discarded.compare(excess.eligible_excess.amount), 0)
+	var corpse := QuantityLayerLedger.Pool.new(Quantity.from_count(0), QuantityErrorBounds.new())
+	var dead := QuantityLayerLedger.recovery(full, _quantize(full), corpse, one, true)
+	assert_eq(dead.hp_restored.sign_value, 0)
+	assert_eq(dead.eligible_excess.amount.sign_value, 0)
+	assert_eq(dead.discarded.compare(_quantize(full)), 0)
+	assert_eq(hp.amount.compare(Quantity.from_count(444445, 6)), 0)
+
+
 func _fraction(numerator: int, divisor: int) -> QuantityFraction:
 	return QuantityFraction.create(Quantity.from_count(numerator), Quantity.from_count(divisor))
 

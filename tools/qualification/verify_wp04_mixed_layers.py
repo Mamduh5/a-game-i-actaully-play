@@ -17,10 +17,10 @@ SCALE = 7
 GRID = 10**SCALE
 
 
-def scenarios():
+def scenarios(count):
     sources = [101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 197]
     rng = random.Random(620404)
-    for index in range(96):
+    for index in range(count):
         rates = rng.sample(sources, 15)
         # The first layer has exhausted replay by the last hit. Samples vary
         # how far the final debit reaches through the remaining pools.
@@ -80,25 +80,33 @@ def main():
     parser.add_argument("--engine", type=Path, required=True)
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--histories", type=int, default=96)
     args = parser.parse_args()
+    if args.histories < 1:
+        parser.error("--histories must be positive")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    rows = list(scenarios())
+    rows = list(scenarios(args.histories))
     source, native, log = (output / name for name in ("vectors.json", "native.json", "native.log"))
     source.write_text(json.dumps(rows), encoding="utf-8")
     with log.open("wb") as destination:
         subprocess.run([args.engine.resolve(), "--headless", "--path", args.project.resolve(), "--script",
                         "res://tools/qualification/wp04_mixed_layers_probe.gd", "--", source, native],
-                       stdout=destination, stderr=subprocess.STDOUT, check=True, timeout=90,
+                       stdout=destination, stderr=subprocess.STDOUT, check=True, timeout=180,
                        creationflags=subprocess.CREATE_NO_WINDOW)
     if "ERROR:" in log.read_text(encoding="utf-8", errors="replace"):
         raise ValueError("Native mixed-rate probe reported an error")
     expected = [reference(row) for row in rows]
     (output / "reference.json").write_text(json.dumps(expected), encoding="utf-8")
-    for index, (observed, wanted) in enumerate(zip(json.loads(native.read_text(encoding="utf-8")), expected, strict=True)):
+    actual = json.loads(native.read_text(encoding="utf-8"))
+    for index, (observed, wanted) in enumerate(zip(actual["rows"], expected, strict=True)):
         if observed != wanted:
             raise ValueError(f"Mixed-rate ledger mismatch in case {index}")
-    print(f"Validated {len(rows)} mixed-rate histories and {sum(len(row['receipts']) for row in expected)} attributed postings")
+    measurement = actual["measurement"]
+    measurement["attributed_postings"] = sum(len(row["receipts"]) for row in expected)
+    summary = json.dumps(measurement, indent=2)
+    (output / "summary.json").write_text(summary + "\n", encoding="utf-8")
+    print(summary)
 
 
 if __name__ == "__main__":

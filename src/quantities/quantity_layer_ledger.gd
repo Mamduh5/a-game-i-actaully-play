@@ -25,6 +25,14 @@ class DamageDraft:
 	var lethal: bool
 	var eligible_hostile_hp: Quantity
 
+class RecoveryDraft:
+	var hp: Pool
+	var hp_restored: Quantity
+	var eligible_excess: Pool
+	var discarded: Quantity
+	var offered: Quantity
+	var adjustment: Quantity
+
 
 static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Array[Pool],
 		hp: Pool, hostile: bool) -> DamageDraft:
@@ -76,6 +84,52 @@ static func draft(raw: QuantityFraction, nominal: Quantity, ordered_layers: Arra
 		return null
 	result.adjustment = result.incoming.subtract(nominal)
 	return result if result.adjustment != null else null
+
+
+## Maximum HP is the represented cap of this life. Raw and nominal describe
+## the same already-eligible healing source, after its independent limits.
+static func recovery(raw: QuantityFraction, nominal: Quantity, hp: Pool,
+		maximum: Quantity, excess_allowed: bool) -> RecoveryDraft:
+	if (raw == null or nominal == null or raw.numerator.sign_value != nominal.sign_value or nominal.sign_value < 0
+			or hp == null or hp.amount == null or hp.error == null or maximum == null
+			or hp.amount.sign_value < 0 or hp.amount.compare(maximum) > 0):
+		return null
+	var zero := Quantity.from_count(0)
+	var living := hp.error.certify_after(hp.amount, QuantityFraction.from_amount(zero))
+	if (hp.amount.sign_value == 0 and living != QuantityErrorBounds.Sign.EQUAL) or (
+			hp.amount.sign_value > 0 and living != QuantityErrorBounds.Sign.ABOVE):
+		return null
+	var result := RecoveryDraft.new()
+	result.eligible_excess = Pool.new(zero, QuantityErrorBounds.new())
+	if living == QuantityErrorBounds.Sign.EQUAL or nominal.sign_value == 0:
+		result.hp = hp
+		result.hp_restored = zero
+		result.discarded = nominal
+		result.offered = nominal
+		result.adjustment = zero
+		return result
+	var missing := maximum.subtract(hp.amount)
+	if missing == null:
+		return null
+	var missing_error := hp.error.opposite()
+	var posted := QuantityThresholdDebit.resolve(missing, missing_error, raw, nominal)
+	if posted == null:
+		return null
+	var after := maximum.subtract(posted.remaining)
+	if after == null:
+		return null
+	result.hp = Pool.new(after, posted.error.opposite())
+	result.hp_restored = posted.debit
+	result.offered = posted.incoming
+	result.adjustment = posted.adjustment
+	result.discarded = posted.overkill
+	if excess_allowed and posted.overkill.sign_value > 0:
+		var error := missing_error.after_debit(raw, posted.incoming)
+		if error == null:
+			return null
+		result.eligible_excess = Pool.new(posted.overkill, error.opposite())
+		result.discarded = zero
+	return result
 
 
 static func _effective_bounds(pool: Pool, incoming_error: QuantityErrorBounds) -> QuantityErrorBounds:
