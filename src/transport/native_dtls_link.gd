@@ -155,7 +155,7 @@ static func private_ip(address: String) -> bool:
 		return false
 	if address.contains(":"):
 		var lower := address.to_lower()
-		return lower == "::1" or lower.begins_with("fc") or lower.begins_with("fd")
+		return lower == "::1" or (lower.find(":") == 4 and (lower.begins_with("fc") or lower.begins_with("fd")))
 	var groups := address.split(".")
 	if groups.size() != 4:
 		return false

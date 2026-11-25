@@ -239,9 +239,13 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 				return _write(_handoff_path, PackedByteArray([1]))
 			return _link.send(peer, ADMISSION, EPOCH, 3, NativeAdmissionMessage.acknowledge()) == OK
 		NativeAdmissionMessage.Operation.READY:
-			return (_guest_stage == 3 and _link.send(peer, RELIABLE, EPOCH, 1, PackedByteArray([RELIABLE])) == OK
-				and _link.send(peer, SEQUENCED, EPOCH, 1, PackedByteArray([SEQUENCED])) == OK)
+			return _guest_stage == 3 and _guest_ready(peer)
 	return false
+
+
+func _guest_ready(peer: ENetPacketPeer) -> bool:
+	return (_link.send(peer, RELIABLE, EPOCH, 1, PackedByteArray([RELIABLE])) == OK
+		and _link.send(peer, SEQUENCED, EPOCH, 1, PackedByteArray([SEQUENCED])) == OK)
 
 
 func _purpose() -> NativeJoinChallenge.Purpose:

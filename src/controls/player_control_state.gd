@@ -29,6 +29,13 @@ func aim_from(origin: RealmSweep.Point, prior: RealmSweep.Point) -> RealmSweep.P
 	return direction(origin, _aim, prior)
 
 
+## The next fixed step can start from this input and an authoritative pose.
+func movement_snapshot() -> PlayerCommand:
+	if _destination != null:
+		return PlayerCommand.new(PlayerCommand.MOVE_TO, _destination.x, _destination.y)
+	return PlayerCommand.new(PlayerCommand.MOVE_AXES, _axis.x, _axis.y)
+
+
 func step(geometry: RealmGeometry, actor: StringName, slot: int, blockers: int,
 		speed: float, seconds: float) -> RealmSweep.Point:
 	var start := geometry.circle_center(actor, slot)
