@@ -1,9 +1,10 @@
 class_name WorldExploration
 extends RefCounted
-## Shared overworld fog and mutable module state. Consumers project geography only.
+## Shared fog and mutable module state within one realm.
 
 const EXPLORATION_CELL := 32
 const BLOCKER := 1
+const STARTER_RADIUS := 14.0
 
 var _layout: WorldTopology
 var _geometry: RealmGeometry
@@ -20,7 +21,7 @@ static func create(layout: WorldTopology, seats: Array[StringName]) -> WorldExpl
 	result._layout = layout
 	result._seats = seats.duplicate()
 	result._geometry = layout.realize(BLOCKER)
-	return result if result._geometry != null else null
+	return result if layout.has_clearance(result._geometry, BLOCKER, STARTER_RADIUS) else null
 
 
 ## Pass a committed living seat pose from the fixed-step owner. Other actors
@@ -28,7 +29,7 @@ static func create(layout: WorldTopology, seats: Array[StringName]) -> WorldExpl
 func observe_seat(seat: StringName, realm: StringName, point: RealmSweep.Point) -> bool:
 	if seat not in _seats:
 		return false
-	if realm != WorldTopology.OVERWORLD or point == null:
+	if realm != _layout.realm or point == null:
 		_present.erase(seat)
 		return false
 	if not is_finite(point.x) or not is_finite(point.y) or absf(point.x) > 1000000 or absf(point.y) > 1000000:

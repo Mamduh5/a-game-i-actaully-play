@@ -88,6 +88,49 @@ func test_reopened_module_preserves_shortcut_and_shared_exploration_without_visi
 	assert_null(WorldExploration.restore(tampered, party))
 
 
+func test_optional_realm_reservations_have_independent_entry_exit_and_fog() -> void:
+	var party: Array[StringName] = [&"host", &"guest"]
+	for realm: StringName in WorldTopology.OPTIONAL_REALMS:
+		for seed: int in [-23, 0, 981]:
+			var layout := WorldTopology.generate_optional(seed, realm)
+			assert_not_null(layout)
+			assert_eq(layout.realm, realm)
+			assert_eq(layout.route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT).size(), 4)
+			var world := WorldExploration.create(layout, party)
+			assert_not_null(world)
+			if world == null:
+				continue
+			assert_eq(world.geometry().realm_id, realm)
+			assert_false(layout.has_clearance(world.geometry(), WorldExploration.BLOCKER, 45.0))
+			var entry := layout.center(WorldTopology.ENTRY)
+			assert_false(world.observe_seat(&"host", WorldTopology.OVERWORLD, entry))
+			assert_true(world.view(&"guest")["explored"].is_empty())
+			assert_true(world.observe_seat(&"host", realm, entry))
+			assert_true(world.view(&"guest")["visible"].is_empty())
+			assert_eq(world.view(&"guest")["explored"].size(), 1)
+			var saved := world.checkpoint()
+			var restored := WorldExploration.restore(saved, party)
+			assert_not_null(restored)
+			if restored != null:
+				assert_eq(restored.checkpoint(), saved)
+				assert_true(restored.view(&"host")["visible"].is_empty())
+				assert_eq(restored.geometry().realm_id, realm)
+	assert_null(WorldTopology.generate_optional(0, &"unknown"))
+
+
+func test_checkpoint_accepts_legacy_module_order_and_rejects_duplicate_rows() -> void:
+	var layout := WorldTopology.generate(-7)
+	var saved := layout.manifest()
+	var previous_order: Array = saved["modules"]
+	previous_order.reverse()
+	var reopened := WorldTopology.restore(saved)
+	assert_not_null(reopened)
+	if reopened != null:
+		assert_eq(reopened.manifest(), layout.manifest())
+	previous_order[0] = previous_order[1]
+	assert_null(WorldTopology.restore(saved))
+
+
 static func _contacts(visit: WorldExploration, start: RealmSweep.Point, finish: RealmSweep.Point) -> int:
 	var proof := visit.geometry().certify_circle_sweep(WorldTopology.OVERWORLD, start, finish, 14.0,
 		WorldExploration.BLOCKER)

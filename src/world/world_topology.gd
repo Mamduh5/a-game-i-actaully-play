@@ -1,10 +1,13 @@
 class_name WorldTopology
 extends RefCounted
-## Revisioned overworld topology. The geometry owner realizes the listed modules and seams.
+## Revisioned realm topology and its realized module seams.
 
 const REVISION := 1
 const OVERWORLD := &"overworld"
+const OPTIONAL_REALMS := [&"inverted_archive", &"silent_garden", &"fractured_beyond", &"hall_of_echoes"]
 const GATEWAY := &"final_gateway"
+const ENTRY := &"entry"
+const RETURN_EXIT := &"return_exit"
 const SHORTCUT_DOOR := &"central_shortcut_door"
 const MODULE_SIZE := 256
 const SEAM_HALF_WIDTH := 44
@@ -28,7 +31,10 @@ class Module:
 
 var seed: int:
 	get: return _seed
+var realm: StringName:
+	get: return _realm
 var _seed: int
+var _realm := OVERWORLD
 var _modules: Dictionary[StringName, Module] = {}
 var _cells: Dictionary[Vector2i, StringName] = {}
 var _shortcut: Array[StringName] = []
@@ -69,6 +75,29 @@ static func generate(run_seed: int) -> WorldTopology:
 	return layout
 
 
+## Reserve a connected interior and independent return geometry. WP25 owns
+## when the party can transfer through a particular authored entrance.
+static func generate_optional(run_seed: int, realm_id: StringName) -> WorldTopology:
+	if realm_id not in OPTIONAL_REALMS:
+		return null
+	var layout := WorldTopology.new()
+	layout._seed = run_seed
+	layout._realm = realm_id
+	var rng := RunRandom.new(run_seed)
+	var entrance := rng.draw(StringName("topology_v1_entry/%s" % realm_id)) % RING.size()
+	var ring: Array[Module] = []
+	for index: int in RING.size():
+		var id := StringName("interior_%d" % index)
+		if index == 0:
+			id = ENTRY
+		elif index == 3:
+			id = RETURN_EXIT
+		ring.append(layout._place(id, RING[(index + entrance) % RING.size()], []))
+	for index: int in ring.size():
+		layout._link(ring[index], ring[(index + 1) % ring.size()])
+	return layout
+
+
 func _place(id: StringName, cell: Vector2i, regions: Array[StringName], landmark: StringName = &"") -> Module:
 	var item := Module.new()
 	item.id = id
@@ -98,23 +127,35 @@ static func _link(first: Module, second: Module) -> void:
 
 func manifest() -> Dictionary:
 	var result: Array[Dictionary] = []
-	var ids := _modules.keys()
-	ids.sort()
-	for id: StringName in ids:
+	for id: StringName in _module_ids():
 		var item := _modules[id]
 		result.append({"id": id, "cell": item.cell, "regions": item.regions.duplicate(),
 			"landmark": item.landmark, "neighbors": item.neighbors.duplicate()})
-	return {"revision": REVISION, "realm": OVERWORLD, "seed": _seed,
+	return {"revision": REVISION, "realm": _realm, "seed": _seed,
 		"modules": result, "shortcut": _shortcut.duplicate()}
 
 
 ## A local checkpoint names its original generation. The current revision
 ## rejects a mismatched module or link before world state can use it.
 static func restore(saved: Dictionary) -> WorldTopology:
-	if saved.get("revision") != REVISION or not saved.get("seed") is int:
+	if (saved.get("revision") != REVISION or not saved.get("seed") is int
+			or not saved.get("realm") is StringName or not saved.get("modules") is Array):
 		return null
-	var layout := generate(saved["seed"])
-	return layout if layout.manifest() == saved else null
+	var realm_id: StringName = saved["realm"]
+	var layout := generate(saved["seed"]) if realm_id == OVERWORLD else generate_optional(saved["seed"], realm_id)
+	if layout == null:
+		return null
+	# The original checkpoint accepted the engine's StringName iteration
+	# order. Compare by stable names while retaining all recorded module facts.
+	var ordered: Array[Dictionary] = []
+	for row: Variant in saved["modules"]:
+		if not row is Dictionary or not row.get("id") is StringName:
+			return null
+		ordered.append(row)
+	ordered.sort_custom(func(left: Dictionary, right: Dictionary) -> bool: return String(left["id"]) < String(right["id"]))
+	var canonical := saved.duplicate()
+	canonical["modules"] = ordered
+	return layout if layout.manifest() == canonical else null
 
 
 func route(origin: StringName, destination: StringName, shortcut_open: bool = false) -> Array[StringName]:
@@ -153,10 +194,8 @@ func center(id: StringName) -> RealmSweep.Point:
 
 
 func realize(blocker_mask: int, shortcut_open: bool = false) -> RealmGeometry:
-	var geometry := RealmGeometry.new(OVERWORLD)
-	var ids := _modules.keys()
-	ids.sort()
-	for id: StringName in ids:
+	var geometry := RealmGeometry.new(_realm)
+	for id: StringName in _module_ids():
 		var item := _modules[id]
 		for side: int in CARDINAL.size():
 			var normal: Vector2i = CARDINAL[side]
@@ -168,6 +207,31 @@ func realize(blocker_mask: int, shortcut_open: bool = false) -> RealmGeometry:
 			if not _solid_side(geometry, item, side, neighbor, blocker_mask, shortcut_open):
 				return null
 	return geometry
+
+
+## A module connection must have room for a starter circle in the realized
+## geometry. The route test covers every open edge before a realm admits play.
+func has_clearance(geometry: RealmGeometry, blocker_mask: int, radius: float,
+		shortcut_open: bool = false) -> bool:
+	if geometry == null or geometry.realm_id != _realm:
+		return false
+	var start: StringName = ANCHORS[0] if _realm == OVERWORLD else ENTRY
+	for id: StringName in _module_ids():
+		if route(start, id, shortcut_open).is_empty():
+			return false
+		for neighbor: StringName in _modules[id].neighbors:
+			if String(id) >= String(neighbor) or (not shortcut_open and _is_shortcut(id, neighbor)):
+				continue
+			var proof := geometry.certify_circle_sweep(_realm, center(id), center(neighbor), radius, blocker_mask)
+			if proof == null or not proof.unresolved.is_empty() or not proof.contacts.is_empty():
+				return false
+	return true
+
+
+func _module_ids() -> Array[StringName]:
+	var ids := _modules.keys()
+	ids.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
+	return ids
 
 
 func _solid_side(geometry: RealmGeometry, item: Module, side: int, neighbor: StringName,
