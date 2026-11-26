@@ -4,9 +4,15 @@ const STARTERS := preload("res://src/catalog/starter_roster.tres")
 const RECIPES := preload("res://dev/fixtures/catalog_reciprocal.tres")
 const STATUS := ProfileStore.CommitResult
 
+class RefusableStore extends ProfileStore:
+	var refuse_commit: bool
+
+	func _commit_io() -> bool:
+		return false if refuse_commit else super._commit_io()
+
 var _catalog: DefinitionCatalog
 var _scratch: DirAccess
-var _alice: ProfileStore
+var _alice: RefusableStore
 
 
 func before_each() -> void:
@@ -21,7 +27,7 @@ func before_each() -> void:
 	entries.append(_definition(&"R99", CatalogEntry.Kind.RUNE, CatalogEntry.Eligibility.DISCOVERY))
 	_catalog = DefinitionCatalog.compile(&"wp21-fixture-v1", entries)
 	_scratch = DirAccess.create_temp("agip-profile-progression")
-	_alice = ProfileStore.new()
+	_alice = RefusableStore.new()
 	assert_true(_catalog.is_valid(), str(_catalog.issues()))
 	assert_eq(_alice.open("alice", _scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
 
@@ -101,6 +107,50 @@ func test_shop_rejects_invalid_rank_schedules() -> void:
 		_offer(&"movement", 1, ProfileShop.COMMON, 8, 1500),
 		_offer(&"movement", 2, ProfileShop.COMMON, 10, 1500),
 	]))
+
+
+func test_live_run_purchase_waits_for_pending_earnings_and_retries_once() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var setup := RunSetup.new()
+	setup.run_id = &"purchase-run"
+	setup.epoch = 1
+	setup.rules_revision = &"rules-v1"
+	setup.catalog_revision = _catalog.revision
+	setup.authority_id = &"host"
+	setup.challenge_id = &"normal"
+	setup.initial_realms = {&"host": &"overworld"}
+	var run := RunAuthority.new()
+	assert_true(run.start(setup, &"host"))
+	var signer := Crypto.new().generate_rsa(2048)
+	var binding := ProfileGrant.Binding.new()
+	binding.run = String(setup.run_id)
+	binding.rules = String(setup.rules_revision)
+	binding.catalog = String(setup.catalog_revision)
+	binding.issuer = signer
+	binding.recipient_key = signer
+	binding.recipient = "alice"
+	var earned := OrdinaryCurrency.begin(_alice, binding, signer, ProfileShop.COMMON)
+	assert_true(run.attach_ordinary_currency(earned))
+	assert_eq(earned.accrue("defeated/wildborn", Quantity.from_count(10)), OrdinaryCurrency.Eligibility.QUEUED)
+	var shop := ProfileShop.open(_alice, _catalog, "rules-v1", _offers(), run)
+	_alice.refuse_commit = true
+	var held := shop.buy("pending-rank", &"movement", 1)
+	assert_eq(held.status, STATUS.UNAVAILABLE)
+	assert_eq(_alice.lookup(held.id).status, STATUS.MISSING)
+	assert_eq(_alice.balance(ProfileShop.COMMON).native_at_scale(0), 0)
+	assert_eq(earned.pending_amount().native_at_scale(0), 10)
+	assert_eq(shop.upgrade_basis_points(&"movement"), 0)
+	_alice.refuse_commit = false
+	var settled := shop.buy("pending-rank", &"movement", 1)
+	assert_eq(settled.status, STATUS.COMMITTED)
+	assert_eq(settled.id, held.id)
+	assert_eq(_alice.balance(ProfileShop.COMMON).native_at_scale(0), 4)
+	assert_eq(shop.upgrade_basis_points(&"movement"), 500)
+	assert_eq(earned.accrue("defeated/legion", Quantity.from_count(3)), OrdinaryCurrency.Eligibility.QUEUED)
+	assert_eq(shop.buy("pending-rank", &"movement", 1).status, STATUS.DUPLICATE)
+	assert_eq(_alice.balance(ProfileShop.COMMON).native_at_scale(0), 4)
+	assert_eq(earned.pending_amount().native_at_scale(0), 3)
 
 
 func test_personal_fusion_identification_and_evolution_verification_preserve_recipe_visibility() -> void:

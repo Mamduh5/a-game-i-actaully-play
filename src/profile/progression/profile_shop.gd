@@ -29,10 +29,12 @@ var _rules: String
 var _catalog: DefinitionCatalog
 var _store: ProfileStore
 var _facts: ProfileProgression
+var _run: RunAuthority
 var _offers: Dictionary[String, Offer] = {}
 
 
-static func open(store: ProfileStore, catalog: DefinitionCatalog, rules: String, offers: Array[Offer]) -> ProfileShop:
+static func open(store: ProfileStore, catalog: DefinitionCatalog, rules: String,
+		offers: Array[Offer], active_run: RunAuthority = null) -> ProfileShop:
 	var facts := ProfileProgression.open(store, catalog)
 	if facts == null or not ProfileMutation.valid_id(rules) or not ProfileMutation.valid_id(String(catalog.revision)):
 		return null
@@ -41,6 +43,7 @@ static func open(store: ProfileStore, catalog: DefinitionCatalog, rules: String,
 	result._catalog = catalog
 	result._facts = facts
 	result._rules = rules
+	result._run = active_run
 	for offer: Offer in offers:
 		if not result._valid_offer(offer):
 			return null
@@ -79,6 +82,11 @@ func buy(request: String, id: StringName, rank: int = 0) -> ProfileStore.Receipt
 	purchase.deltas[offer.account] = offer.price.negated()
 	purchase.claims.append(_facts.ownership_claim(id) if rank == 0 else _key(id, rank))
 	var prior := _store.lookup(operation)
+	# A live run can still have qualified earnings newer than the durable balance.
+	if _run != null and prior.status != ProfileStore.CommitResult.COMMITTED:
+		if not _run.flush_ordinary_currency(_store.identity()):
+			return _receipt(ProfileStore.CommitResult.UNAVAILABLE, operation)
+		prior = _store.lookup(operation)
 	if prior.status == ProfileStore.CommitResult.COMMITTED:
 		return _store.commit_confirmed(purchase)
 	if prior.status != ProfileStore.CommitResult.MISSING:
