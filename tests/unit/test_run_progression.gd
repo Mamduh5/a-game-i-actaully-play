@@ -329,6 +329,8 @@ func test_rank_five_evolution_cards_rotate_and_reciprocal_forms_work_in_both_ord
 		_rank_recipe_bases(queue)
 		var first_bonus := queue.read_offer(queue.earn(11))
 		var second_bonus := queue.read_offer(queue.earn(12))
+		assert_eq(first_bonus.fusion, &"")
+		assert_eq(second_bonus.fusion, &"")
 		assert_true(first_bonus.evolution in [&"E07A", &"E12A"])
 		assert_true(second_bonus.evolution in [&"E07A", &"E12A"])
 		assert_ne(first_bonus.evolution, second_bonus.evolution)
@@ -352,7 +354,20 @@ func test_rank_five_evolution_cards_rotate_and_reciprocal_forms_work_in_both_ord
 		assert_true(restored.restore(resumed.checkpoint(), 13, 13))
 		assert_eq(restored.active_form(&"P07"), &"E07A")
 		assert_eq(restored.active_form(&"P12"), &"E12A")
-		assert_eq(restored.read_offer(restored.earn(14)).evolution, &"")
+		var fusion_offer := restored.read_offer(restored.earn(14))
+		assert_eq(fusion_offer.evolution, &"")
+		assert_eq(fusion_offer.fusion, &"F06")
+		var other_offer := restored.read_offer(restored.earn(15))
+		assert_eq(restored.select(fusion_offer.ordinal, &"F06"), Selection.APPLIED)
+		assert_eq(restored.active_form(&"P07"), &"F06")
+		assert_eq(restored.active_form(&"P12"), &"F06")
+		assert_eq(restored.ranks(), {&"P07": 5, &"P12": 5})
+		assert_eq(restored.select(other_offer.ordinal, &"F06"), Selection.STALE_OPTION)
+		var fused := RunRewardQueue.begin(preparation, RunRandom.new(6), &"host")
+		assert_true(fused.restore(restored.checkpoint(), 15, 15))
+		assert_eq(fused.active_form(&"P07"), &"F06")
+		assert_eq(fused.active_form(&"P12"), &"F06")
+		assert_eq(fused.read_offer(fused.earn(16)).fusion, &"")
 
 
 func test_selected_alternative_invalidates_its_sibling_and_lost_catalyst_without_reroll() -> void:
@@ -417,6 +432,44 @@ func test_evolution_choices_and_active_slot_survive_native_progression_reopen() 
 	assert_true(store.close())
 
 
+func test_fusion_rune_requirements_and_retained_capability_control_the_separate_bonus() -> void:
+	for arm: Array in [[false, false], [true, false], [true, true]]:
+		var equipped: bool = arm[0]
+		var retains: bool = arm[1]
+		var runes: Array[StringName] = [&"", &"R02" if equipped else &""]
+		var preparation := _recipe_preparation(runes, true, retains)
+		var queue := RunRewardQueue.begin(preparation, RunRandom.new(6), &"host")
+		_rank_recipe_bases(queue)
+		var tick := 10
+		for evolution: StringName in [&"E07A", &"E12A"]:
+			var acquired := false
+			for _attempt: int in 4:
+				tick += 1
+				var offer := queue.read_offer(queue.earn(tick))
+				if offer.evolution == evolution:
+					acquired = queue.select(offer.ordinal, evolution) == Selection.APPLIED
+					break
+			assert_true(acquired)
+		for _rank: int in 5:
+			tick += 1
+			assert_eq(queue.select(queue.earn(tick), &"P03"), Selection.APPLIED)
+		tick += 1
+		var frozen := queue.read_offer(queue.earn(tick))
+		assert_eq(frozen.evolution, &"E03A")
+		assert_eq(frozen.fusion, &"F06" if equipped else &"")
+		var resumed := RunRewardQueue.begin(preparation, RunRandom.new(6), &"host")
+		assert_true(resumed.restore(queue.checkpoint(), tick, tick))
+		assert_eq(resumed.read_offer(frozen.ordinal).options, frozen.options)
+		if not equipped:
+			continue
+		tick += 1
+		var chosen := resumed.read_offer(resumed.earn(tick))
+		assert_eq(resumed.select(chosen.ordinal, &"F06"), Selection.APPLIED)
+		assert_eq(resumed.select(chosen.ordinal, &"E03A"), Selection.UNKNOWN_REWARD)
+		assert_eq(resumed.read_offer(frozen.ordinal).options, frozen.options)
+		assert_eq(resumed.select(frozen.ordinal, &"E03A"), Selection.APPLIED if retains else Selection.STALE_OPTION)
+
+
 func _rank_recipe_bases(queue: RunRewardQueue) -> void:
 	var tick := 0
 	for base: StringName in [&"P07", &"P12"]:
@@ -427,23 +480,46 @@ func _rank_recipe_bases(queue: RunRewardQueue) -> void:
 			assert_eq(queue.select(offer.ordinal, base), Selection.APPLIED)
 
 
-static func _recipe_preparation(runes: Array[StringName]) -> RunPreparation:
+static func _recipe_preparation(runes: Array[StringName], fusion_controls: bool = false,
+		retains: bool = false) -> RunPreparation:
 	var bundle: CatalogBundle = load("res://dev/fixtures/catalog_reciprocal.tres")
 	var entries: Array[CatalogEntry] = [_entry(&"H01", Kind.HERO), _entry(&"W01", Kind.WEAPON),
 		_entry(&"R02", Kind.RUNE)]
-	entries.append_array(bundle.entries)
+	for entry: CatalogEntry in bundle.entries:
+		if fusion_controls and entry.id == &"F06":
+			var fusion: CatalogEntry = entry.duplicate()
+			fusion.fusion_runes = [_recipe_ref(&"R02")]
+			if retains:
+				fusion.second_component_capabilities = [&"reprisal_pulse"]
+			entries.append(fusion)
+		else:
+			entries.append(entry)
 	var alternate := _entry(&"E07B", Kind.EVOLUTION, Eligibility.RUN_RECIPE)
 	alternate.lifetime = CatalogEntry.Lifetime.RUN
-	alternate.base = CatalogReference.new()
-	alternate.base.target_id = &"P07"
-	alternate.catalyst = CatalogReference.new()
-	alternate.catalyst.target_id = &"R02"
+	alternate.base = _recipe_ref(&"P07")
+	alternate.catalyst = _recipe_ref(&"R02")
 	entries.append(alternate)
 	var candidates := _slots()
 	candidates[0] = &"P07"
 	candidates[1] = &"P12"
+	if fusion_controls:
+		var third := _entry(&"P03", Kind.POWER)
+		third.ranks = [&"rank1", &"rank2", &"rank3", &"rank4", &"rank5"]
+		var third_form := _entry(&"E03A", Kind.EVOLUTION, Eligibility.RUN_RECIPE)
+		third_form.lifetime = CatalogEntry.Lifetime.RUN
+		third_form.base = _recipe_ref(third.id)
+		third_form.catalyst = _recipe_ref(&"P12")
+		third_form.catalyst_capability = &"reprisal_pulse"
+		entries.append_array([third, third_form])
+		candidates[2] = third.id
 	return RunPreparation.select(DefinitionCatalog.compile(&"fixture_evolutions", entries),
 		&"H01", &"W01", runes, candidates, {&"P07": true, &"P12": true})
+
+
+static func _recipe_ref(id: StringName) -> CatalogReference:
+	var reference := CatalogReference.new()
+	reference.target_id = id
+	return reference
 
 
 static func _setup() -> RunSetup:

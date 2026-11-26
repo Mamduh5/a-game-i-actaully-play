@@ -120,7 +120,7 @@ func _validate_fields(definition: CatalogDefinition) -> void:
 			_issue(id, IssueCode.INVALID_FIELDS)
 	if definition.kind != CatalogEntry.Kind.FUSION:
 		if not definition.components.is_empty() or not definition.first_component_capabilities.is_empty() \
-				or not definition.second_component_capabilities.is_empty():
+				or not definition.second_component_capabilities.is_empty() or not definition.fusion_runes.is_empty():
 			_issue(id, IssueCode.INVALID_FIELDS)
 	if definition.kind in [CatalogEntry.Kind.POWER, CatalogEntry.Kind.WEAPON, +			CatalogEntry.Kind.EVOLUTION, CatalogEntry.Kind.FUSION] and definition.source_family.is_empty():
 		_issue(id, IssueCode.INCOMPLETE_METADATA)
@@ -148,6 +148,12 @@ func _validate_evolution(form: CatalogDefinition, forms_by_base: Dictionary[Stri
 func _validate_fusion(fusion: CatalogDefinition) -> void:
 	if fusion.eligibility != CatalogEntry.Eligibility.RUN_RECIPE:
 		_issue(fusion.id, IssueCode.INCOMPLETE_METADATA)
+	var runes: Array[StringName] = []
+	for link: CatalogDefinition.Reference in fusion.fusion_runes:
+		_check_link(fusion.id, link, [CatalogEntry.Kind.RUNE])
+		runes.append(link.id)
+	if runes.size() > CatalogRecipeValidator.RUNE_SLOTS or not _unique_values(runes):
+		_issue(fusion.id, IssueCode.INVALID_FIELDS, runes)
 	if fusion.components.size() != 2:
 		_issue(fusion.id, IssueCode.INVALID_FIELDS, _recipe_ids(fusion))
 		return

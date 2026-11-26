@@ -44,6 +44,8 @@ var catalyst_capability: StringName:
 	get: return _fields.catalyst_capability
 var components: Array[Reference]:
 	get: return _fields.components
+var fusion_runes: Array[Reference]:
+	get: return _fields.fusion_runes
 var first_component_capabilities: Array[StringName]:
 	get: return _fields.first_component_capabilities
 var second_component_capabilities: Array[StringName]:
@@ -77,6 +79,7 @@ func _init(source: CatalogEntry) -> void:
 		"catalyst": Reference.new(source.catalyst) if source.catalyst != null else null,
 		"catalyst_capability": source.catalyst_capability,
 		"components": _compile_links(source.components),
+		"fusion_runes": _compile_links(source.fusion_runes),
 		"first_component_capabilities": retained_first,
 		"second_component_capabilities": retained_second,
 	}

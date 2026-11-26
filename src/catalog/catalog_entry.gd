@@ -30,5 +30,6 @@ enum Eligibility { UNSET, STARTER, DISCOVERY, OWNERSHIP, RUN_RECIPE }
 
 ## Fusion components are ordered to scope their retained capabilities.
 @export var components: Array[CatalogReference] = []
+@export var fusion_runes: Array[CatalogReference] = []
 @export var first_component_capabilities: Array[StringName] = []
 @export var second_component_capabilities: Array[StringName] = []

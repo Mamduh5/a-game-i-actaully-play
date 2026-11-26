@@ -55,6 +55,9 @@ func _complete(
 	var bases: Dictionary[StringName, bool] = {}
 	var runes: Dictionary[StringName, bool] = {}
 	var missing: CatalogDefinition
+	for fusion: CatalogDefinition in fusions:
+		for rune: CatalogDefinition.Reference in fusion.fusion_runes:
+			runes[rune.id] = true
 	for form: CatalogDefinition in forms.values():
 		bases[form.base.id] = true
 		var catalyst: CatalogDefinition = _definitions[form.catalyst.id]
