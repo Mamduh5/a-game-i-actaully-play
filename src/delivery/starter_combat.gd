@@ -30,6 +30,7 @@ var _weapon: StarterWeapon
 var _hero: StringName
 var _force_equipped: bool
 var _lightning_equipped: bool
+var _bleed_equipped: bool
 var _kernel: CombatKernel
 var _geometry: RealmGeometry
 var _actor: StringName
@@ -65,6 +66,7 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	result._hero = preparation.hero
 	result._force_equipped = &"R03" in preparation.runes()
 	result._lightning_equipped = &"R02" in preparation.runes()
+	result._bleed_equipped = &"R01" in preparation.runes()
 	result._kernel = kernel
 	result._geometry = geometry
 	result._actor = actor
@@ -93,6 +95,8 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		else CombatAction.Damage.PHYSICAL)
 	action.components[0].categories = bonuses
 	action.activation_costs = costs
+	if _bleed_equipped:
+		action.bleed = _rules.bleed_application(bonuses)
 	if _lightning_equipped:
 		action.lightning_reach = _rules.lightning_reach
 		action.lightning_targets = _hostiles

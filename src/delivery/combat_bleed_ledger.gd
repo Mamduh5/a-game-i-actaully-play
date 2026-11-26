@@ -4,6 +4,8 @@ extends RefCounted
 ## create a stack. A reapplication keeps existing snapshots and tick phase.
 
 class Stack:
+	var source: StringName
+	var source_life: int
 	var origin: CombatOrigin
 	var offense: CombatAction.Component
 	var id: String
@@ -11,6 +13,8 @@ class Stack:
 	func copy() -> Stack:
 		var result := Stack.new()
 		result.id = id
+		result.source = source
+		result.source_life = source_life
 		result.origin = origin.copy()
 		result.offense = offense.copy()
 		return result
@@ -24,6 +28,14 @@ class Application:
 	func is_valid() -> bool:
 		return (duration > 0 and period > 0 and capacity > 0 and offense != null
 			and offense.is_valid() and offense.kind == CombatAction.Damage.PHYSICAL)
+
+	func copy() -> Application:
+		var result := Application.new()
+		result.duration = duration
+		result.period = period
+		result.capacity = capacity
+		result.offense = offense.copy()
+		return result
 
 class Owner:
 	var cadence: CombatDeliverySchedule
@@ -45,6 +57,30 @@ var _life: int
 var _owners: Dictionary[String, Owner] = {}
 var _latest_application: CombatInstant
 var _applied_at_instant: Dictionary[String, bool] = {}
+
+
+func copy() -> CombatBleedLedger:
+	var result := create(_target, _life)
+	result._latest_application = _latest_application
+	result._applied_at_instant = _applied_at_instant.duplicate()
+	for key: String in _owners:
+		var entry := Owner.new()
+		entry.cadence = _owners[key].cadence.copy()
+		entry.stacks = _owners[key].stacks.duplicate()
+		result._owners[key] = entry
+	return result
+
+
+func deadlines() -> Array[CombatInstant]:
+	var result: Array[CombatInstant] = []
+	for entry: Owner in _owners.values():
+		var next := entry.cadence.next_event()
+		result.append(next.instant if next != null else null)
+	return result
+
+
+func owners() -> Array[String]:
+	return _owners.keys()
 
 
 static func create(target: StringName, life: int) -> CombatBleedLedger:
@@ -78,6 +114,8 @@ func apply(hit: CombatKernel.Hit, now: CombatInstant, definition: Application) -
 	if entry.stacks.size() < definition.capacity:
 		var stack := Stack.new()
 		stack.id = occurrence
+		stack.source = hit.source
+		stack.source_life = hit.source_life
 		stack.origin = hit.origin.copy()
 		stack.offense = definition.offense.copy()
 		entry.stacks.append(stack)
@@ -130,7 +168,10 @@ func consume(origin: CombatOrigin, captured: Prestate, now: CombatInstant, maxim
 func due_for(origin: CombatOrigin, through: CombatInstant) -> Tick:
 	if origin == null:
 		return null
-	var owner := _owner_key(origin)
+	return due_for_owner(_owner_key(origin), through)
+
+
+func due_for_owner(owner: String, through: CombatInstant) -> Tick:
 	var entry: Owner = _owners.get(owner)
 	if entry == null:
 		return null

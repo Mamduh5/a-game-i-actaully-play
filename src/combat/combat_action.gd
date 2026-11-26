@@ -119,6 +119,7 @@ var lightning_reach: float
 var lightning_targets: int
 var lightning_damage: Quantity
 var storm_relay: bool
+var bleed: CombatBleedLedger.Application
 var restore_source: Quantity
 var damage_recovery: Array[DamageRecovery] = []
 var barrier_for_source: BarrierGrant
@@ -141,6 +142,7 @@ func is_valid() -> bool:
 			or (lightning_damage == null) != (lightning_targets == 0)
 			or (lightning_damage != null and lightning_damage.sign_value <= 0)
 			or (storm_relay and lightning_damage == null)
+			or (bleed != null and not bleed.is_valid())
 			or (restore_source != null and restore_source.sign_value <= 0)
 			or (barrier_for_source != null and not barrier_for_source.is_valid())
 			or (converted_barrier != null and not converted_barrier.is_valid())):
@@ -185,6 +187,7 @@ func copy() -> CombatAction:
 	result.lightning_targets = lightning_targets
 	result.lightning_damage = lightning_damage
 	result.storm_relay = storm_relay
+	result.bleed = bleed.copy() if bleed != null else null
 	result.restore_source = restore_source
 	for rule: DamageRecovery in damage_recovery:
 		result.damage_recovery.append(rule.copy())

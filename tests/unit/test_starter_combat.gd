@@ -226,6 +226,25 @@ func test_sword_cleaves_each_intersecting_enemy_while_moving_and_pays_once() -> 
 	assert_eq(controls.step(arena.geometry, HERO, 0, BLOCKER, 100.0, 0.01).y, 2.0)
 
 
+func test_bleed_refresh_keeps_first_tick_and_new_stack_waits_until_following_tick() -> void:
+	var arena := Arena.new(&"W01", &"H01", false, &"R01")
+	assert_true(arena.add(&"aim", 30, 0, 200))
+	for tick: int in [1, 61]:
+		assert_eq(arena.attack(tick), Committed)
+		assert_true(arena.combat.advance(tick))
+		var hits := arena.settle(tick)
+		assert_eq(hits.size(), 1 if tick == 1 else 2)
+	assert_eq(arena.hp(&"aim").native_at_scale(0), 157)
+	for tick: int in [121, 181, 241]:
+		var ticks := arena.settle(tick)
+		assert_eq(ticks.size(), 2)
+		for hit: CombatKernel.Hit in ticks:
+			assert_eq(hit.family, &"R01.bleed")
+			assert_eq(hit.origin.owner, HERO)
+	assert_null(arena.kernel.next_due())
+	assert_eq(arena.hp(&"aim").native_at_scale(0), 139)
+
+
 func test_force_sword_uses_actual_target_direction_resistance_and_wall_clearance() -> void:
 	for rune: StringName in [&"", &"R03"]:
 		var arena := Arena.new(&"W01", &"H01", false, rune)

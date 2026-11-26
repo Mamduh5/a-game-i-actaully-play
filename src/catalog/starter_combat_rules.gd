@@ -26,6 +26,10 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 @export var force_distance: float = 20.0
 @export var lightning_reach: float = 64.0
 @export var lightning_damage: int = 10
+@export var bleed_damage: int = 3
+@export var bleed_capacity: int = 3
+@export var bleed_duration: int = 180
+@export var bleed_period: int = 60
 
 
 func is_valid_for(catalog: DefinitionCatalog) -> bool:
@@ -33,6 +37,7 @@ func is_valid_for(catalog: DefinitionCatalog) -> bool:
 			or not is_finite(harmonic_reach) or harmonic_reach <= 0.0 or harmonic_damage <= 0 or harmonic_cooldown <= 0
 			or not is_finite(force_distance) or force_distance <= 0.0
 			or not is_finite(lightning_reach) or lightning_reach <= 0.0 or lightning_damage <= 0
+			or bleed_damage <= 0 or bleed_capacity <= 0 or bleed_period <= 0 or bleed_duration < bleed_period
 			or resonance_cap <= 0 or harvest_per_kill <= 0 or harvest_cap < harvest_per_kill
 			or not is_finite(siphon_radius) or siphon_radius <= 0.0 or siphon_damage <= 0
 			or siphon_ratio_percent <= 0 or siphon_ratio_percent > 100 or siphon_cap <= 0
@@ -54,6 +59,17 @@ func weapon_for(id: StringName) -> StarterWeapon:
 		if weapon.id == id:
 			return weapon
 	return null
+
+
+func bleed_application(bonuses: Array[QuantityFormula.BonusCategory]) -> CombatBleedLedger.Application:
+	var application := CombatBleedLedger.Application.new()
+	application.offense = CombatAction.Component.new()
+	application.offense.base = Quantity.from_count(bleed_damage)
+	application.offense.categories = bonuses
+	application.capacity = bleed_capacity
+	application.duration = bleed_duration
+	application.period = bleed_period
+	return application
 
 
 func prepare_hero(actor: CombatantState, preparation: RunPreparation) -> bool:

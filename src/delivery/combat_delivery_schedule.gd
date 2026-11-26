@@ -26,6 +26,21 @@ var end_reason: End:
 var next_tick: CombatInstant:
 	get: return _next_tick
 
+func next_event() -> Due:
+	return due_through(_expiry)
+
+
+func copy() -> CombatDeliverySchedule:
+	var result := CombatDeliverySchedule.new()
+	result._period = _period
+	result._next_tick = _next_tick
+	result._start = _start
+	result._expiry = _expiry
+	result._latest = _latest
+	result._ordinal = _ordinal
+	result._end = _end
+	return result
+
 
 static func create(start: CombatInstant, duration: int, period: int, immediate_tick: bool = false) -> CombatDeliverySchedule:
 	if start == null or duration <= 0 or period <= 0:

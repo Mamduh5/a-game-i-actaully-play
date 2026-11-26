@@ -28,7 +28,7 @@ class Rules extends RunAuthority:
 		var tuning: StarterCombatRules = load("res://src/catalog/starter_combat.tres")
 		var roster: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		var catalog := roster.compile()
-		var weapon := &"W01" if which in ["sword", "conductor-charged"] else (&"W03" if which == "sigil" else &"W02")
+		var weapon := &"W01" if which in ["sword", "bleed", "conductor-charged"] else (&"W03" if which == "sigil" else &"W02")
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
@@ -36,6 +36,8 @@ class Rules extends RunAuthority:
 		var runes: Array[StringName] = [&"", &""]
 		if which == "storm-relay":
 			runes.assign([&"R02", &"R03"])
+		elif which == "bleed":
+			runes[0] = &"R01"
 		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, {})
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
@@ -57,6 +59,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"bleed":
+				return _enemy(&"near", 357, 380, 100)
 			"storm-relay":
 				return _enemy(&"primary", 390, 380, 100) and _enemy(&"first", 370, 415, 100, false) and _enemy(&"relay", 435, 405, 100, false)
 			"conductor-charged":
@@ -179,6 +183,11 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"bleed":
+				return (launches == 1 and kernel.pending_count() == 0
+					and kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0) == 71
+					and trace == [[8, "W01", "near", false], [68, "R01.bleed", "near", false],
+						[128, "R01.bleed", "near", false], [188, "R01.bleed", "near", false]])
 			"storm-relay":
 				return (launches == 1 and geometry.circle_center(&"primary", 0).x == 410.0
 					and trace.size() == 3 and trace[0].slice(1) == ["W02", "primary", false]
@@ -250,6 +259,8 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "The Conductor\nResonance %d" % _rules.combat.resonance
 	elif _case == "storm-relay":
 		_hud.text = "Lightning + Force\nStorm Relay"
+	elif _case == "bleed":
+		_hud.text = "Bleed\nTarget HP %d" % _rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0)
 	else:
 		_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
 			{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
@@ -257,9 +268,9 @@ func _physics_process(_delta: float) -> void:
 		]
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
-			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17]}[_case]:
+			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17], "bleed": [190]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
-	if tick >= (252 if _case == "conductor-charged" else 59) or not _rules.passed:
+	if tick >= int({"conductor-charged": 252, "bleed": 192}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
 		var pose := _rules.geometry.circle_center(Player, 0)
 		var facts := [_case, _rules.trace, snappedf(pose.y, 0.001), _rules.launches, _rules.manual,
