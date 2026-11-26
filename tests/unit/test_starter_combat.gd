@@ -249,6 +249,46 @@ func test_bleed_refresh_keeps_first_tick_and_new_stack_waits_until_following_tic
 	assert_eq(arena.hp(&"aim").native_at_scale(0), 139)
 
 
+func test_two_sword_users_bleed_one_target_on_independent_clocks() -> void:
+	var arena := Arena.new(&"W01", &"H01", false, &"R01")
+	assert_true(arena.add(&"aim", 30, 0, 200))
+	assert_true(arena.add(&"partner", 0, 2, 100, FRIEND))
+	var slots: Array[StringName] = []
+	slots.resize(RunPreparation.CANDIDATE_SLOTS)
+	slots.fill(&"")
+	var prep := RunPreparation.select(arena.catalog, &"H01", &"W01", [&"R01", &""], slots, {})
+	var partner := StarterCombat.create(arena.rules, arena.catalog, prep, arena.kernel, arena.geometry,
+		&"partner", HOSTILE, HOSTILE, BLOCKER)
+	assert_eq(arena.attack(1), Committed)
+	arena.settle(1)
+	assert_eq(partner.try_weapon(11, PlayerTargeting.new(), arena.candidates), Committed)
+	arena.settle(11)
+	for at: int in [61, 71, 121, 131, 181, 191]:
+		var hits := arena.settle(at)
+		assert_eq(hits.size(), 1)
+		if hits.size() == 1:
+			assert_eq(hits[0].family, &"R01.bleed")
+			assert_eq(hits[0].origin.owner, HERO if at % 60 == 1 else &"partner")
+	assert_null(arena.kernel.next_due())
+
+
+func test_thunder_rupture_consumes_each_secondary_targets_owned_pre_arc_stack_once() -> void:
+	for rune: StringName in [&"", &"R01"]:
+		var arena := Arena.new(&"W01", &"H01", false, &"R02", rune)
+		assert_true(arena.add(&"front", 30, 0, 200))
+		assert_true(arena.add(&"flank", 40, 10, 200))
+		assert_eq(arena.attack(1), Committed)
+		var hits := arena.settle(1)
+		var counts: Dictionary[StringName, int] = {}
+		for hit: CombatKernel.Hit in hits:
+			counts[hit.family] = counts.get(hit.family, 0) + 1
+		assert_eq(counts.get(&"W01", 0), 2)
+		assert_eq(counts.get(&"R02.lightning", 0), 2)
+		assert_eq(counts.get(&"RP01.thunder_rupture", 0), 2 if rune == &"R01" else 0)
+		assert_eq(arena.hp(&"front").native_at_scale(0), 164 if rune == &"R01" else 170)
+		assert_null(arena.kernel.next_due())
+
+
 func test_force_sword_uses_actual_target_direction_resistance_and_wall_clearance() -> void:
 	for rune: StringName in [&"", &"R03"]:
 		var arena := Arena.new(&"W01", &"H01", false, rune)

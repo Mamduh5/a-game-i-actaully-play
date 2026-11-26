@@ -102,6 +102,8 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		action.lightning_targets = _hostiles
 		action.lightning_damage = Quantity.from_count(_rules.lightning_damage)
 		action.storm_relay = _force_equipped
+		if _bleed_equipped:
+			action.rupture_per_stack = _rules.rupture_per_stack
 	var heading := PlayerControlState.direction(start, aim, RealmSweep.Point.new(1.0, 0.0))
 	if _force_equipped:
 		if _weapon.delivery == StarterWeapon.Delivery.ARROW:

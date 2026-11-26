@@ -133,6 +133,7 @@ class Ancestry:
 	var previous: Ancestry
 
 class Posting:
+	var before_bleed: CombatBleedLedger.Prestate
 	var impact: Impact
 	var hit: Hit
 
@@ -729,6 +730,8 @@ func _resolve_wave(group: Group) -> StringName:
 			group.receipt.hits.append(hit)
 			if hit.accepted:
 				var posting := Posting.new()
+				if group.bleeds.has(id):
+					posting.before_bleed = group.bleeds[id].capture(group.receipt.due)
 				posting.hit = hit
 				posting.impact = impact
 				postings.append(posting)
@@ -1031,6 +1034,8 @@ func _queue_descendants(group: Group, postings: Array[Posting]) -> StringName:
 		if source != null and (source.life != posting.hit.source_life or source.realm != target.realm):
 			source = null
 		if source != null:
+			if posting.impact.reaction == &"R02.lightning" and posting.impact.action.rupture_per_stack > 0:
+				_queue_rupture(group, claims, posting, source)
 			if posting.hit.hostile and posting.impact.action.lightning_damage != null:
 				var arc_failure := _queue_lightning(group, claims, posting, source)
 				if not arc_failure.is_empty():
@@ -1046,6 +1051,31 @@ func _queue_descendants(group: Group, postings: Array[Posting]) -> StringName:
 		if not failure.is_empty():
 			return failure
 	return &"causal_cycle" if _has_repeated_continuation(group) else &""
+
+
+static func _queue_rupture(group: Group, claims: Array[ReactionClaim], posting: Posting, source: CombatantState) -> void:
+	var hit := posting.hit
+	var ledger: CombatBleedLedger = group.bleeds.get(hit.target)
+	if ledger == null or posting.before_bleed == null or not group.actors[hit.target].is_alive():
+		return
+	var stacks := ledger.consume(hit.origin, posting.before_bleed, group.receipt.due, 0x7fffffff)
+	if stacks.is_empty():
+		return
+	if ledger.owners().is_empty():
+		group.bleeds.erase(hit.target)
+	var rule := CombatFollowUp.new()
+	rule.id = &"RP01.thunder_rupture"
+	rule.family = rule.id
+	rule.component = CombatAction.Component.new()
+	rule.component.kind = CombatAction.Damage.MAGICAL
+	rule.component.base = Quantity.from_count(posting.impact.action.rupture_per_stack).multiply(Quantity.from_count(stacks.size()))
+	var claim := ReactionClaim.new()
+	claim.rule = rule
+	claim.posting = posting
+	claim.actor = source
+	claim.target = group.actors[hit.target]
+	claim.shape = hit.shape
+	claims.append(claim)
 
 
 func _queue_lightning(group: Group, claims: Array[ReactionClaim], posting: Posting, source: CombatantState) -> StringName:
@@ -1224,6 +1254,8 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 	action.source = claim.actor.id
 	action.source_life = claim.actor.life
 	action.family = rule.family
+	if rule.id == &"R02.lightning":
+		action.rupture_per_stack = cause.action.rupture_per_stack
 	action.origin = receipt.origin.copy()
 	action.origin.owner = claim.actor.owner
 	action.origin.provenance = claim.actor.provenance
