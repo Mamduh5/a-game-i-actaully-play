@@ -51,6 +51,7 @@ var barrier_on_elimination: CombatAction.BarrierGrant
 var physical := Defense.new()
 var magical := Defense.new()
 var prevents_hit: bool
+var displacement_resistance: float = 0.0
 var accepts_new_actions := true
 var revival_protected_until: CombatInstant
 var statuses: Dictionary[StringName, int] = {}
@@ -65,6 +66,7 @@ func is_valid() -> bool:
 	if (id.is_empty() or realm.is_empty() or realm_visit < 0 or life <= 0 or owner.is_empty() or controller == id
 			or provenance not in [CombatOrigin.Provenance.SEAT, CombatOrigin.Provenance.SPAWN]
 			or not _valid_pool(hp) or physical == null or not physical.is_valid()
+			or not is_finite(displacement_resistance) or displacement_resistance < 0.0 or displacement_resistance > 1.0
 			or magical == null or not magical.is_valid()
 			or (barrier_on_elimination != null and not barrier_on_elimination.is_valid())):
 		return false
@@ -114,6 +116,7 @@ func copy() -> CombatantState:
 	result.physical = physical.copy()
 	result.magical = magical.copy()
 	result.prevents_hit = prevents_hit
+	result.displacement_resistance = displacement_resistance
 	result.accepts_new_actions = accepts_new_actions
 	result.revival_protected_until = revival_protected_until
 	if barrier_on_elimination != null:

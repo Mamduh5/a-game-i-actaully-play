@@ -23,11 +23,13 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 @export var harmonic_damage: int = 18
 @export var harmonic_cooldown: int = 240
 @export var resonance_cap: int = 5
+@export var force_distance: float = 20.0
 
 
 func is_valid_for(catalog: DefinitionCatalog) -> bool:
 	if (catalog == null or not catalog.is_valid() or revision <= 0 or weapons.size() != 3
 			or not is_finite(harmonic_reach) or harmonic_reach <= 0.0 or harmonic_damage <= 0 or harmonic_cooldown <= 0
+			or not is_finite(force_distance) or force_distance <= 0.0
 			or resonance_cap <= 0 or harvest_per_kill <= 0 or harvest_cap < harvest_per_kill
 			or not is_finite(siphon_radius) or siphon_radius <= 0.0 or siphon_damage <= 0
 			or siphon_ratio_percent <= 0 or siphon_ratio_percent > 100 or siphon_cap <= 0

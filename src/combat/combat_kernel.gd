@@ -776,10 +776,11 @@ static func _apply_statuses(group: Group, postings: Array[Posting]) -> void:
 
 func _displace(group: Group, postings: Array[Posting]) -> bool:
 	for posting: Posting in postings:
-		var offset := posting.impact.action.displacement
+		var action := posting.impact.action
+		var offset := action.displacement
 		var hit := posting.hit
 		var target := group.actors[hit.target]
-		if offset == null or not target.is_alive():
+		if (offset == null and action.push_center == null) or not target.is_alive() or target.displacement_resistance == 1.0:
 			continue
 		var realm := target.realm
 		if not group.geometry.has(realm):
@@ -790,7 +791,13 @@ func _displace(group: Group, postings: Array[Posting]) -> bool:
 		var start := geometry.circle_center(target.id, hit.shape)
 		if start == null:
 			return false
-		var finish := RealmSweep.Point.new(start.x + offset.x, start.y + offset.y)
+		if action.push_center != null:
+			var axis := PlayerControlState.direction(action.push_center, start, RealmSweep.Point.new(0, 0))
+			if axis.x == 0.0 and axis.y == 0.0:
+				continue
+			offset = RealmSweep.Point.new(axis.x * action.radial_distance, axis.y * action.radial_distance)
+		var scale := 1.0 - target.displacement_resistance
+		var finish := RealmSweep.Point.new(start.x + offset.x * scale, start.y + offset.y * scale)
 		hit.displacement = geometry.displace_circle(target.id, hit.shape, finish, _blocker_masks[realm])
 		if hit.displacement == null:
 			return false

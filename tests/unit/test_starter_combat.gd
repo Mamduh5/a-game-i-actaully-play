@@ -18,7 +18,8 @@ class Arena:
 	var candidates: Array[PlayerTargeting.Candidate] = []
 	var targeting := PlayerTargeting.new()
 
-	func _init(weapon: StringName, hero: StringName = &"H01", short_cooldown: bool = false) -> void:
+	func _init(weapon: StringName, hero: StringName = &"H01", short_cooldown: bool = false,
+			rune: StringName = &"") -> void:
 		var source: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		catalog = source.compile()
 		if short_cooldown:
@@ -27,7 +28,7 @@ class Arena:
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
-		var prep := RunPreparation.select(catalog, hero, weapon, [&"", &""], slots, {})
+		var prep := RunPreparation.select(catalog, hero, weapon, [rune, &""], slots, {})
 		var actor := make_actor(HERO, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
@@ -50,8 +51,9 @@ class Arena:
 		return actor
 
 	func add(id: StringName, x: float, y: float, hp: int, kind: int = HOSTILE,
-			known: bool = true, controller: StringName = &"") -> bool:
+			known: bool = true, controller: StringName = &"", resistance: float = 0.0) -> bool:
 		var actor := make_actor(id, hp, CombatOrigin.Provenance.SEAT if kind == FRIEND else CombatOrigin.Provenance.SPAWN)
+		actor.displacement_resistance = resistance
 		if not controller.is_empty():
 			actor.controller = controller
 			actor.owner = controller
@@ -222,6 +224,47 @@ func test_sword_cleaves_each_intersecting_enemy_while_moving_and_pays_once() -> 
 		assert_eq(arena.hp(id).native_at_scale(0), 100)
 	assert_eq(arena.kernel.actor_snapshot(HERO).resources[MANA].native_at_scale(0), 8)
 	assert_eq(controls.step(arena.geometry, HERO, 0, BLOCKER, 100.0, 0.01).y, 2.0)
+
+
+func test_force_sword_uses_actual_target_direction_resistance_and_wall_clearance() -> void:
+	for rune: StringName in [&"", &"R03"]:
+		var arena := Arena.new(&"W01", &"H01", false, rune)
+		assert_true(arena.add(&"aim", 15, 0, 100))
+		assert_true(arena.add(&"flank", 30, 40, 100, HOSTILE, true, &"", 0.5))
+		assert_true(arena.add(&"immune", 48, -24, 100, HOSTILE, true, &"", 1.0))
+		assert_true(arena.wall(26, -6, 6))
+		assert_eq(arena.attack(1), Committed)
+		var hits := arena.settle(1)
+		assert_eq(hits.size(), 3)
+		var flank := arena.geometry.circle_center(&"flank", 0)
+		assert_eq(flank.x, 36.0 if rune == &"R03" else 30.0)
+		assert_eq(flank.y, 48.0 if rune == &"R03" else 40.0)
+		var aim := arena.geometry.circle_center(&"aim", 0)
+		if rune == &"R03":
+			assert_gt(aim.x, 15.0)
+			assert_lte(aim.x, 23.0)
+		else:
+			assert_eq(aim.x, 15.0)
+		assert_eq(arena.geometry.circle_center(&"immune", 0).x, 48.0)
+		for id: StringName in [&"aim", &"flank", &"immune"]:
+			assert_eq(arena.hp(id).native_at_scale(0), 80)
+
+
+func test_force_arrow_keeps_its_heading_and_staff_pushes_from_its_committed_center() -> void:
+	for weapon: StringName in [&"W02", &"W03"]:
+		var arena := Arena.new(weapon, &"H01", false, &"R03")
+		assert_true(arena.add(&"aim", 50, 0, 100))
+		assert_true(arena.add(&"interceptor", 20, 80, 100, HOSTILE, false))
+		assert_eq(arena.attack(1), Committed)
+		assert_true(arena.move(&"aim", 50, 120))
+		assert_true(arena.move(&"interceptor", 32 if weapon == &"W02" else 50, 2 if weapon == &"W02" else -18))
+		for tick: int in range(1, 26):
+			assert_true(arena.combat.advance(tick))
+			arena.settle(tick)
+		var pose := arena.geometry.circle_center(&"interceptor", 0)
+		assert_eq(pose.x, 52.0 if weapon == &"W02" else 50.0)
+		assert_eq(pose.y, 2.0 if weapon == &"W02" else -38.0)
+		assert_eq(arena.hp(&"interceptor").native_at_scale(0), 76)
 
 
 func test_bow_keeps_its_launch_heading_through_a_paid_miss_and_interception() -> void:

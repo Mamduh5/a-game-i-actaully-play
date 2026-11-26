@@ -113,6 +113,8 @@ var add_status: StringName
 var status_units: int
 var consume_status: StringName
 var displacement: RealmSweep.Point
+var push_center: RealmSweep.Point
+var radial_distance: float
 var restore_source: Quantity
 var damage_recovery: Array[DamageRecovery] = []
 var barrier_for_source: BarrierGrant
@@ -127,6 +129,9 @@ func is_valid() -> bool:
 			or (add_status.is_empty() and status_units != 0) or (not add_status.is_empty() and status_units <= 0)
 			or (hp_cost != null and hp_cost.sign_value <= 0) or (automatic_hp_cost and hp_cost == null)
 			or (displacement != null and (not is_finite(displacement.x) or not is_finite(displacement.y)))
+			or not is_finite(radial_distance) or radial_distance < 0.0
+			or (push_center == null) != (radial_distance == 0.0)
+			or (push_center != null and (displacement != null or not is_finite(push_center.x) or not is_finite(push_center.y)))
 			or (restore_source != null and restore_source.sign_value <= 0)
 			or (barrier_for_source != null and not barrier_for_source.is_valid())
 			or (converted_barrier != null and not converted_barrier.is_valid())):
@@ -176,6 +181,9 @@ func copy() -> CombatAction:
 		result.converted_barrier = converted_barrier.copy()
 	if displacement != null:
 		result.displacement = RealmSweep.Point.new(displacement.x, displacement.y)
+	if push_center != null:
+		result.push_center = RealmSweep.Point.new(push_center.x, push_center.y)
+		result.radial_distance = radial_distance
 	for component: Component in components:
 		result.components.append(component.copy())
 	return result
