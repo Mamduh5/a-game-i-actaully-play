@@ -7,6 +7,7 @@ const Admission := RunAuthority.Admission
 
 class TravelAuthority extends RunAuthority:
 	var party: RunParty
+	var activity: WorldActivity
 	var closed_party := false
 
 	func _supports_action(action: StringName) -> bool:
@@ -18,7 +19,7 @@ class TravelAuthority extends RunAuthority:
 				party.apply_input(intent.seat_id, intent.command)
 		for seat: StringName in party.initialized_seats():
 			party.step_movement(seat, 6000.0, 1.0 / 60.0)
-		closed_party = party.close_tick(tick)
+		closed_party = (activity == null or activity.advance(tick) != null) and party.close_tick(tick)
 		return []
 
 class Route:
@@ -343,3 +344,56 @@ func test_pr11_preserves_occupied_trials_and_allows_exit_after_the_collapse_boun
 	assert_eq(completed.observe(empty), RunRealmTrial.Observation.RETAINED)
 	assert_eq(completed.phase, RunRealmTrial.Phase.COMPLETED)
 	assert_false(resettable.start(Host, empty))
+
+
+func test_first_entry_and_return_observe_the_same_already_active_optional_world() -> void:
+	var route := Route.new(&"inverted_archive")
+	assert_true(route.begin())
+	var activity := WorldActivity.new(route.kernel, Route.Seed)
+	assert_true(activity.register_realm(route.outer))
+	assert_true(activity.register_realm(route.inner))
+	assert_true(activity.track_player(Host))
+	assert_true(activity.track_player(Guest))
+	route.authority.activity = activity
+	var resident := WorldEnemy.Rules.new()
+	resident.faction = &"archive"
+	resident.family = &"fixture"
+	resident.hp = Quantity.from_count(40)
+	resident.damage = Quantity.from_count(1)
+	resident.radius = 4.0
+	resident.sight = 20.0
+	resident.attack_range = 8.0
+	resident.attack_radius = 4.0
+	resident.windup_ticks = 1
+	resident.recovery_ticks = 1
+	var site := WorldActivity.SpawnSite.new()
+	site.id = &"archive"
+	site.realm = &"inverted_archive"
+	site.rules = resident
+	site.positions = [Route.offset(route.inner.module_center(WorldTopology.ENTRY), 28.0, 0.0)]
+	site.first_tick = 1
+	site.period = 3
+	site.limit = 1
+	assert_true(activity.schedule_spawn(site))
+	assert_true(route.authority.close_tick())
+	assert_true(route.authority.closed_party)
+	var id := &"spawn/7:archive/1"
+	var active: Array = activity.snapshot().actors[id]
+	assert_eq(route.inner.view(Guest).visible, [])
+	var enter := route.input(Guest, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(enter))
+	assert_true(route.passages.interact(enter))
+	assert_eq(activity.snapshot().actors[id], active)
+	assert_eq(activity.snapshot().actors[Guest][0], &"inverted_archive")
+	assert_true(route.walk_to_exit(Guest))
+	var leave := route.input(Guest, PlayerCommand.INTERACT, route.inner.module_center(WorldTopology.RETURN_EXIT))
+	assert_true(route.submit(leave))
+	assert_true(route.passages.interact(leave))
+	var reenter := route.input(Guest, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(reenter))
+	assert_true(route.passages.interact(reenter))
+	var resumed := activity.snapshot()
+	assert_eq(resumed.actors[id], active)
+	assert_eq(resumed.actors[Guest][0], &"inverted_archive")
+	assert_eq(resumed.rng[&"world-spawn/archive"][1], 1)
+	assert_eq(resumed.tick, route.authority.next_tick() - 1)
