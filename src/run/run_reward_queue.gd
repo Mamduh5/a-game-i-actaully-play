@@ -188,6 +188,8 @@ func restore(image: Dictionary, expected_offers: int, closed_tick: int) -> bool:
 
 
 static func _valid_frozen_options(kind: Kind, rows: Variant, eligible: Array[StringName], shown: Dictionary, ordinal: int) -> bool:
+	if not rows is Dictionary or rows.is_empty():
+		return false
 	match kind:
 		Kind.POWER:
 			if not _valid_options(rows, ORDINARY_OPTIONS, eligible, MAX_RANK):
@@ -197,10 +199,9 @@ static func _valid_frozen_options(kind: Kind, rows: Variant, eligible: Array[Str
 					return false
 			return true
 		Kind.OVERFLOW:
-			return (_valid_options(rows, OVERFLOW_STATS.size(), OVERFLOW_STATS, OVERFLOW_STEPS.size())
-				and not rows.is_empty())
+			return _valid_options(rows, OVERFLOW_STATS.size(), OVERFLOW_STATS, OVERFLOW_STEPS.size())
 		Kind.UTILITY:
-			return _valid_options(rows, 1, [SHARD_OPTION], 1) and not rows.is_empty()
+			return _valid_options(rows, 1, [SHARD_OPTION], 1)
 	return false
 
 

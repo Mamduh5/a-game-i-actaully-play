@@ -64,6 +64,28 @@ func test_preparation_enforces_fixed_slot_counts_distinct_runes_and_profile_acce
 	assert_null(RunPreparation.select(catalog, &"H01", &"W01", [&"", &""], blanks, {}))
 
 
+func test_preparation_checkpoint_filters_empty_unlock_keys_and_reopens_valid_access() -> void:
+	var catalog := _catalog()
+	var slots := _slots()
+	slots[0] = &"P13"
+	var prepared := RunPreparation.select(catalog, &"H01", &"W01", [&"", &""], slots,
+		{&"": true, &"P13": true, &"P14": false})
+	assert_not_null(prepared)
+	if prepared == null:
+		return
+	var checkpoint := prepared.checkpoint()
+	assert_eq(checkpoint[4], [&"P13"])
+	var reopened := RunPreparation.reopen(catalog, checkpoint)
+	assert_not_null(reopened)
+	if reopened != null:
+		assert_eq(reopened.checkpoint(), checkpoint)
+		assert_true(&"P13" in reopened.eligible_powers())
+		assert_false(&"P14" in reopened.eligible_powers())
+	var malformed := checkpoint.duplicate(true)
+	malformed[4].append(&"")
+	assert_null(RunPreparation.reopen(catalog, malformed))
+
+
 func test_full_prepared_pool_gets_only_its_choices_with_seeded_opportunities() -> void:
 	var slots := _slots(10)
 	var prepared := _prepare(slots)
@@ -124,6 +146,26 @@ func test_earned_options_freeze_and_a_selected_reward_cannot_be_spent_twice() ->
 	var alternate: StringName = queue.read_offer(old).options.keys()[1]
 	assert_eq(queue.select(old, alternate), Selection.APPLIED)
 	assert_eq(queue.ranks(), {id: 1, alternate: 1})
+
+
+func test_restore_refuses_empty_frozen_power_offers_and_allows_retry() -> void:
+	var prepared := _prepare(_slots(10))
+	var original := RunRewardQueue.begin(prepared, RunRandom.new(44), &"host")
+	var ordinal := original.earn(2)
+	var checkpoint := original.checkpoint()
+	for legacy: bool in [false, true]:
+		var valid := checkpoint.duplicate(true)
+		if legacy:
+			valid["pending"][0].pop_back()
+		var malformed := valid.duplicate(true)
+		malformed["pending"][0][2].clear()
+		var restored := RunRewardQueue.begin(prepared, RunRandom.new(44), &"host")
+		assert_false(restored.restore(malformed, ordinal, 2), "An earned power offer requires a card")
+		assert_null(restored.read_offer(ordinal))
+		assert_eq(restored.compensate_if_stale(ordinal), Selection.UNKNOWN_REWARD)
+		assert_eq(restored.trade_shards().native_at_scale(0), 0)
+		assert_true(restored.restore(valid, ordinal, 2), "Invalid input must not consume the restore attempt")
+		assert_eq(restored.checkpoint(), checkpoint)
 
 
 func test_rank_caps_lead_to_diminishing_overflow_and_then_personal_utility() -> void:

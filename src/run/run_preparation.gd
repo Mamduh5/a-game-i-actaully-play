@@ -44,7 +44,7 @@ static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: S
 	result._candidates = candidate_slots.duplicate()
 	result._eligible_powers = eligible_powers
 	for id: StringName in unlocked:
-		if unlocked[id]:
+		if not id.is_empty() and unlocked[id]:
 			result._unlocked.append(id)
 	result._unlocked.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
 	return result
