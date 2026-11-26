@@ -52,6 +52,14 @@ func position() -> RealmSweep.Point:
 	return PlayerControlState.copy_point(_position) if _position != null else null
 
 
+func dart_positions() -> Array[RealmSweep.Point]:
+	var result: Array[RealmSweep.Point] = []
+	for volley: Volley in _volleys:
+		for dart: Dart in volley.darts:
+			result.append(PlayerControlState.copy_point(dart.position))
+	return result
+
+
 func advance(tick: int, candidates: Array[PlayerTargeting.Candidate]) -> bool:
 	if tick <= 0 or tick >= RunAuthority.MAX_TICK or (_last_tick >= 0 and tick != _last_tick + 1):
 		return false

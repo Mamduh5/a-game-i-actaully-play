@@ -14,6 +14,7 @@ class Rules extends RunAuthority:
 	var controls := PlayerControlState.new()
 	var targeting := PlayerTargeting.new()
 	var combat: StarterCombat
+	var familiar: SketchFamiliar
 	var targets: Array[PlayerTargeting.Candidate] = []
 	var scenario: String
 	var trace: Array[Array] = []
@@ -51,6 +52,17 @@ class Rules extends RunAuthority:
 				or not kernel.attach_geometry(geometry, Wall)):
 			return false
 		combat = StarterCombat.create(tuning, catalog, prep, kernel, geometry, Player, Foe, Foe, Wall)
+		if which == "familiar":
+			var rewards := RunRewardQueue.begin(prep, RunRandom.new(17), Player)
+			for event: int in range(1, 100):
+				if rewards.ranks().get(&"P02", 0) == 5:
+					break
+				var ordinal := rewards.earn(event)
+				var options := rewards.read_offer(ordinal).options
+				rewards.select(ordinal, &"P02" if options.has(&"P02") else options.keys()[0])
+			if rewards.ranks().get(&"P02", 0) != 5:
+				return false
+			familiar = SketchFamiliar.create(kernel, geometry, Player, rewards, Foe, Wall)
 		var setup := RunSetup.new()
 		setup.run_id = Run
 		setup.authority_id = Player
@@ -63,6 +75,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"familiar":
+				return familiar != null and _enemy(&"near", 366, 380, 200) and _enemy(&"rear", 395, 380, 200)
 			"rupture":
 				return _enemy(&"near", 357, 380, 100) and _enemy(&"flank", 365, 401, 100)
 			"wake":
@@ -124,7 +138,7 @@ class Rules extends RunAuthority:
 				axes += int(intent.action == PlayerCommand.MOVE_AXES and intent.command.y < 0.0)
 				controls.apply(intent.command)
 		passed = passed and controls.step(geometry, Player, 0, Wall, 100.0, 1.0 / 60.0) != null
-		if (tick == 8 and scenario != "undying") or (tick == 68 and scenario == "wake"):
+		if (tick == 8 and scenario not in ["undying", "familiar"]) or (tick == 68 and scenario == "wake"):
 			launches += int(combat.try_weapon(tick, targeting, targets) == StarterCombat.Attempt.COMMITTED)
 		if tick == 11 and scenario in ["bow", "bow-miss"]:
 			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(570, 500))
@@ -138,6 +152,8 @@ class Rules extends RunAuthority:
 		if scenario == "wake" and tick in [83, 98]:
 			passed = passed and geometry.commit_circle_pose(&"visitor", 0,
 				RealmSweep.Point.new(387, 389 if tick == 83 else 410))
+		if familiar != null:
+			passed = passed and familiar.advance(tick, targets)
 		passed = passed and combat.advance(tick) and _settle(now, true)
 		if kernel.advance_survival(now).result == CombatKernel.Result.INTERRUPTED:
 			passed = false
@@ -194,6 +210,12 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"familiar":
+				var dart_hits := 0
+				for row: Array in trace:
+					dart_hits += int(row[1] == "P02")
+				return (manual == 1 and axes > 0 and dart_hits == 4 and familiar.position().y < 350
+					and layer_units(StarterCombatRules.SIPHON) > 0)
 			"rupture":
 				return (launches == 1 and kernel.pending_count() == 0 and trace.size() == 6
 					and trace[4] == [8, "RP01.thunder_rupture", "flank", false]
@@ -290,6 +312,8 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "Blood Wake\nTarget HP %d   Visitor HP %d" % [
 			_rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0),
 			_rules.kernel.actor_snapshot(&"visitor").hp.amount.native_at_scale(0)]
+	elif _case == "familiar":
+		_hud.text = "Sketch Familiar\nTwin Quill + Piercing Quill"
 	elif _case == "rupture":
 		_hud.text = "Thunder Rupture\nTarget HP %d   Flank HP %d" % [
 			_rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0),
@@ -302,7 +326,7 @@ func _physics_process(_delta: float) -> void:
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
-			"bleed": [190], "wake": [80, 85, 100], "rupture": [10]}[_case]:
+			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -315,12 +339,12 @@ func _physics_process(_delta: float) -> void:
 
 
 func _drive_visible_inputs(tick: int) -> void:
-	if _case == "sword" and tick in [1, 31]:
+	if _case in ["sword", "familiar"] and tick in [1, 31]:
 		var event := InputEventKey.new()
 		event.physical_keycode = KEY_W
 		event.pressed = tick == 1
 		Input.parse_input_event(event)
-	if (_case in ["undying", "conductor"] and tick == 16) or (_case == "conductor-charged" and tick in [2, 242]):
+	if (_case in ["undying", "conductor", "familiar"] and tick == 16) or (_case == "conductor-charged" and tick in [2, 242]):
 		for pressed: bool in [true, false]:
 			var event := InputEventMouseButton.new()
 			event.button_index = MOUSE_BUTTON_LEFT
@@ -350,4 +374,9 @@ func _draw() -> void:
 		draw_string(ThemeDB.fallback_font, location + label_offset, String(target.id),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#ded7ca"))
 	draw_circle(Vector2(player.x, player.y), 14, Color("#9fe0c5"), true, -1.0, true)
+	if _rules.familiar != null and _rules.familiar.position() != null:
+		var pet := _rules.familiar.position()
+		draw_circle(Vector2(pet.x, pet.y), 6.0, Color("#e1d6bf"), true, -1.0, true)
+		for dart: RealmSweep.Point in _rules.familiar.dart_positions():
+			draw_circle(Vector2(dart.x, dart.y), 2.0, Color("#efe2b2"), true, -1.0, true)
 	draw_arc(Vector2(player.x, player.y), 15, 0, TAU, 24, Color("#223837"), 2.0, true)
