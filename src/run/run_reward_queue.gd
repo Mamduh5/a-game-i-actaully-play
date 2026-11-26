@@ -34,6 +34,10 @@ class Offer:
 var _preparation: RunPreparation
 var _random: RunRandom
 var _stream: StringName
+var _seat: StringName
+
+var bound_seat: StringName:
+	get: return _seat
 var _last_offer: int
 var _ranks: Dictionary[StringName, int] = {}
 var _forms: Dictionary[StringName, StringName] = {}
@@ -53,6 +57,7 @@ static func begin(preparation: RunPreparation, random: RunRandom, bound_seat: St
 	queue._preparation = preparation
 	queue._random = random
 	queue._stream = StringName("ordinary_rewards/%s" % bound_seat)
+	queue._seat = bound_seat
 	return queue
 
 
