@@ -106,6 +106,12 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 			action.rupture_per_stack = _rules.rupture_per_stack
 	var heading := PlayerControlState.direction(start, aim, RealmSweep.Point.new(1.0, 0.0))
 	if _force_equipped:
+		if _bleed_equipped:
+			action.wake_targets = _hostiles
+			action.wake_radius = _rules.wake_radius
+			action.wake_period = _rules.wake_period
+			action.wake_duration = _rules.wake_duration
+			action.wake_damage = _rules.wake_damage
 		if _weapon.delivery == StarterWeapon.Delivery.ARROW:
 			action.displacement = RealmSweep.Point.new(heading.x * _rules.force_distance, heading.y * _rules.force_distance)
 		else:

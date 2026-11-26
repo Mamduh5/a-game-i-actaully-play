@@ -31,6 +31,10 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 @export var bleed_duration: int = 180
 @export var bleed_period: int = 60
 @export var rupture_per_stack: int = 6
+@export var wake_radius: float = 5.0
+@export var wake_period: int = 15
+@export var wake_duration: int = 45
+@export var wake_damage: int = 4
 
 
 func is_valid_for(catalog: DefinitionCatalog) -> bool:
@@ -39,6 +43,7 @@ func is_valid_for(catalog: DefinitionCatalog) -> bool:
 			or not is_finite(force_distance) or force_distance <= 0.0
 			or not is_finite(lightning_reach) or lightning_reach <= 0.0 or lightning_damage <= 0
 			or bleed_damage <= 0 or bleed_capacity <= 0 or bleed_period <= 0 or bleed_duration < bleed_period or rupture_per_stack <= 0
+			or not is_finite(wake_radius) or wake_radius <= 0 or wake_period <= 0 or wake_duration < wake_period or wake_damage <= 0
 			or resonance_cap <= 0 or harvest_per_kill <= 0 or harvest_cap < harvest_per_kill
 			or not is_finite(siphon_radius) or siphon_radius <= 0.0 or siphon_damage <= 0
 			or siphon_ratio_percent <= 0 or siphon_ratio_percent > 100 or siphon_cap <= 0

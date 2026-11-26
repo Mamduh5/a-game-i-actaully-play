@@ -120,6 +120,11 @@ var lightning_targets: int
 var lightning_damage: Quantity
 var storm_relay: bool
 var rupture_per_stack: int
+var wake_targets: int
+var wake_radius: float
+var wake_period: int
+var wake_duration: int
+var wake_damage: int
 var bleed: CombatBleedLedger.Application
 var restore_source: Quantity
 var damage_recovery: Array[DamageRecovery] = []
@@ -144,6 +149,8 @@ func is_valid() -> bool:
 			or (lightning_damage != null and lightning_damage.sign_value <= 0)
 			or (storm_relay and lightning_damage == null)
 			or rupture_per_stack < 0
+			or wake_targets < 0 or (wake_targets > 0 and (not is_finite(wake_radius) or wake_radius <= 0.0
+				or wake_period <= 0 or wake_duration < wake_period or wake_damage <= 0))
 			or (bleed != null and not bleed.is_valid())
 			or (restore_source != null and restore_source.sign_value <= 0)
 			or (barrier_for_source != null and not barrier_for_source.is_valid())
@@ -190,6 +197,11 @@ func copy() -> CombatAction:
 	result.lightning_damage = lightning_damage
 	result.storm_relay = storm_relay
 	result.rupture_per_stack = rupture_per_stack
+	result.wake_targets = wake_targets
+	result.wake_radius = wake_radius
+	result.wake_period = wake_period
+	result.wake_duration = wake_duration
+	result.wake_damage = wake_damage
 	result.bleed = bleed.copy() if bleed != null else null
 	result.restore_source = restore_source
 	for rule: DamageRecovery in damage_recovery:

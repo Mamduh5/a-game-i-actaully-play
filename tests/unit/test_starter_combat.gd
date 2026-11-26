@@ -289,6 +289,27 @@ func test_thunder_rupture_consumes_each_secondary_targets_owned_pre_arc_stack_on
 		assert_null(arena.kernel.next_due())
 
 
+func test_blood_wake_samples_real_motion_only_after_owned_bleed_exists() -> void:
+	for resistance: float in [0.0, 1.0]:
+		var arena := Arena.new(&"W01", &"H01", false, &"R01", &"R03")
+		assert_true(arena.add(&"aim", 30, 0, 250, HOSTILE, true, &"", resistance))
+		assert_true(arena.add(&"visitor", 150, 0, 100, HOSTILE, false))
+		for tick: int in range(1, 108):
+			if tick in [1, 61]:
+				assert_eq(arena.attack(tick), Committed)
+			if tick in [76, 106]:
+				assert_true(arena.move(&"visitor", 60, 2))
+			elif tick == 91:
+				assert_true(arena.move(&"visitor", 60, 20))
+			assert_true(arena.combat.advance(tick))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				if hit.family == &"RP02.blood_wake":
+					assert_eq(resistance, 0.0)
+					assert_has([76, 91, 106], tick)
+		assert_eq(arena.hp(&"visitor").native_at_scale(0), 92 if resistance == 0.0 else 100)
+		assert_eq(arena.kernel.next_due().tick, 121)
+
+
 func test_force_sword_uses_actual_target_direction_resistance_and_wall_clearance() -> void:
 	for rune: StringName in [&"", &"R03"]:
 		var arena := Arena.new(&"W01", &"H01", false, rune)

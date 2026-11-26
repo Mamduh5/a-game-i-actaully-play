@@ -152,6 +152,7 @@ class ReactionClaim:
 	var shape: int
 
 class Group:
+	var wakes: Array[Wake] = []
 	var bleeds: Dictionary[StringName, CombatBleedLedger] = {}
 	var root: CombatRootQueue.Wave
 	var pending: Array[Impact] = []
@@ -164,6 +165,25 @@ class Group:
 	var activation_outcomes: Dictionary[String, ActivationOutcome] = {}
 	var receipt: WaveResult
 
+class Wake:
+	var realm: StringName
+	var start: RealmSweep.Point
+	var finish: RealmSweep.Point
+	var action: CombatAction
+	var origin: CombatOrigin
+	var cadence: CombatDeliverySchedule
+
+	func copy() -> Wake:
+		var result := Wake.new()
+		result.realm = realm
+		result.start = start
+		result.finish = finish
+		result.action = action
+		result.origin = origin
+		result.cadence = cadence.copy()
+		return result
+
+var _wakes: Array[Wake] = []
 var _actors: Dictionary[StringName, CombatantState] = {}
 var _bleeds: Dictionary[StringName, CombatBleedLedger] = {}
 var _actions: Dictionary[String, Commitment] = {}
@@ -484,7 +504,7 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 
 
 func pending_count() -> int:
-	return _queue.pending_count() + _bleeds.size()
+	return _queue.pending_count() + _bleeds.size() + _wakes.size()
 
 
 ## The fixed-step owner can drain older sub-tick impacts before it admits
@@ -498,13 +518,16 @@ func next_due() -> CombatInstant:
 
 func _next_wave() -> CombatRootQueue.Wave:
 	var roots := _queue.earliest_wave()
-	if _bleeds.is_empty() or (roots == null and _queue.pending_count() > 0):
+	if (_bleeds.is_empty() and _wakes.is_empty()) or (roots == null and _queue.pending_count() > 0):
 		return roots
 	var times: Array[CombatInstant] = []
 	if roots != null:
 		times.append(roots.due)
 	for ledger: CombatBleedLedger in _bleeds.values():
 		times.append_array(ledger.deadlines())
+	for wake: Wake in _wakes:
+		var next := wake.cadence.next_event()
+		times.append(next.instant if next != null else null)
 	var first: CombatInstant
 	for due: CombatInstant in times:
 		if due == null:
@@ -588,6 +611,8 @@ func _open_group(through: CombatInstant) -> WaveResult:
 	_group.receipt.due = wave.due
 	for id: StringName in _bleeds:
 		_group.bleeds[id] = _bleeds[id].copy()
+	for wake: Wake in _wakes:
+		_group.wakes.append(wake.copy())
 	if not _expire_barriers(_group, false):
 		return _interrupt(&"barrier_time")
 	for realm: StringName in _geometry:
@@ -619,6 +644,8 @@ func _open_group(through: CombatInstant) -> WaveResult:
 		_group.pending.append(impact)
 	if not _advance_bleeds(_group, false):
 		return _interrupt(&"bleed_cadence")
+	if not _advance_wakes(_group):
+		return _interrupt(&"wake_geometry_or_cadence")
 	return null
 
 
@@ -653,6 +680,51 @@ static func _advance_bleeds(group: Group, expiring: bool) -> bool:
 				return false
 		if ledger.owners().is_empty():
 			group.bleeds.erase(id)
+	return true
+
+
+func _advance_wakes(group: Group) -> bool:
+	for index: int in range(group.wakes.size() - 1, -1, -1):
+		var wake := group.wakes[index]
+		var due := wake.cadence.due_through(group.receipt.due)
+		if due == null:
+			continue
+		if due.kind == CombatDeliverySchedule.Kind.TICK:
+			var geometry := _geometry[wake.realm]
+			var coverage := geometry.certify_frozen_path(wake.realm, wake.start, wake.finish,
+				wake.action.wake_radius, wake.action.wake_targets, wake.action.source)
+			if coverage == null or not coverage.unresolved.is_empty():
+				return false
+			var reached: Dictionary[StringName, bool] = {}
+			for contact: RealmGeometry.Contact in coverage.contacts:
+				var target: CombatantState = group.actors.get(contact.entity)
+				if target == null or not target.is_alive() or target.realm != wake.realm or reached.has(target.id):
+					continue
+				reached[target.id] = true
+				var impact := Impact.new()
+				impact.action = CombatAction.new()
+				impact.action.family = &"RP02.blood_wake"
+				impact.action.source = wake.action.source
+				impact.action.source_life = wake.action.source_life
+				var part := CombatAction.Component.new()
+				part.base = Quantity.from_count(wake.action.wake_damage)
+				impact.action.components = [part]
+				impact.origin = wake.origin
+				impact.root_occurrence = wake.origin.occurrence_key()
+				impact.reaction = impact.action.family
+				impact.target = target.id
+				impact.target_life = target.life
+				impact.target_visit = target.realm_visit
+				impact.shape = contact.shape
+				impact.hostile = true
+				group.pending.append(impact)
+		if not wake.cadence.settle(due):
+			return false
+		var expiry := wake.cadence.due_through(group.receipt.due)
+		if expiry != null and not wake.cadence.settle(expiry):
+			return false
+		if wake.cadence.end_reason == CombatDeliverySchedule.End.NATURAL:
+			group.wakes.remove_at(index)
 	return true
 
 
@@ -776,6 +848,7 @@ func _publish_group() -> WaveResult:
 		_geometry[realm].adopt(group.geometry[realm])
 	_actors = group.actors
 	_bleeds = group.bleeds
+	_wakes = group.wakes
 	for origin: CombatOrigin in group.root.origins:
 		_impacts.erase(origin.occurrence_key())
 	for key: String in group.activation_outcomes:
@@ -796,6 +869,7 @@ func _publish_group() -> WaveResult:
 
 func _retire_combat_work() -> void:
 	_bleeds.clear()
+	_wakes.clear()
 	_queue = CombatRootQueue.new()
 	_impacts.clear()
 	_actions.clear()
@@ -890,6 +964,17 @@ func _displace(group: Group, postings: Array[Posting]) -> bool:
 			return false
 		var settled := hit.displacement.finish
 		if settled.x != start.x or settled.y != start.y:
+			if hit.hostile and action.wake_targets > 0 and posting.before_bleed != null and posting.before_bleed.has_owner(hit.origin):
+				var wake := Wake.new()
+				wake.realm = realm
+				wake.start = start
+				wake.finish = settled
+				wake.action = action
+				wake.origin = hit.origin.copy()
+				wake.cadence = CombatDeliverySchedule.create(group.receipt.due, action.wake_duration, action.wake_period)
+				if wake.cadence == null:
+					return false
+				group.wakes.append(wake)
 			var poses: Dictionary = group.displaced_poses.get_or_add(target.id, {})
 			poses[hit.shape] = [settled.x, settled.y]
 	return true
@@ -1217,7 +1302,7 @@ static func _reaction_order(first: ReactionClaim, second: ReactionClaim) -> Real
 static func _reaction_matches(rule: CombatFollowUp, posting: Posting, alive: bool, defending: bool) -> bool:
 	if not defending:
 		match rule.cause:
-			CombatFollowUp.Cause.PAID_HIT: return alive and posting.hit.family != &"R01.bleed"
+			CombatFollowUp.Cause.PAID_HIT: return alive and posting.hit.family not in [&"R01.bleed", &"RP02.blood_wake"]
 			CombatFollowUp.Cause.KILL: return posting.hit.eliminated
 			CombatFollowUp.Cause.SOLID_IMPACT:
 				return posting.hit.displacement != null and not posting.hit.displacement.stopped_by.is_empty()

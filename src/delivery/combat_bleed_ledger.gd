@@ -46,6 +46,9 @@ class Prestate:
 	var _instant: CombatInstant
 	var _stacks: Dictionary[String, Dictionary] = {}
 
+	func has_owner(origin: CombatOrigin) -> bool:
+		return _stacks.has(CombatBleedLedger._owner_key(origin))
+
 class Tick:
 	var _cadence: CombatDeliverySchedule
 	var _owner: String
