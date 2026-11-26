@@ -2,7 +2,7 @@ class_name CombatFollowUp
 extends RefCounted
 ## An authored immediate reaction tied to a realized hit or elimination.
 
-enum Cause { PAID_HIT, OWN_DEATH, KILL, HOSTILE_HP, HOSTILE_LAYER, SOLID_IMPACT }
+enum Cause { PAID_HIT, OWN_DEATH, KILL, HOSTILE_HP, HOSTILE_LAYER, SOLID_IMPACT, HOSTILE_DAMAGE }
 
 var id: StringName
 var cause: Cause
@@ -13,6 +13,7 @@ var resource: StringName
 var cost: Quantity
 var component: CombatAction.Component
 var restore_source: Quantity
+var damage_recovery: Array[CombatAction.DamageRecovery] = []
 var consume_status: StringName
 var inherit_parent_statuses: bool
 var fresh_target: StringName
@@ -27,6 +28,7 @@ func is_valid() -> bool:
 		and (cause != Cause.PAID_HIT or not resource.is_empty())
 		and (cause != Cause.KILL or not fresh_target.is_empty())
 		and (restore_source == null or restore_source.sign_value > 0)
+		and CombatAction.valid_recovery(damage_recovery)
 		and ((fresh_target.is_empty() and reach == 0.0 and collision_mask == 0)
 			or (not fresh_target.is_empty() and is_finite(reach) and reach > 0.0 and collision_mask > 0))
 		and ((resource.is_empty() and cost == null)
@@ -44,6 +46,8 @@ func copy() -> CombatFollowUp:
 	result.cost = cost
 	result.component = component.copy()
 	result.restore_source = restore_source
+	for recovery: CombatAction.DamageRecovery in damage_recovery:
+		result.damage_recovery.append(recovery.copy())
 	result.consume_status = consume_status
 	result.inherit_parent_statuses = inherit_parent_statuses
 	result.fresh_target = fresh_target

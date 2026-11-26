@@ -1,18 +1,22 @@
 class_name CombatantState
 extends RefCounted
 ## Fixed-step combat state. Life IDs distinguish repeated encounters with the
-## same actor. Barrier order is supplied by the survival rule owner.
+## same actor. Barrier insertion order is their acquisition age.
 
 class Barrier:
 	var id: StringName
 	var mask: int
 	var pool: QuantityLayerLedger.Pool
+	var expires: CombatInstant
+	var generation := 1
 
 	func copy() -> Barrier:
 		var result := Barrier.new()
 		result.id = id
 		result.mask = mask
 		result.pool = QuantityLayerLedger.Pool.new(pool.amount, pool.error)
+		result.expires = expires
+		result.generation = generation
 		return result
 
 class Defense:
@@ -37,6 +41,7 @@ var id: StringName
 var realm: StringName
 var life: int
 var owner: StringName
+var controller: StringName
 var provenance: CombatOrigin.Provenance
 var hp: QuantityLayerLedger.Pool
 var max_hp: Quantity
@@ -44,15 +49,17 @@ var barriers: Array[Barrier] = []
 var physical := Defense.new()
 var magical := Defense.new()
 var prevents_hit: bool
+var revival_protected_until: CombatInstant
 var statuses: Dictionary[StringName, int] = {}
 var resources: Dictionary[StringName, Quantity] = {}
 var follow_ups: Array[CombatFollowUp] = []
 var _rates: Dictionary[int, QuantityRateCursor] = {}
 var _ready_at: Dictionary[StringName, CombatInstant] = {}
+var _barrier_generations: Dictionary[StringName, int] = {}
 
 
 func is_valid() -> bool:
-	if (id.is_empty() or realm.is_empty() or life <= 0 or owner.is_empty()
+	if (id.is_empty() or realm.is_empty() or life <= 0 or owner.is_empty() or controller == id
 			or provenance not in [CombatOrigin.Provenance.SEAT, CombatOrigin.Provenance.SPAWN]
 			or not _valid_pool(hp) or physical == null or not physical.is_valid()
 			or magical == null or not magical.is_valid()):
@@ -77,7 +84,7 @@ func is_valid() -> bool:
 			return false
 	var layers: Dictionary[StringName, bool] = {}
 	for barrier: Barrier in barriers:
-		if (barrier == null or barrier.id.is_empty() or layers.has(barrier.id) or barrier.mask <= 0
+		if (barrier == null or barrier.id.is_empty() or layers.has(barrier.id) or barrier.mask <= 0 or barrier.generation < 1
 				or barrier.mask > (CombatAction.Damage.PHYSICAL | CombatAction.Damage.MAGICAL)
 				or not _valid_pool(barrier.pool) or barrier.pool.amount.sign_value == 0):
 			return false
@@ -95,43 +102,117 @@ func copy() -> CombatantState:
 	result.realm = realm
 	result.life = life
 	result.owner = owner
+	result.controller = controller
 	result.provenance = provenance
 	result.hp = QuantityLayerLedger.Pool.new(hp.amount, hp.error)
 	result.max_hp = max_hp
 	result.physical = physical.copy()
 	result.magical = magical.copy()
 	result.prevents_hit = prevents_hit
+	result.revival_protected_until = revival_protected_until
 	result.statuses = statuses.duplicate()
 	result.resources = resources.duplicate()
 	for follow_up: CombatFollowUp in follow_ups:
 		result.follow_ups.append(follow_up.copy())
 	result._ready_at = _ready_at.duplicate()
+	result._barrier_generations = _barrier_generations.duplicate()
 	for barrier: Barrier in barriers:
 		result.barriers.append(barrier.copy())
+		result._barrier_generations[barrier.id] = maxi(int(result._barrier_generations.get(barrier.id, 0)), barrier.generation)
 	for kind: int in _rates:
 		result._rates[kind] = _rates[kind].copy()
 	return result
 
 
-## Conservative exact cap check against the existing physical HP posting error.
-func recover_hp(amount: Quantity) -> bool:
-	if not is_alive() or max_hp == null:
-		return true
-	var next := hp.amount.add(amount)
-	if next == null:
+## Changing a cap preserves exact current HP unless that HP must be clamped.
+func change_max_hp(maximum: Quantity) -> bool:
+	if maximum == null or maximum.sign_value <= 0:
 		return false
-	match hp.error.certify_after(next, QuantityFraction.from_amount(max_hp)):
-		QuantityErrorBounds.Sign.ABOVE, QuantityErrorBounds.Sign.EQUAL:
-			hp = QuantityLayerLedger.Pool.new(max_hp, QuantityErrorBounds.new())
-		QuantityErrorBounds.Sign.BELOW:
-			var represented := next if next.compare(max_hp) <= 0 else max_hp
-			var error := hp.error.after_change(QuantityFraction.from_amount(next), represented)
-			if error == null:
-				return false
-			hp = QuantityLayerLedger.Pool.new(represented, error)
-		_:
-			return false
+	var limited := cap_pool(hp, maximum)
+	if limited == null:
+		return false
+	hp = limited
+	max_hp = maximum
 	return true
+
+
+func grant_barrier(grant: CombatAction.BarrierGrant, now: CombatInstant) -> Barrier:
+	if grant == null or not grant.is_valid() or now == null:
+		return null
+	var previous: Barrier
+	for layer: Barrier in barriers:
+		if layer.id == grant.id:
+			previous = layer
+			break
+	var expiry := now.after_ticks(grant.duration_ticks) if grant.duration_ticks > 0 else null
+	if grant.duration_ticks > 0 and expiry == null:
+		return null
+	var incoming := Barrier.new()
+	incoming.id = grant.id
+	incoming.mask = grant.mask
+	incoming.expires = expiry
+	incoming.pool = QuantityLayerLedger.Pool.new(grant.capacity, QuantityErrorBounds.new())
+	if grant.rule == CombatAction.BarrierRule.ACCUMULATE:
+		var base := previous.pool if previous != null else QuantityLayerLedger.Pool.new(Quantity.from_count(0), QuantityErrorBounds.new())
+		if previous != null and (previous.mask != grant.mask or (previous.expires == null) != (expiry == null)):
+			return null
+		var sum := base.amount.add(grant.capacity)
+		if sum == null:
+			return null
+		incoming.pool = cap_pool(QuantityLayerLedger.Pool.new(sum, base.error), grant.cap)
+		if incoming.pool == null:
+			return null
+		if previous != null:
+			var order := previous.expires.order_against(expiry) if grant.refresh_lifetime else RealmCircleTime.Order.SAME
+			if order == RealmCircleTime.Order.UNRESOLVED:
+				return null
+			previous.pool = incoming.pool
+			if order == RealmCircleTime.Order.BEFORE:
+				previous.expires = expiry
+			return previous
+	if previous != null:
+		match grant.rule:
+			CombatAction.BarrierRule.KEEP:
+				return previous
+			CombatAction.BarrierRule.STRONGEST:
+				var strength := previous.pool.error.certify_after(previous.pool.amount, QuantityFraction.from_amount(grant.capacity))
+				if strength == QuantityErrorBounds.Sign.UNKNOWN:
+					return null
+				if strength == QuantityErrorBounds.Sign.ABOVE:
+					return previous
+				if strength == QuantityErrorBounds.Sign.EQUAL:
+					if previous.expires == null:
+						return previous
+					if expiry != null:
+						var order := previous.expires.order_against(expiry)
+						if order == RealmCircleTime.Order.UNRESOLVED:
+							return null
+						if order != RealmCircleTime.Order.BEFORE:
+							return previous
+	var sequence: int = _barrier_generations.get(grant.id, 0)
+	if previous != null:
+		sequence = maxi(sequence, previous.generation)
+	if sequence == Quantity.INT_MAX:
+		return null
+	incoming.generation = sequence + 1
+	_barrier_generations[grant.id] = incoming.generation
+	if previous != null:
+		barriers.erase(previous)
+		end_rates(previous.mask | incoming.mask)
+	barriers.append(incoming)
+	return incoming
+
+
+static func cap_pool(pool: QuantityLayerLedger.Pool, maximum: Quantity) -> QuantityLayerLedger.Pool:
+	match pool.error.certify_after(pool.amount, QuantityFraction.from_amount(maximum)):
+		QuantityErrorBounds.Sign.ABOVE, QuantityErrorBounds.Sign.EQUAL:
+			return QuantityLayerLedger.Pool.new(maximum, QuantityErrorBounds.new())
+		QuantityErrorBounds.Sign.BELOW:
+			if pool.amount.compare(maximum) <= 0:
+				return pool
+			var error := pool.error.after_change(QuantityFraction.from_amount(pool.amount), maximum)
+			return QuantityLayerLedger.Pool.new(maximum, error) if error != null else null
+	return null
 
 
 ## All resource costs and cooldown readiness settle together. A rejected

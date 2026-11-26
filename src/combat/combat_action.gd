@@ -4,6 +4,8 @@ extends RefCounted
 ## The kernel verifies liveness, pays this activation and freezes offense.
 
 enum Damage { PHYSICAL = 1, MAGICAL = 2 }
+enum BarrierRule { KEEP, STRONGEST, ACCUMULATE }
+enum Continuation { COMMITTED, LIVE_CONTROLLER }
 
 class Component:
 	var kind: Damage = Damage.PHYSICAL
@@ -35,23 +37,61 @@ class BarrierGrant:
 	var id: StringName
 	var mask: int
 	var capacity: Quantity
+	var duration_ticks: int
+	var rule: BarrierRule
+	var cap: Quantity
+	var refresh_lifetime: bool
 
 	func is_valid() -> bool:
-		return not id.is_empty() and mask > 0 and mask <= (Damage.PHYSICAL | Damage.MAGICAL) and capacity != null and capacity.sign_value > 0
+		if (id.is_empty() or mask <= 0 or mask > (Damage.PHYSICAL | Damage.MAGICAL)
+				or capacity == null or capacity.sign_value <= 0 or duration_ticks < 0
+				or rule not in BarrierRule.values()):
+			return false
+		if rule == BarrierRule.ACCUMULATE:
+			return cap != null and cap.sign_value > 0 and (not refresh_lifetime or duration_ticks > 0)
+		return cap == null and not refresh_lifetime
 
 	func copy() -> BarrierGrant:
 		var result := BarrierGrant.new()
 		result.id = id
 		result.mask = mask
 		result.capacity = capacity
+		result.duration_ticks = duration_ticks
+		result.rule = rule
+		result.cap = cap
+		result.refresh_lifetime = refresh_lifetime
+		return result
+
+class DamageRecovery:
+	var id: StringName
+	var rate: QuantityFraction
+	var limit: Quantity
+	var amplification: QuantityFraction
+	var admits_excess: bool
+
+	func is_valid() -> bool:
+		return (not id.is_empty() and rate != null and rate.numerator.sign_value > 0
+			and limit != null and limit.sign_value > 0
+			and amplification != null and amplification.numerator.sign_value > 0)
+
+	func copy() -> DamageRecovery:
+		var result := DamageRecovery.new()
+		result.id = id
+		result.rate = rate
+		result.limit = limit
+		result.amplification = amplification
+		result.admits_excess = admits_excess
 		return result
 
 var source: StringName
 var source_life: int
 var family: StringName
 var origin: CombatOrigin
+var continuation: Continuation
 var components: Array[Component] = []
 var activation_costs: Dictionary[StringName, Quantity] = {}
+var hp_cost: Quantity
+var automatic_hp_cost: bool
 var cooldown: StringName
 var cooldown_ticks: int
 var add_status: StringName
@@ -59,14 +99,17 @@ var status_units: int
 var consume_status: StringName
 var displacement: RealmSweep.Point
 var restore_source: Quantity
+var damage_recovery: Array[DamageRecovery] = []
 var barrier_for_source: BarrierGrant
 
 
 func is_valid() -> bool:
 	if (source.is_empty() or source_life <= 0 or family.is_empty() or origin == null
 			or origin.delivery_part != 0 or not origin.valid_for(origin.committed_at)
+			or continuation not in Continuation.values()
 			or cooldown_ticks < 0 or (cooldown_ticks > 0 and cooldown.is_empty())
 			or (add_status.is_empty() and status_units != 0) or (not add_status.is_empty() and status_units <= 0)
+			or (hp_cost != null and hp_cost.sign_value <= 0) or (automatic_hp_cost and hp_cost == null)
 			or (displacement != null and (not is_finite(displacement.x) or not is_finite(displacement.y)))
 			or (restore_source != null and restore_source.sign_value <= 0)
 			or (barrier_for_source != null and not barrier_for_source.is_valid())):
@@ -78,6 +121,17 @@ func is_valid() -> bool:
 	for component: Component in components:
 		if component == null or not component.is_valid():
 			return false
+	if not valid_recovery(damage_recovery):
+		return false
+	return true
+
+
+static func valid_recovery(rules: Array[DamageRecovery]) -> bool:
+	var seen: Dictionary[StringName, bool] = {}
+	for rule: DamageRecovery in rules:
+		if rule == null or not rule.is_valid() or seen.has(rule.id):
+			return false
+		seen[rule.id] = true
 	return true
 
 
@@ -87,13 +141,18 @@ func copy() -> CombatAction:
 	result.source_life = source_life
 	result.family = family
 	result.origin = origin.copy()
+	result.continuation = continuation
 	result.activation_costs = activation_costs.duplicate()
+	result.hp_cost = hp_cost
+	result.automatic_hp_cost = automatic_hp_cost
 	result.cooldown = cooldown
 	result.cooldown_ticks = cooldown_ticks
 	result.add_status = add_status
 	result.status_units = status_units
 	result.consume_status = consume_status
 	result.restore_source = restore_source
+	for rule: DamageRecovery in damage_recovery:
+		result.damage_recovery.append(rule.copy())
 	if barrier_for_source != null:
 		result.barrier_for_source = barrier_for_source.copy()
 	if displacement != null:

@@ -4,11 +4,28 @@ extends RefCounted
 
 enum Result { IDLE, WAITING, CLOSED, INTERRUPTED, YIELDED }
 enum Terminal { ACTIVE, VICTORY, DEFEAT }
+enum BarrierEnd { EXPIRED, REPLACED, CLAMPED, DECAYED, REMOVED }
+enum BarrierAdjustment { CAP, DECAY, REMOVE }
+enum ActivationOutcome { PAID, LETHAL, REJECTED, SUPPRESSED }
 
 class LayerReceipt:
 	var id: StringName
+	var generation: int
 	var absorbed: Quantity
 	var hostile_depletion: bool
+
+class EndedBarrier:
+	var target: StringName
+	var life: int
+	var id: StringName
+	var generation: int
+	var reason: BarrierEnd
+	var remaining: Quantity
+
+class BarrierChange:
+	var removed: Quantity
+	var remaining: Quantity
+	var ended: EndedBarrier
 
 class ComponentReceipt:
 	var kind: CombatAction.Damage
@@ -18,6 +35,24 @@ class ComponentReceipt:
 	var hostile_hp_removed: Quantity
 	var overkill: Quantity
 	var barriers: Array[LayerReceipt] = []
+
+class RecoveryReceipt:
+	var id: StringName
+	var recipient: StringName
+	var life: int
+	var eligible_hp_removed: Quantity
+	var offered: Quantity
+	var restored: Quantity
+	var eligible_excess: QuantityLayerLedger.Pool
+	var discarded: Quantity
+
+class ActivationReceipt:
+	var origin: CombatOrigin
+	var source: StringName
+	var life: int
+	var outcome: ActivationOutcome
+	var hp_paid := Quantity.from_count(0)
+	var death_statuses: Dictionary[StringName, int] = {}
 
 class Hit:
 	var origin: CombatOrigin
@@ -36,6 +71,7 @@ class Hit:
 	var status_consumed: bool
 	var displacement: RealmGeometry.Displacement
 	var hp_restored: Quantity
+	var damage_recovery: Array[RecoveryReceipt] = []
 	var granted_barrier: StringName
 	var before_statuses: Dictionary[StringName, int] = {}
 	var death_statuses: Dictionary[StringName, int] = {}
@@ -46,6 +82,8 @@ class WaveResult:
 	var due: CombatInstant
 	var hits: Array[Hit] = []
 	var eliminations: Array[Hit] = []
+	var ended_barriers: Array[EndedBarrier] = []
+	var activations: Array[ActivationReceipt] = []
 	var fault: StringName
 	var terminal: Terminal
 	var waves: int
@@ -55,6 +93,7 @@ class Commitment:
 	var action: CombatAction
 	var realm: StringName
 	var parts: Dictionary[int, bool] = {}
+	var payment_pending: bool
 
 class Impact:
 	var action: CombatAction
@@ -64,6 +103,7 @@ class Impact:
 	var target_life: int
 	var shape: int
 	var hostile: bool
+	var activation: String
 	var parent: int
 	var reaction: StringName
 	var inherited_statuses: Dictionary[StringName, int] = {}
@@ -95,10 +135,12 @@ class Group:
 	var displaced_poses: Dictionary[StringName, Dictionary] = {}
 	var geometry: Dictionary[StringName, RealmGeometry] = {}
 	var revisions: Dictionary[StringName, int] = {}
+	var activation_outcomes: Dictionary[String, ActivationOutcome] = {}
 	var receipt: WaveResult
 
 var _actors: Dictionary[StringName, CombatantState] = {}
 var _actions: Dictionary[String, Commitment] = {}
+var _hp_activations: Dictionary[String, Commitment] = {}
 var _latest_activation: Dictionary[String, int] = {}
 var _impacts: Dictionary[String, Impact] = {}
 var _queue := CombatRootQueue.new()
@@ -125,6 +167,55 @@ func add_actor(actor: CombatantState) -> bool:
 func actor_snapshot(id: StringName) -> CombatantState:
 	var actor: CombatantState = _actors.get(id)
 	return actor.copy() if actor != null else null
+
+
+## Absolute HP changes at the closed run boundary. No hit or recovery is emitted.
+func change_max_hp(id: StringName, life: int, maximum: Quantity) -> bool:
+	var actor: CombatantState = _actors.get(id)
+	return _accepting() and actor != null and actor.life == life and actor.change_max_hp(maximum)
+
+
+## Called by the run at the closed boundary when the authored change is due.
+func adjust_barrier(id: StringName, life: int, layer_id: StringName, generation: int,
+		kind: BarrierAdjustment, amount: Quantity = null) -> BarrierChange:
+	var actor: CombatantState = _actors.get(id)
+	if not _accepting() or actor == null or actor.life != life or kind not in BarrierAdjustment.values():
+		return null
+	if (kind == BarrierAdjustment.REMOVE and amount != null
+			or kind != BarrierAdjustment.REMOVE and (amount == null or amount.sign_value < 0)):
+		return null
+	for layer: CombatantState.Barrier in actor.barriers:
+		if layer.id != layer_id or layer.generation != generation:
+			continue
+		var after: QuantityLayerLedger.Pool
+		var reason := BarrierEnd.REMOVED
+		match kind:
+			BarrierAdjustment.CAP:
+				reason = BarrierEnd.CLAMPED
+				after = CombatantState.cap_pool(layer.pool, amount)
+			BarrierAdjustment.DECAY:
+				reason = BarrierEnd.DECAYED
+				var debit := QuantityThresholdDebit.resolve(layer.pool.amount, layer.pool.error,
+					QuantityFraction.from_amount(amount), amount)
+				if debit != null:
+					after = QuantityLayerLedger.Pool.new(debit.remaining, debit.error)
+			BarrierAdjustment.REMOVE:
+				after = QuantityLayerLedger.Pool.new(Quantity.from_count(0), QuantityErrorBounds.new())
+		if after == null:
+			return null
+		var change := BarrierChange.new()
+		change.removed = layer.pool.amount.subtract(after.amount)
+		if change.removed == null:
+			return null
+		change.remaining = after.amount
+		if change.remaining.sign_value == 0:
+			change.ended = _barrier_end(actor, layer, reason)
+			actor.barriers.erase(layer)
+			actor.end_rates(layer.mask)
+		else:
+			layer.pool = after
+		return change
+	return null
 
 
 func set_defense(id: StringName, life: int, kind: CombatAction.Damage, defense: CombatantState.Defense) -> bool:
@@ -158,25 +249,32 @@ func configure_terminal(creator: StringName, eligible: Array[StringName]) -> boo
 	return true
 
 
-## The caller validates authored placement and eligibility. A successful
-## commitment consumes its activation costs once, including after a miss.
+## Ordinary costs settle now. An HP-priced activation returns a provisional
+## key and settles at its own instant, before the group's contacts.
 func commit(action: CombatAction) -> String:
 	if not _accepting() or action == null or not action.is_valid():
 		return ""
 	var source: CombatantState = _actors.get(action.source)
 	var origin := action.origin
-	if (source == null or source.life != action.source_life or not source.is_alive()
+	if (source == null or source.life != action.source_life or not _live_controller(_actors, source)
 			or source.owner != origin.owner or source.provenance != origin.provenance):
 		return ""
 	if _closed != null and _closed.order_against(origin.committed_at) != RealmCircleTime.Order.BEFORE:
 		return ""
 	var stream := origin.activation_stream_key()
-	if origin.activation <= int(_latest_activation.get(stream, 0)) or not source.pay_activation(action):
+	if origin.activation <= int(_latest_activation.get(stream, 0)):
 		return ""
 	var held := Commitment.new()
 	held.action = action.copy()
 	held.realm = source.realm
 	var key := origin.occurrence_key()
+	if action.hp_cost != null:
+		if _queue.admit(origin, origin.committed_at) != CombatRootQueue.Result.ACCEPTED:
+			return ""
+		held.payment_pending = true
+		_hp_activations[key] = held
+	elif not source.pay_activation(action):
+		return ""
 	_actions[key] = held
 	_latest_activation[stream] = origin.activation
 	return key
@@ -199,7 +297,16 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 		return CombatRootQueue.Result.INVALID
 	if held.parts.has(part):
 		return CombatRootQueue.Result.REPEATED
+	if held.action.continuation == CombatAction.Continuation.LIVE_CONTROLLER:
+		var source: CombatantState = _actors.get(held.action.source)
+		if source == null or source.life != held.action.source_life or not _live_controller(_actors, source):
+			return CombatRootQueue.Result.INVALID
 	var due := CombatInstant.at_contact(start_tick, contact.proof)
+	if due != null and _closed != null and _closed.order_against(due) != RealmCircleTime.Order.BEFORE:
+		return CombatRootQueue.Result.CLOSED_INSTANT
+	if held.payment_pending and (due == null
+			or due.order_against(held.action.origin.committed_at) != RealmCircleTime.Order.SAME):
+		return CombatRootQueue.Result.INVALID
 	var impact := Impact.new()
 	impact.action = held.action
 	impact.origin = held.action.origin.copy()
@@ -209,6 +316,8 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 	impact.target_life = target_life
 	impact.shape = contact.shape
 	impact.hostile = hostile
+	if held.payment_pending:
+		impact.activation = key
 	var result := _queue.admit(impact.origin, due)
 	if result == CombatRootQueue.Result.ACCEPTED:
 		held.parts[part] = true
@@ -218,6 +327,31 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 
 func pending_count() -> int:
 	return _queue.pending_count()
+
+
+## Close an idle survival deadline after the run has admitted all work through it.
+## Impacts at the deadline get their full causal group before expiry.
+func advance_survival(through: CombatInstant) -> WaveResult:
+	if not _fault.is_empty():
+		return _result(Result.INTERRUPTED)
+	if (not _accepting() or through == null
+			or (_closed != null and _closed.order_against(through) != RealmCircleTime.Order.BEFORE)):
+		return _result(Result.WAITING)
+	if pending_count() > 0:
+		var next := _queue.earliest_wave()
+		if next == null:
+			return _interrupt(&"due_order")
+		if next.due.order_against(through) != RealmCircleTime.Order.AFTER:
+			return _result(Result.WAITING)
+	var draft := Group.new()
+	draft.actors = _actors.duplicate()
+	draft.receipt = _result(Result.CLOSED)
+	draft.receipt.due = through
+	if not _expire_barriers(draft, true):
+		return _interrupt(&"barrier_time")
+	_actors = draft.actors
+	_closed = through
+	return draft.receipt
 
 
 func resolve_next(through: CombatInstant, wave_budget: int = 8) -> WaveResult:
@@ -250,11 +384,87 @@ func _open_group(through: CombatInstant) -> WaveResult:
 	_group.actors = _actors.duplicate()
 	_group.receipt = _result(Result.CLOSED)
 	_group.receipt.due = wave.due
+	if not _expire_barriers(_group, false):
+		return _interrupt(&"barrier_time")
 	for realm: StringName in _geometry:
 		_group.revisions[realm] = _geometry[realm].revision
+	var offers: Array[CombatOrigin] = []
 	for origin: CombatOrigin in wave.origins:
-		_group.pending.append(_impacts[origin.occurrence_key()])
+		if _hp_activations.has(origin.occurrence_key()):
+			offers.append(origin)
+	# Each payment root is due at its commitment, so only priority and
+	# canonical provenance can distinguish competing claims at this instant.
+	offers.sort_custom(func(left: CombatOrigin, right: CombatOrigin) -> bool:
+		return left.priority > right.priority if left.priority != right.priority else left.canonical_before(right))
+	for offer: CombatOrigin in offers:
+		var key := offer.occurrence_key()
+		var paid := _settle_hp_activation(_group, _hp_activations[key])
+		if paid == null:
+			return _interrupt(&"hp_payment")
+		_group.activation_outcomes[key] = paid.outcome
+		_group.receipt.activations.append(paid)
+	for origin: CombatOrigin in wave.origins:
+		var impact: Impact = _impacts.get(origin.occurrence_key())
+		if impact == null or (not impact.activation.is_empty()
+				and _group.activation_outcomes[impact.activation] != ActivationOutcome.PAID):
+			continue
+		if impact.action.continuation == CombatAction.Continuation.LIVE_CONTROLLER:
+			var source: CombatantState = _group.actors.get(impact.action.source)
+			if source == null or source.life != impact.action.source_life or not _live_controller(_group.actors, source):
+				continue
+		_group.pending.append(impact)
 	return null
+
+
+static func _live_controller(actors: Dictionary[StringName, CombatantState], source: CombatantState) -> bool:
+	var controller := _controller(actors, source)
+	return source.is_alive() and controller != null and controller.is_alive()
+
+
+static func _controller(actors: Dictionary[StringName, CombatantState], source: CombatantState) -> CombatantState:
+	if source.controller.is_empty():
+		return source
+	var controller: CombatantState = actors.get(source.controller)
+	if (controller == null or not controller.controller.is_empty()
+			or controller.owner != source.owner or controller.provenance != source.provenance):
+		return null
+	return controller
+
+
+static func _settle_hp_activation(group: Group, held: Commitment) -> ActivationReceipt:
+	var action := held.action
+	var receipt := ActivationReceipt.new()
+	receipt.origin = action.origin.copy()
+	receipt.source = action.source
+	receipt.life = action.source_life
+	receipt.outcome = ActivationOutcome.REJECTED
+	var actor: CombatantState = group.actors.get(action.source)
+	if actor == null or actor.life != action.source_life or not _live_controller(group.actors, actor):
+		return receipt
+	var draft := actor.copy()
+	if not draft.pay_activation(action):
+		return receipt
+	var cost := action.hp_cost
+	var debit := QuantityThresholdDebit.resolve(draft.hp.amount, draft.hp.error, QuantityFraction.from_amount(cost), cost)
+	if debit == null:
+		return null
+	var lethal := debit.remaining.sign_value == 0
+	if lethal and action.automatic_hp_cost and actor.revival_protected_until != null:
+		var protection := group.receipt.due.order_against(actor.revival_protected_until)
+		if protection == RealmCircleTime.Order.UNRESOLVED:
+			return null
+		if protection == RealmCircleTime.Order.BEFORE:
+			receipt.outcome = ActivationOutcome.SUPPRESSED
+			return receipt
+	group.actors[actor.id] = draft
+	group.touched[actor.id] = true
+	draft.hp = QuantityLayerLedger.Pool.new(debit.remaining, debit.error)
+	receipt.hp_paid = debit.debit
+	receipt.outcome = ActivationOutcome.LETHAL if lethal else ActivationOutcome.PAID
+	if lethal:
+		receipt.death_statuses = draft.statuses.duplicate()
+		draft.end_rates(CombatAction.Damage.PHYSICAL | CombatAction.Damage.MAGICAL)
+	return receipt
 
 
 func _resolve_wave(group: Group) -> StringName:
@@ -303,6 +513,8 @@ func _publish_group() -> WaveResult:
 	for realm: StringName in group.revisions:
 		if _geometry[realm].revision != group.revisions[realm]:
 			return _interrupt(&"geometry_changed")
+	if not _expire_barriers(group, true):
+		return _interrupt(&"barrier_time")
 	if not _queue.close(group.root):
 		return _interrupt(&"stale_wave")
 	for realm: StringName in group.geometry:
@@ -310,6 +522,13 @@ func _publish_group() -> WaveResult:
 	_actors = group.actors
 	for origin: CombatOrigin in group.root.origins:
 		_impacts.erase(origin.occurrence_key())
+	for key: String in group.activation_outcomes:
+		var held := _hp_activations[key]
+		if group.activation_outcomes[key] == ActivationOutcome.PAID:
+			held.payment_pending = false
+		else:
+			_actions.erase(key)
+		_hp_activations.erase(key)
 	_closed = group.root.due
 	_group = null
 	_terminal = _evaluate_terminal()
@@ -318,7 +537,31 @@ func _publish_group() -> WaveResult:
 		_queue = CombatRootQueue.new()
 		_impacts.clear()
 		_actions.clear()
+		_hp_activations.clear()
 	return group.receipt
+
+
+static func _expire_barriers(group: Group, at_deadline: bool) -> bool:
+	var ids := group.actors.keys()
+	ids.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
+	for id: StringName in ids:
+		var actor := group.actors[id]
+		# Walk the original list so copy-on-write and removal cannot skip a layer.
+		for barrier: CombatantState.Barrier in actor.barriers.duplicate():
+			if barrier.expires == null:
+				continue
+			var order := barrier.expires.order_against(group.receipt.due)
+			if order == RealmCircleTime.Order.UNRESOLVED:
+				return false
+			if order == RealmCircleTime.Order.BEFORE or (at_deadline and order == RealmCircleTime.Order.SAME):
+				var draft := _edit_actor(group, id)
+				for layer: CombatantState.Barrier in draft.barriers:
+					if layer.id == barrier.id:
+						group.receipt.ended_barriers.append(_barrier_end(draft, layer, BarrierEnd.EXPIRED))
+						draft.barriers.erase(layer)
+						draft.end_rates(layer.mask)
+						break
+	return true
 
 
 func _evaluate_terminal() -> Terminal:
@@ -388,31 +631,90 @@ static func _recover(group: Group, postings: Array[Posting]) -> bool:
 	for posting: Posting in postings:
 		var action := posting.impact.action
 		var source: CombatantState = group.actors.get(posting.hit.source)
-		if source == null or source.life != posting.hit.source_life or not source.is_alive():
+		if source == null or source.life != posting.hit.source_life:
+			continue
+		if not action.damage_recovery.is_empty():
+			var owner := _controller(group.actors, source)
+			if owner != null and owner.is_alive() and owner.max_hp != null:
+				if not _recover_from_damage(_edit_actor(group, owner.id), posting):
+					return false
+		if not source.is_alive():
 			continue
 		if action.restore_source != null:
-			var before := source.hp.amount
-			var actor := _edit_actor(group, source.id)
-			if not actor.recover_hp(action.restore_source):
-				return false
-			posting.hit.hp_restored = actor.hp.amount.subtract(before)
-			if posting.hit.hp_restored == null:
-				return false
+			posting.hit.hp_restored = Quantity.from_count(0)
+			if source.max_hp != null:
+				var flat := action.restore_source
+				var actor := _edit_actor(group, source.id)
+				var direct := QuantityLayerLedger.recovery(QuantityFraction.from_amount(flat), flat, actor.hp, actor.max_hp, false)
+				if direct == null:
+					return false
+				actor.hp = direct.hp
+				posting.hit.hp_restored = direct.hp_restored
 		if action.barrier_for_source != null:
-			_grant_barrier(_edit_actor(group, source.id), posting.hit, action.barrier_for_source)
+			if not _grant_barrier(group, _edit_actor(group, source.id), posting.hit, action.barrier_for_source):
+				return false
 	return true
 
 
-static func _grant_barrier(actor: CombatantState, hit: Hit, grant: CombatAction.BarrierGrant) -> void:
+static func _recover_from_damage(actor: CombatantState, posting: Posting) -> bool:
+	var hit := posting.hit
+	var action := posting.impact.action
+	var eligible := Quantity.from_count(0)
+	for component: ComponentReceipt in hit.components:
+		eligible = eligible.add(component.hostile_hp_removed)
+		if eligible == null:
+			return false
+	for rule: CombatAction.DamageRecovery in action.damage_recovery:
+		var raw := QuantityFormula.source_limited_recovery(eligible, rule.rate, rule.limit, rule.amplification)
+		if raw == null:
+			return false
+		var nominal := Quantity.quantize_ratio(raw.numerator, raw.divisor)
+		var draft := QuantityLayerLedger.recovery(raw, nominal, actor.hp, actor.max_hp, rule.admits_excess)
+		if draft == null:
+			return false
+		actor.hp = draft.hp
+		var receipt := RecoveryReceipt.new()
+		receipt.id = rule.id
+		receipt.recipient = actor.id
+		receipt.life = actor.life
+		receipt.eligible_hp_removed = eligible
+		receipt.offered = draft.offered
+		receipt.restored = draft.hp_restored
+		receipt.eligible_excess = draft.eligible_excess
+		receipt.discarded = draft.discarded
+		hit.damage_recovery.append(receipt)
+	return true
+
+
+static func _grant_barrier(group: Group, actor: CombatantState, hit: Hit, grant: CombatAction.BarrierGrant) -> bool:
+	var prior: CombatantState.Barrier
 	for barrier: CombatantState.Barrier in actor.barriers:
 		if barrier.id == grant.id:
-			return
-	var barrier := CombatantState.Barrier.new()
-	barrier.id = grant.id
-	barrier.mask = grant.mask
-	barrier.pool = QuantityLayerLedger.Pool.new(grant.capacity, QuantityErrorBounds.new())
-	actor.barriers.append(barrier)
-	hit.granted_barrier = grant.id
+			prior = barrier
+			break
+	var prior_pool := prior.pool if prior != null else null
+	var prior_expiry := prior.expires if prior != null else null
+	var layer := actor.grant_barrier(grant, group.receipt.due)
+	if layer == null:
+		return false
+	if layer != prior:
+		if prior != null:
+			group.receipt.ended_barriers.append(_barrier_end(actor, prior, BarrierEnd.REPLACED))
+		hit.granted_barrier = grant.id
+	elif layer.pool != prior_pool or layer.expires != prior_expiry:
+		hit.granted_barrier = grant.id
+	return true
+
+
+static func _barrier_end(actor: CombatantState, layer: CombatantState.Barrier, reason: BarrierEnd) -> EndedBarrier:
+	var receipt := EndedBarrier.new()
+	receipt.target = actor.id
+	receipt.life = actor.life
+	receipt.id = layer.id
+	receipt.generation = layer.generation
+	receipt.reason = reason
+	receipt.remaining = layer.pool.amount
+	return receipt
 
 
 static func _edit_actor(group: Group, id: StringName) -> CombatantState:
@@ -533,13 +835,17 @@ static func _reaction_matches(rule: CombatFollowUp, posting: Posting, alive: boo
 		return false
 	if rule.cause == CombatFollowUp.Cause.OWN_DEATH:
 		return posting.hit.eliminated
+	if not posting.impact.hostile:
+		return false
 	for component: ComponentReceipt in posting.hit.components:
-		if rule.cause == CombatFollowUp.Cause.HOSTILE_HP and component.hostile_hp_removed.sign_value > 0:
+		if (rule.cause in [CombatFollowUp.Cause.HOSTILE_HP, CombatFollowUp.Cause.HOSTILE_DAMAGE]
+				and component.hostile_hp_removed.sign_value > 0):
 			return true
-		if rule.cause == CombatFollowUp.Cause.HOSTILE_LAYER:
-			for barrier: LayerReceipt in component.barriers:
-				if barrier.id == rule.layer and barrier.hostile_depletion:
-					return true
+		for barrier: LayerReceipt in component.barriers:
+			if rule.cause == CombatFollowUp.Cause.HOSTILE_DAMAGE and barrier.absorbed.sign_value > 0:
+				return true
+			if rule.cause == CombatFollowUp.Cause.HOSTILE_LAYER and barrier.id == rule.layer and barrier.hostile_depletion:
+				return true
 	return false
 
 
@@ -565,6 +871,7 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 	action.origin.priority = rule.priority
 	action.components = [rule.component]
 	action.restore_source = rule.restore_source
+	action.damage_recovery = rule.damage_recovery
 	action.consume_status = rule.consume_status
 	var child := Impact.new()
 	child.action = action
@@ -691,8 +998,18 @@ static func _post_component(actor: CombatantState, kind: CombatAction.Damage, ra
 	var layers: Array[QuantityLayerLedger.Pool] = []
 	for barrier: CombatantState.Barrier in actor.barriers:
 		if barrier.mask & kind:
-			eligible.append(barrier)
-			layers.append(barrier.pool)
+			var insertion := eligible.size()
+			if barrier.expires != null:
+				for index: int in eligible.size():
+					var previous := eligible[index].expires
+					var order := barrier.expires.order_against(previous) if previous != null else RealmCircleTime.Order.BEFORE
+					if order == RealmCircleTime.Order.UNRESOLVED:
+						return null
+					if order == RealmCircleTime.Order.BEFORE:
+						insertion = index
+						break
+			eligible.insert(insertion, barrier)
+			layers.insert(insertion, barrier.pool)
 	var draft := QuantityLayerLedger.draft(raw, nominal, layers, actor.hp, hostile)
 	if draft == null:
 		return null
@@ -710,6 +1027,7 @@ static func _post_component(actor: CombatantState, kind: CombatAction.Damage, ra
 		var debit := draft.layers[index]
 		var receipt := LayerReceipt.new()
 		receipt.id = barrier.id
+		receipt.generation = barrier.generation
 		receipt.absorbed = debit.spent
 		receipt.hostile_depletion = debit.hostile_depletion
 		posted.barriers.append(receipt)

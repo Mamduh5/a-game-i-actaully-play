@@ -636,6 +636,302 @@ static func _reaction(id: StringName, cause: CombatFollowUp.Cause, damage: int) 
 	return rule
 
 
+func test_max_hp_preserves_absolute_health_and_clamping_issues_no_hit() -> void:
+	var kernel := CombatKernel.new()
+	var hero := _actor(&"hero", 80)
+	hero.max_hp = Quantity.from_count(100)
+	assert_true(kernel.add_actor(hero))
+	assert_true(kernel.add_actor(_actor(&"dead", 0)))
+	assert_true(kernel.change_max_hp(&"hero", 1, Quantity.from_count(120)))
+	assert_eq(_count(kernel.actor_snapshot(&"hero").hp.amount), 80)
+	assert_true(kernel.change_max_hp(&"hero", 1, Quantity.from_count(70)))
+	assert_eq(_count(kernel.actor_snapshot(&"hero").hp.amount), 70)
+	assert_false(kernel.change_max_hp(&"hero", 2, Quantity.from_count(100)))
+	assert_false(kernel.change_max_hp(&"hero", 1, Quantity.from_count(0)))
+	assert_true(kernel.change_max_hp(&"dead", 1, Quantity.from_count(100)))
+	assert_false(kernel.actor_snapshot(&"dead").is_alive())
+	assert_eq(kernel.pending_count(), 0)
+
+
+func test_temporary_barriers_absorb_by_deadline_and_age_before_persistent_layers() -> void:
+	var kernel := CombatKernel.new()
+	var target := _actor(&"target", 10)
+	target.barriers = [_barrier(&"persistent", 2, 1), _barrier(&"later", 2, 1),
+		_barrier(&"older", 2, 1), _barrier(&"soon", 2, 1), _barrier(&"newer", 2, 1)]
+	target.barriers[1].expires = CombatInstant.at_tick(8)
+	target.barriers[2].expires = CombatInstant.at_tick(6)
+	target.barriers[3].expires = CombatInstant.at_tick(5)
+	target.barriers[4].expires = CombatInstant.at_tick(6)
+	assert_true(kernel.add_actor(target))
+	assert_true(kernel.add_actor(_actor(&"source", 10)))
+	assert_eq(_admit(kernel, kernel.commit(_attack(&"source", 1, 1, 11)), &"target", 2), CombatRootQueue.Result.ACCEPTED)
+	var wave := kernel.resolve_next(CombatInstant.at_tick(3))
+	assert_eq(wave.result, CombatKernel.Result.CLOSED)
+	var component := wave.hits[0].components[0]
+	assert_eq(_count(component.hp_removed), 1)
+	var order: Array[StringName] = []
+	for layer: CombatKernel.LayerReceipt in component.barriers:
+		order.append(layer.id)
+		assert_true(layer.hostile_depletion)
+	assert_eq(order, [&"soon", &"older", &"newer", &"later", &"persistent"])
+	assert_true(wave.ended_barriers.is_empty(), "Hostile depletion has its own receipt")
+
+
+func test_strongest_replacement_and_expiry_keep_complete_instances_and_no_hostile_depletion() -> void:
+	var kernel := CombatKernel.new()
+	var source := _actor(&"source", 10)
+	var original := _barrier(&"guard", 80, 1)
+	original.expires = CombatInstant.at_tick(5)
+	source.barriers = [original]
+	assert_true(kernel.add_actor(source))
+	assert_true(kernel.add_actor(_actor(&"target", 10)))
+	for activation: int in [1, 2]:
+		var action := _attack(&"source", activation, activation, 0)
+		action.barrier_for_source = CombatAction.BarrierGrant.new()
+		var grant := action.barrier_for_source
+		grant.id = &"guard"
+		grant.mask = 1
+		grant.capacity = Quantity.from_count(60 if activation == 1 else 80)
+		grant.duration_ticks = 8
+		grant.rule = CombatAction.BarrierRule.STRONGEST
+		assert_eq(_admit(kernel, kernel.commit(action), &"target", activation), CombatRootQueue.Result.ACCEPTED)
+		var wave := kernel.resolve_next(CombatInstant.at_tick(activation + 1))
+		assert_eq(wave.result, CombatKernel.Result.CLOSED)
+		var layer := kernel.actor_snapshot(&"source").barriers[0]
+		assert_eq(_count(layer.pool.amount), 80)
+		assert_eq(layer.expires.tick, 5 if activation == 1 else 10)
+		assert_eq(layer.generation, activation)
+		assert_eq(wave.ended_barriers.size(), activation - 1)
+		if activation == 2:
+			assert_eq(wave.ended_barriers[0].reason, CombatKernel.BarrierEnd.REPLACED)
+			assert_eq(wave.ended_barriers[0].generation, 1)
+	var future := kernel.commit(_attack(&"source", 3, 3, 0))
+	assert_ne(future, "")
+	var idle := kernel.advance_survival(CombatInstant.at_tick(11))
+	assert_eq(idle.result, CombatKernel.Result.CLOSED)
+	assert_true(idle.hits.is_empty())
+	assert_eq(idle.ended_barriers.size(), 1)
+	assert_eq(idle.ended_barriers[0].reason, CombatKernel.BarrierEnd.EXPIRED)
+	assert_eq(idle.ended_barriers[0].generation, 2)
+	assert_true(kernel.actor_snapshot(&"source").barriers.is_empty())
+	assert_eq(_admit(kernel, future, &"target", 10), CombatRootQueue.Result.CLOSED_INSTANT)
+
+
+func test_hit_at_expiry_drains_before_expiration_and_idle_advance_cannot_skip_it() -> void:
+	var kernel := CombatKernel.new()
+	var target := _actor(&"target", 10)
+	var layer := _barrier(&"timed", 5, 1)
+	layer.expires = CombatInstant.at_tick(3)
+	target.barriers = [layer]
+	assert_true(kernel.add_actor(target))
+	assert_true(kernel.add_actor(_actor(&"source", 10)))
+	var key := kernel.commit(_attack(&"source", 1, 1, 2))
+	var deadline := CombatInstant.at_tick(3)
+	assert_eq(kernel.admit_contact(key, 1, REALM, 3, _contact(&"target", true), 1, true), CombatRootQueue.Result.ACCEPTED)
+	assert_eq(kernel.advance_survival(deadline).result, CombatKernel.Result.WAITING)
+	var wave := kernel.resolve_next(deadline)
+	assert_eq(wave.result, CombatKernel.Result.CLOSED)
+	assert_eq(_count(wave.hits[0].components[0].barriers[0].absorbed), 2)
+	assert_false(wave.hits[0].components[0].barriers[0].hostile_depletion)
+	assert_eq(_count(wave.ended_barriers[0].remaining), 3)
+	assert_eq(wave.ended_barriers[0].reason, CombatKernel.BarrierEnd.EXPIRED)
+	assert_true(kernel.actor_snapshot(&"target").barriers.is_empty())
+	assert_eq(_count(kernel.actor_snapshot(&"target").hp.amount), 10)
+
+
+func test_barrier_accumulation_is_capped_and_clamping_and_decay_have_no_hit() -> void:
+	var kernel := CombatKernel.new()
+	assert_true(kernel.add_actor(_actor(&"source", 10)))
+	assert_true(kernel.add_actor(_actor(&"target", 10)))
+	for index: int in [1, 2]:
+		var action := _attack(&"source", index, index, 0)
+		var grant := CombatAction.BarrierGrant.new()
+		grant.id = &"accumulated"
+		grant.mask = CombatAction.Damage.PHYSICAL
+		grant.capacity = Quantity.from_count(6)
+		grant.cap = Quantity.from_count(10)
+		grant.rule = CombatAction.BarrierRule.ACCUMULATE
+		action.barrier_for_source = grant
+		assert_eq(_admit(kernel, kernel.commit(action), &"target", index), CombatRootQueue.Result.ACCEPTED)
+		var wave := kernel.resolve_next(CombatInstant.at_tick(index + 1))
+		assert_eq(wave.hits[0].granted_barrier, &"accumulated")
+		assert_true(wave.ended_barriers.is_empty())
+	var cap := CombatKernel.BarrierAdjustment.CAP
+	var decay := CombatKernel.BarrierAdjustment.DECAY
+	var id := &"accumulated"
+	assert_null(kernel.adjust_barrier(&"source", 1, id, 2, cap, Quantity.from_count(1)))
+	var grown := kernel.adjust_barrier(&"source", 1, id, 1, cap, Quantity.from_count(12))
+	assert_eq(_count(grown.remaining), 10)
+	assert_eq(_count(grown.removed), 0)
+	var clamped := kernel.adjust_barrier(&"source", 1, id, 1, cap, Quantity.from_count(7))
+	assert_eq(_count(clamped.remaining), 7)
+	assert_eq(_count(clamped.removed), 3)
+	assert_null(clamped.ended)
+	var decayed := kernel.adjust_barrier(&"source", 1, id, 1, decay, Quantity.from_count(11))
+	assert_eq(_count(decayed.removed), 7)
+	assert_eq(decayed.ended.reason, CombatKernel.BarrierEnd.DECAYED)
+	assert_true(kernel.actor_snapshot(&"source").barriers.is_empty())
+	assert_eq(kernel.resolve_next(CombatInstant.at_tick(4)).result, CombatKernel.Result.IDLE)
+
+
+func test_damage_recovery_credits_owner_actual_hostile_hp_and_respects_independent_limits() -> void:
+	var kernel := CombatKernel.new()
+	var hero := _actor(&"hero", 8)
+	hero.max_hp = Quantity.from_count(10)
+	var summon := _actor(&"summon", 7)
+	summon.owner = hero.owner
+	summon.controller = hero.id
+	var enemy := _actor(&"enemy", 5)
+	enemy.barriers = [_barrier(&"guard", 6, CombatAction.Damage.PHYSICAL)]
+	for actor: CombatantState in [hero, summon, enemy]:
+		assert_true(kernel.add_actor(actor))
+	for index: int in [1, 2, 3]:
+		var action := _attack(&"summon", index, index, 2 if index <= 2 else 20)
+		action.origin.owner = hero.owner
+		var bounded := CombatAction.DamageRecovery.new()
+		bounded.id = &"limited"
+		bounded.rate = QuantityFraction.from_amount(Quantity.from_count(1))
+		bounded.limit = Quantity.from_count(2)
+		bounded.amplification = QuantityFraction.from_amount(Quantity.from_count(2))
+		bounded.admits_excess = true
+		var independent := bounded.copy()
+		independent.id = &"independent"
+		independent.limit = Quantity.from_count(20)
+		independent.admits_excess = false
+		action.damage_recovery = [bounded, independent]
+		var key := kernel.commit(action)
+		assert_eq(kernel.admit_contact(key, 1, REALM, index, _contact(&"enemy"), 1, index != 1), CombatRootQueue.Result.ACCEPTED)
+		var hit := kernel.resolve_next(CombatInstant.at_tick(index + 1)).hits[0]
+		assert_eq(_count(hit.damage_recovery[0].eligible_hp_removed), 0 if index <= 2 else 5)
+		assert_eq(hit.damage_recovery[0].recipient, &"hero")
+		if index == 3:
+			assert_eq(_count(hit.components[0].overkill), 13)
+			assert_eq(_count(hit.damage_recovery[0].offered), 4)
+			assert_eq(_count(hit.damage_recovery[0].restored), 2)
+			assert_eq(_count(hit.damage_recovery[0].eligible_excess.amount), 2)
+			assert_eq(_count(hit.damage_recovery[1].offered), 10)
+			assert_eq(_count(hit.damage_recovery[1].discarded), 10)
+	assert_eq(_count(kernel.actor_snapshot(&"hero").hp.amount), 10)
+	assert_eq(_count(kernel.actor_snapshot(&"summon").hp.amount), 7)
+
+
+func test_hp_payment_is_atomic_fails_or_suppresses_without_cooldown_and_stops_lethal_cast() -> void:
+	var kernel := CombatKernel.new()
+	var hero := _actor(&"hero", 5)
+	hero.resources[&"mp"] = Quantity.from_count(4)
+	hero.revival_protected_until = CombatInstant.at_tick(4)
+	hero.barriers = [_barrier(&"guard", 20, CombatAction.Damage.PHYSICAL)]
+	hero.follow_ups = [_reaction(&"reprisal", CombatFollowUp.Cause.HOSTILE_DAMAGE, 10)]
+	assert_true(kernel.add_actor(hero))
+	assert_true(kernel.add_actor(_actor(&"creator", 10)))
+	assert_true(kernel.configure_terminal(&"creator", [&"hero"]))
+	var expected: Array[CombatKernel.ActivationOutcome] = [
+		CombatKernel.ActivationOutcome.REJECTED, CombatKernel.ActivationOutcome.SUPPRESSED,
+		CombatKernel.ActivationOutcome.PAID, CombatKernel.ActivationOutcome.LETHAL,
+	]
+	for index: int in [1, 2, 3, 4]:
+		var action := _attack(&"hero", index, index, 1 if index == 3 else 10)
+		action.automatic_hp_cost = true
+		action.hp_cost = Quantity.from_count(1 if index == 3 else 9)
+		action.activation_costs[&"mp"] = Quantity.from_count(5 if index == 1 else 1)
+		action.cooldown = &"cast"
+		action.cooldown_ticks = 1
+		# The first attempt tests insufficient MP independently of revival protection.
+		if index == 1:
+			action.automatic_hp_cost = false
+		var key := kernel.commit(action)
+		assert_ne(key, "")
+		assert_eq(kernel.admit_contact(key, 1, REALM, index, _contact(&"creator", true), 1, true),
+			CombatRootQueue.Result.ACCEPTED)
+		var closed := kernel.resolve_next(CombatInstant.at_tick(index), 1)
+		assert_eq(closed.activations.size(), 1)
+		assert_eq(closed.activations[0].outcome, expected[index - 1])
+		var paid := [0, 0, 1, 4]
+		assert_eq(_count(closed.activations[0].hp_paid), paid[index - 1])
+		assert_eq(closed.hits.size(), 1 if index == 3 else 0)
+		assert_eq(closed.terminal, CombatKernel.Terminal.DEFEAT if index == 4 else CombatKernel.Terminal.ACTIVE)
+		assert_eq(_count(kernel.actor_snapshot(&"hero").barriers[0].pool.amount), 20)
+	assert_eq(_count(kernel.actor_snapshot(&"hero").resources[&"mp"]), 2)
+	assert_eq(_count(kernel.actor_snapshot(&"creator").hp.amount), 9)
+	assert_eq(kernel.pending_count(), 0)
+
+
+func test_controller_death_suspends_live_delivery_but_committed_kill_keeps_attribution() -> void:
+	var kernel := CombatKernel.new()
+	var hero := _actor(&"hero", 4)
+	hero.max_hp = Quantity.from_count(10)
+	var victim := _actor(&"victim", 4)
+	var summon := _actor(&"summon", 8)
+	summon.controller = hero.id
+	summon.owner = hero.owner
+	for actor: CombatantState in [hero, summon, victim, _actor(&"survivor", 8), _actor(&"creator", 8)]:
+		assert_true(kernel.add_actor(actor))
+	assert_true(kernel.configure_terminal(&"creator", [&"hero", &"survivor"]))
+	var committed := _attack(&"summon", 1, 1, 4)
+	committed.origin.owner = hero.owner
+	var recovery := CombatAction.DamageRecovery.new()
+	recovery.id = &"vital"
+	recovery.rate = QuantityFraction.from_amount(Quantity.from_count(1))
+	recovery.limit = Quantity.from_count(10)
+	recovery.amplification = recovery.rate
+	committed.damage_recovery = [recovery]
+	var retained := kernel.commit(committed)
+	var continuous := _attack(&"summon", 2, 1, 4)
+	continuous.origin.owner = hero.owner
+	continuous.continuation = CombatAction.Continuation.LIVE_CONTROLLER
+	var suspended := kernel.commit(continuous)
+	assert_eq(_admit(kernel, suspended, &"victim", 3), CombatRootQueue.Result.ACCEPTED)
+	assert_eq(_admit(kernel, kernel.commit(_attack(&"creator", 1, 1, 4)), &"hero", 2), CombatRootQueue.Result.ACCEPTED)
+	assert_eq(kernel.resolve_next(CombatInstant.at_tick(3)).terminal, CombatKernel.Terminal.ACTIVE)
+	assert_eq(kernel.admit_contact(suspended, 2, REALM, 4, _contact(&"victim"), 1, true), CombatRootQueue.Result.INVALID)
+	var new_attack := _attack(&"summon", 3, 4, 4)
+	new_attack.origin.owner = hero.owner
+	assert_eq(kernel.commit(new_attack), "")
+	assert_true(kernel.resolve_next(CombatInstant.at_tick(4)).hits.is_empty())
+	assert_eq(_admit(kernel, retained, &"victim", 4), CombatRootQueue.Result.ACCEPTED)
+	var closed := kernel.resolve_next(CombatInstant.at_tick(5))
+	assert_eq(closed.eliminations.size(), 1)
+	assert_eq(closed.eliminations[0].origin.owner, &"hero")
+	assert_true(closed.hits[0].damage_recovery.is_empty())
+	assert_false(kernel.actor_snapshot(&"hero").is_alive())
+
+
+func test_same_instant_hp_payment_claims_use_authored_priority_in_both_admission_orders() -> void:
+	for reversed: bool in [false, true]:
+		var kernel := CombatKernel.new()
+		var hero := _actor(&"hero", 5)
+		hero.resources[&"charge"] = Quantity.from_count(1)
+		assert_true(kernel.add_actor(hero))
+		for slot: int in ([2, 1] if reversed else [1, 2]):
+			var action := _attack(&"hero", 1, 1, 0)
+			action.origin.source_slot = slot
+			action.origin.priority = slot
+			action.hp_cost = Quantity.from_count(slot)
+			action.activation_costs[&"charge"] = Quantity.from_count(1)
+			assert_ne(kernel.commit(action), "")
+		var wave := kernel.resolve_next(CombatInstant.at_tick(1))
+		assert_eq(wave.activations.size(), 2)
+		assert_eq(wave.activations[0].origin.source_slot, 2)
+		assert_eq(wave.activations[0].outcome, CombatKernel.ActivationOutcome.PAID)
+		assert_eq(wave.activations[1].outcome, CombatKernel.ActivationOutcome.REJECTED)
+		assert_eq(_count(kernel.actor_snapshot(&"hero").hp.amount), 3)
+
+
+func test_fully_absorbed_hostile_damage_qualifies_even_if_layer_survives() -> void:
+	var kernel := CombatKernel.new()
+	var hero := _actor(&"hero", 5)
+	hero.follow_ups = [_reaction(&"reprisal", CombatFollowUp.Cause.HOSTILE_DAMAGE, 1)]
+	hero.barriers = [_barrier(&"guard", 5, CombatAction.Damage.PHYSICAL)]
+	assert_true(kernel.add_actor(hero))
+	assert_true(kernel.add_actor(_actor(&"enemy", 5)))
+	assert_eq(_admit(kernel, kernel.commit(_attack(&"enemy", 1, 1, 2)), &"hero", 2), CombatRootQueue.Result.ACCEPTED)
+	var closed := kernel.resolve_next(CombatInstant.at_tick(3))
+	assert_eq(closed.hits.size(), 2)
+	assert_eq(closed.hits[1].reaction, &"reprisal")
+	assert_false(closed.hits[0].components[0].barriers[0].hostile_depletion)
+	assert_eq(_count(kernel.actor_snapshot(&"hero").hp.amount), 5)
+
+
 static func _geometry_with_wall(target: StringName) -> RealmGeometry:
 	var geometry := RealmGeometry.new(REALM)
 	geometry.add_circle(target, 0, RealmSweep.Point.new(0, 0), 1.0, CATEGORY)
@@ -680,10 +976,12 @@ static func _barrier(id: StringName, capacity: int, mask: int) -> CombatantState
 	return barrier
 
 
-static func _contact(id: StringName) -> RealmGeometry.Contact:
+static func _contact(id: StringName, stationary: bool = false) -> RealmGeometry.Contact:
 	var geometry := RealmGeometry.new(REALM)
 	geometry.add_circle(id, 0, RealmSweep.Point.new(0, 0), 2.0, CATEGORY)
-	var sweep := geometry.certify_circle_sweep(REALM, RealmSweep.Point.new(-8, 0), RealmSweep.Point.new(8, 0), 0.0, CATEGORY)
+	var start := RealmSweep.Point.new(0 if stationary else -8, 0)
+	var finish := RealmSweep.Point.new(0 if stationary else 8, 0)
+	var sweep := geometry.certify_circle_sweep(REALM, start, finish, 0.0, CATEGORY)
 	return sweep.contacts[0]
 
 
