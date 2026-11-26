@@ -711,6 +711,8 @@ A qualifying lightning hit against an already Bleeding target consumes its eligi
 
 Qualifying actual displacement of an already Bleeding enemy leaves a short-lived damaging trail along its real movement path. Existing Bleed remains intact. Enemies must intersect the trail to take damage; no displacement creates no trail. Originating Force application alone is insufficient against an immovable target. Trail width, duration, damage cadence and secondary eligibility are authored.
 
+**Starter tuning under OWNER-T04 (§8).** Blood Wake samples the capsule swept by the displaced center with a five-unit radius. The trail deals four base physical damage to each intersecting hostile once per pulse at 15, 30 and 45 ticks after displacement. The original enemy can take a pulse while it overlaps. This gives other enemies time to enter or leave. Adjust the four Wake fields in the starter combat rules after owner playtesting. [C02 evidence](records/C02.md)
+
 #### RP03. Lightning + Force - Storm Relay
 
 A qualifying Lightning-plus-Force hit that physically moves an enemy creates additional lightning arcs from its new position. Preserve normal chain lightning and knockback. A valid target within arc reach is still required. No displacement produces no relay. Real collision or authored later triggers may continue; a relay is not guaranteed damage and does not grant arbitrary unlimited reach.
