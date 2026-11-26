@@ -95,9 +95,11 @@ func decide(kernel: CombatKernel, room: WorldExploration, settled: Dictionary[St
 	elif _last_seen != null:
 		var former: Subject = settled.get(_pursuit)
 		if (former == null or former.hp.sign_value <= 0 or tick > _remember_until
-				or _distance(at, _last_seen) <= _rules.stride):
+				or _distance(at, _last_seen) == 0.0):
 			_pursuit = &""
 			_last_seen = null
+		else:
+			target = null
 	if target != null and _distance(at, target.at) <= _rules.attack_range:
 		return _commit_strike(kernel, self_pose, target.at, tick)
 	var destination := target.at if target != null else _last_seen
@@ -109,8 +111,10 @@ func decide(kernel: CombatKernel, room: WorldExploration, settled: Dictionary[St
 	var distance := _distance(at, destination)
 	if distance == 0.0:
 		return true
-	var travel := minf(1.0, _rules.stride / distance)
-	var end := RealmSweep.Point.new(lerpf(at.x, destination.x, travel), lerpf(at.y, destination.y, travel))
+	var end := destination
+	if distance > _rules.stride:
+		var travel := _rules.stride / distance
+		end = RealmSweep.Point.new(lerpf(at.x, destination.x, travel), lerpf(at.y, destination.y, travel))
 	return geometry.displace_circle(_id, 0, end, blockers) != null
 
 
@@ -128,7 +132,8 @@ func release(geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
 			var other: Subject = subjects.get(contact.entity)
 			if (other != null and other.realm == geometry.realm_id and other.hp.sign_value > 0 and _hostile(other.faction)
 					and _unobstructed(geometry, held.origin, other.at, blockers)):
-				if held.delivery.admit(tick, contact, other.life, true) != CombatDelivery.Result.ADMITTED:
+				if held.delivery.admit(tick, contact, other.life, true) not in [
+						CombatDelivery.Result.ADMITTED, CombatDelivery.Result.CADENCE]:
 					return false
 	if not held.delivery.finish():
 		return false

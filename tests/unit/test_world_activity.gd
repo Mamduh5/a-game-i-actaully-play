@@ -27,7 +27,8 @@ class Room:
 	func point(x: float, y: float) -> RealmSweep.Point:
 		return RealmSweep.Point.new(center.x + x, center.y + y)
 
-	func add(id: StringName, x: float, foes: Array[StringName] = [], hunter: bool = false) -> bool:
+	func add(id: StringName, x: float, foes: Array[StringName] = [], hunter: bool = false,
+			pursuit_ticks: int = 30) -> bool:
 		var rules := WorldEnemy.Rules.new()
 		rules.faction = id
 		rules.family = &"fixture"
@@ -45,7 +46,7 @@ class Room:
 			rules.sight = 120.0
 			rules.stride = 8.0
 			rules.attack_range = 8.0
-			rules.pursuit_ticks = 30
+			rules.pursuit_ticks = pursuit_ticks
 		return world.introduce_enemy(id, Realm, rules, point(x, 0))
 
 	func hit(source: StringName, target_life: int, ordinal: int, commit_tick: int, due: int) -> bool:
@@ -89,6 +90,22 @@ func test_windup_preserves_its_attack_center_when_the_target_evades() -> void:
 		var closed := room.world.advance(3)
 		assert_eq(closed.combat.size(), 0 if evades else 1)
 		assert_eq(room.kernel.actor_snapshot(Hero).hp.amount.native_at_scale(0), 20 if evades else 16)
+
+
+func test_one_world_strike_reaches_a_multishape_actor_once() -> void:
+	var room := Room.new()
+	assert_true(room.enter())
+	assert_true(room.exploration.geometry().add_circle(Hero, 1, room.point(1.0, 0.0), 3.0, WorldActivity.ACTORS))
+	assert_true(room.add(Attacker, -24.0, [WorldEnemy.PARTY]))
+	assert_not_null(room.world.advance(1))
+	assert_not_null(room.world.advance(2))
+	var released := room.world.advance(3)
+	assert_not_null(released)
+	if released != null and released.combat.size() == 1:
+		assert_eq(released.combat[0].hits.size(), 1)
+	else:
+		fail_test("Expected one closed strike group")
+	assert_eq(room.kernel.actor_snapshot(Hero).hp.amount.native_at_scale(0), 16)
 
 
 func test_reanimated_enemy_has_a_new_life_and_old_contact_creates_no_award() -> void:
@@ -150,3 +167,41 @@ func test_hunter_uses_a_real_route_to_its_last_seen_point_when_vision_is_blocked
 		assert_true(contact.contacts.is_empty() and contact.unresolved.is_empty())
 	assert_true(around)
 	assert_gt(floor.circle_center(&"hunter", 0).x, room.center.x)
+
+
+func test_hunter_keeps_active_memory_over_a_nearby_faction_rival_then_engages_after_expiry() -> void:
+	var room := Room.new()
+	var floor := room.exploration.geometry()
+	assert_true(room.enter())
+	assert_true(room.add(&"hunter", -48.0, [&"rival"], true, 1))
+	assert_true(floor.commit_circle_pose(&"hunter", 0, room.point(-48.0, 41.0)))
+	assert_true(floor.commit_circle_pose(Hero, 0, room.point(56.0, 41.0)))
+	assert_not_null(room.world.advance(1))
+	var memory: Array = room.world.snapshot().actors[&"hunter"][7][3]
+	assert_eq(memory, [Hero, room.point(56.0, 41.0).x, room.point(56.0, 41.0).y, 2])
+	assert_true(room.exploration.place_route_solid(&"shut", room.point(0.0, 41.0), 18.0))
+	assert_true(room.add(&"rival", -40.0))
+	var before := floor.circle_center(&"hunter", 0)
+	var rival_at := RealmSweep.Point.new(before.x, before.y - 8.0)
+	assert_true(floor.commit_circle_pose(&"rival", 0, rival_at))
+	var blocker := floor.certify_frozen_path(Realm, before, floor.circle_center(Hero, 0), 0.0, WorldExploration.BLOCKER)
+	assert_false(blocker.contacts.is_empty())
+	var sight := floor.certify_frozen_path(Realm, before, rival_at, 0.0, WorldExploration.BLOCKER)
+	assert_true(sight.contacts.is_empty() and sight.unresolved.is_empty())
+	assert_not_null(room.world.advance(2))
+	var pursuing: Array = room.world.snapshot().actors[&"hunter"][7]
+	assert_eq(pursuing[3], memory)
+	assert_eq(pursuing[4], [])
+	var after := floor.circle_center(&"hunter", 0)
+	assert_true(after.x != before.x or after.y != before.y)
+	rival_at = RealmSweep.Point.new(after.x, after.y - 8.0)
+	assert_true(floor.commit_circle_pose(&"rival", 0, rival_at))
+	assert_not_null(room.world.advance(3))
+	var reengaged: Array = room.world.snapshot().actors[&"hunter"][7]
+	assert_eq(reengaged[3], [])
+	var strike: Array = reengaged[4]
+	assert_eq(strike.size(), 5)
+	if strike.size() == 5:
+		assert_eq(strike[0], 5)
+		assert_eq(strike[3], rival_at.x)
+		assert_eq(strike[4], rival_at.y)
