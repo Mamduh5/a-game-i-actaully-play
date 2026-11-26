@@ -14,6 +14,7 @@ class Shape:
 class Contact:
 	var entity: StringName
 	var shape: int
+	var category: int
 	var time: float
 	var proof: RealmCircleTime.Contact
 
@@ -354,6 +355,7 @@ func _sweep(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point
 		var contact := Contact.new()
 		contact.entity = proxy.entity
 		contact.shape = proxy.shape
+		contact.category = shape.category
 		contact.time = time
 		contact.proof = proof
 		if proof != null and proof.outcome == RealmCircleTime.Result.UNRESOLVED:

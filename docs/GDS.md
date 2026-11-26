@@ -472,6 +472,8 @@ If future co-op-only powers are authored, they retain their slots and become dor
 
 Life Harvest and Siphon Pulse may coexist and are absorbed under shortest-remaining-lifetime priority. Reprisal Pulse can react to genuine hostile damage absorbed by either. Other independent barriers, Vital Exchange and Sanguine Aegis remain compatible. The hero is not assigned a Sword and gains no unique baseline HP/defense stat advantage.
 
+**C01 provisional tuning under OWNER-T04/O20.** Siphon Pulse is a manual 90-unit circular neutral magical pulse with 24 base damage. It converts 75% of the pulse's total actual hostile HP damage to a temporary barrier capped at 40. The barrier lasts four seconds and decays by one point every 0.2 seconds. Cooldown is ten seconds. The values live in the starter combat rules and await owner playtest. [C01 record](records/C01.md)
+
 ### H02. The Acrobat - starter
 <a id="catalog-h02"></a>
 
@@ -593,6 +595,8 @@ Unlimited arrows, no reload and no ammunition collection. Attack timing governs 
 **Arcane Sigil:** Automatically place a sigil at a selected enemy's current position. A short visible delay precedes magical area damage. The sigil does not follow the enemy; enemies must be within its actual area at activation. Multiple eligible enemies can be hit. Placement alone is not a hit/status application.
 
 Neutral magical damage, no innate element/status, and zero base mana cost. Compatible powers/runes can change element, delayed targeting or costs. An unaffordable modified activation does not silently become a free enhanced spell. Sharpsight's later approved compatibility can predict a delayed impact where explicitly supported, without making the unmodified Staff predictive.
+
+**C01 provisional delivery values under OWNER-T04 and O26.** The Bow travels 600 units per second. The Staff's sigil shows its fixed area for 0.4 seconds before impact. Physical terrain or a compatible blocker can stop a Sword strike between the source and target center, intercept a Bow arrow, or make a Staff placement unavailable. Once placed, a sigil resolves across its authored ground area. These choices await owner playtest. [C01 record](records/C01.md)
 
 ### W04. Spear - unlockable
 <a id="catalog-w04"></a>

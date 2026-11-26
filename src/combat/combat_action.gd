@@ -62,6 +62,21 @@ class BarrierGrant:
 		result.refresh_lifetime = refresh_lifetime
 		return result
 
+class BarrierConversion:
+	## One grant from an activation's simultaneous hostile HP debits.
+	var grant: BarrierGrant
+	var rate: Quantity
+
+	func is_valid() -> bool:
+		return (grant != null and grant.is_valid() and grant.rule == BarrierRule.STRONGEST
+			and rate != null and rate.sign_value > 0)
+
+	func copy() -> BarrierConversion:
+		var result := BarrierConversion.new()
+		result.grant = grant.copy()
+		result.rate = rate
+		return result
+
 class DamageRecovery:
 	var id: StringName
 	var rate: QuantityFraction
@@ -101,6 +116,7 @@ var displacement: RealmSweep.Point
 var restore_source: Quantity
 var damage_recovery: Array[DamageRecovery] = []
 var barrier_for_source: BarrierGrant
+var converted_barrier: BarrierConversion
 
 
 func is_valid() -> bool:
@@ -112,7 +128,8 @@ func is_valid() -> bool:
 			or (hp_cost != null and hp_cost.sign_value <= 0) or (automatic_hp_cost and hp_cost == null)
 			or (displacement != null and (not is_finite(displacement.x) or not is_finite(displacement.y)))
 			or (restore_source != null and restore_source.sign_value <= 0)
-			or (barrier_for_source != null and not barrier_for_source.is_valid())):
+			or (barrier_for_source != null and not barrier_for_source.is_valid())
+			or (converted_barrier != null and not converted_barrier.is_valid())):
 		return false
 	for resource: StringName in activation_costs:
 		var cost := activation_costs[resource]
@@ -155,6 +172,8 @@ func copy() -> CombatAction:
 		result.damage_recovery.append(rule.copy())
 	if barrier_for_source != null:
 		result.barrier_for_source = barrier_for_source.copy()
+	if converted_barrier != null:
+		result.converted_barrier = converted_barrier.copy()
 	if displacement != null:
 		result.displacement = RealmSweep.Point.new(displacement.x, displacement.y)
 	for component: Component in components:

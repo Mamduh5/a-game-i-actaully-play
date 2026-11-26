@@ -46,6 +46,7 @@ var provenance: CombatOrigin.Provenance
 var hp: QuantityLayerLedger.Pool
 var max_hp: Quantity
 var barriers: Array[Barrier] = []
+var barrier_on_elimination: CombatAction.BarrierGrant
 var physical := Defense.new()
 var magical := Defense.new()
 var prevents_hit: bool
@@ -63,7 +64,8 @@ func is_valid() -> bool:
 	if (id.is_empty() or realm.is_empty() or life <= 0 or owner.is_empty() or controller == id
 			or provenance not in [CombatOrigin.Provenance.SEAT, CombatOrigin.Provenance.SPAWN]
 			or not _valid_pool(hp) or physical == null or not physical.is_valid()
-			or magical == null or not magical.is_valid()):
+			or magical == null or not magical.is_valid()
+			or (barrier_on_elimination != null and not barrier_on_elimination.is_valid())):
 		return false
 	var zero := QuantityFraction.from_amount(Quantity.from_count(0))
 	var expected := QuantityErrorBounds.Sign.ABOVE if is_alive() else QuantityErrorBounds.Sign.EQUAL
@@ -112,6 +114,8 @@ func copy() -> CombatantState:
 	result.prevents_hit = prevents_hit
 	result.accepts_new_actions = accepts_new_actions
 	result.revival_protected_until = revival_protected_until
+	if barrier_on_elimination != null:
+		result.barrier_on_elimination = barrier_on_elimination.copy()
 	result.statuses = statuses.duplicate()
 	result.resources = resources.duplicate()
 	for follow_up: CombatFollowUp in follow_ups:
@@ -223,11 +227,8 @@ func pay_activation(action: CombatAction) -> bool:
 	if action.activation_costs.is_empty() and action.cooldown.is_empty():
 		return true
 	var now := action.origin.committed_at
-	var last_ready: CombatInstant = _ready_at.get(action.cooldown)
-	if last_ready != null:
-		var order := last_ready.order_against(now)
-		if order not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]:
-			return false
+	if not cooldown_ready(action.cooldown, now):
+		return false
 	var next_ready := now.after_ticks(action.cooldown_ticks)
 	if next_ready == null:
 		return false
@@ -247,6 +248,12 @@ func pay_activation(action: CombatAction) -> bool:
 	if not action.cooldown.is_empty():
 		_ready_at[action.cooldown] = next_ready
 	return true
+
+
+func cooldown_ready(id: StringName, now: CombatInstant) -> bool:
+	var last_ready: CombatInstant = _ready_at.get(id)
+	return now != null and (last_ready == null or last_ready.order_against(now) in [
+		RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME])
 
 
 func post_rate(kind: CombatAction.Damage, raw: QuantityFraction) -> Quantity:

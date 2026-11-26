@@ -131,6 +131,11 @@ class Posting:
 	var impact: Impact
 	var hit: Hit
 
+class BarrierCredit:
+	var first_hit: Hit
+	var rule: CombatAction.BarrierConversion
+	var hp := Quantity.from_count(0)
+
 class ReactionClaim:
 	var rule: CombatFollowUp
 	var posting: Posting
@@ -422,6 +427,15 @@ func pending_count() -> int:
 	return _queue.pending_count()
 
 
+## The fixed-step owner can drain older sub-tick impacts before it admits
+## actions at the next integer boundary.
+func next_due() -> CombatInstant:
+	if _group != null:
+		return _group.root.due
+	var wave := _queue.earliest_wave()
+	return wave.due if wave != null else null
+
+
 ## Close an idle survival deadline after the run has admitted all work through it.
 ## Impacts at the deadline get their full causal group before expiry.
 func advance_survival(through: CombatInstant) -> WaveResult:
@@ -597,6 +611,8 @@ func _resolve_wave(group: Group) -> StringName:
 		if posting.hit.eliminated:
 			posting.hit.death_statuses = group.actors[posting.hit.target].statuses.duplicate()
 			group.receipt.eliminations.append(posting.hit)
+			if not _earn_elimination_barrier(group, posting.hit):
+				return &"elimination_barrier"
 	group.pending.clear()
 	return _queue_descendants(group, postings)
 
@@ -725,6 +741,7 @@ func _displace(group: Group, postings: Array[Posting]) -> bool:
 
 
 static func _recover(group: Group, postings: Array[Posting]) -> bool:
+	var converted: Dictionary[String, BarrierCredit] = {}
 	for posting: Posting in postings:
 		var action := posting.impact.action
 		var source: CombatantState = group.actors.get(posting.hit.source)
@@ -750,7 +767,40 @@ static func _recover(group: Group, postings: Array[Posting]) -> bool:
 		if action.barrier_for_source != null:
 			if not _grant_barrier(group, _edit_actor(group, source.id), posting.hit, action.barrier_for_source):
 				return false
+		if action.converted_barrier != null:
+			var key := action.origin.occurrence_key()
+			var credit: BarrierCredit = converted.get(key)
+			if credit == null:
+				credit = BarrierCredit.new()
+				credit.first_hit = posting.hit
+				credit.rule = action.converted_barrier
+				converted[key] = credit
+			for component: ComponentReceipt in posting.hit.components:
+				credit.hp = credit.hp.add(component.hostile_hp_removed)
+				if credit.hp == null:
+					return false
+	for credit: BarrierCredit in converted.values():
+		if credit.hp.sign_value == 0:
+			continue
+		var grant := credit.rule.grant.copy()
+		var capacity := credit.hp.multiply(credit.rule.rate)
+		if capacity == null:
+			return false
+		if capacity.compare(grant.capacity) < 0:
+			grant.capacity = capacity
+		if not _grant_barrier(group, _edit_actor(group, credit.first_hit.source), credit.first_hit, grant):
+			return false
 	return true
+
+
+static func _earn_elimination_barrier(group: Group, hit: Hit) -> bool:
+	if not hit.hostile or hit.origin.provenance != CombatOrigin.Provenance.SEAT:
+		return true
+	var source: CombatantState = group.actors.get(hit.source)
+	var owner := _controller(group.actors, source) if source != null else null
+	if owner == null or owner.owner != hit.origin.owner or owner.barrier_on_elimination == null:
+		return true
+	return _grant_barrier(group, _edit_actor(group, owner.id), hit, owner.barrier_on_elimination)
 
 
 static func _recover_from_damage(actor: CombatantState, posting: Posting) -> bool:

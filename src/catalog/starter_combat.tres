@@ -1,0 +1,35 @@
+[gd_resource type="Resource" script_class="StarterCombatRules" format=3]
+
+[ext_resource type="Script" path="res://src/catalog/starter_combat_rules.gd" id="1_rules"]
+[ext_resource type="Script" path="res://src/catalog/starter_weapon.gd" id="2_weapon"]
+
+[sub_resource type="Resource" id="Sword"]
+script = ExtResource("2_weapon")
+id = &"W01"
+damage = 20
+cooldown_ticks = 60
+reach = 75.0
+half_angle_degrees = 55.0
+
+[sub_resource type="Resource" id="Bow"]
+script = ExtResource("2_weapon")
+id = &"W02"
+delivery = 1
+damage = 24
+cooldown_ticks = 60
+reach = 450.0
+travel_per_tick = 10.0
+
+[sub_resource type="Resource" id="Staff"]
+script = ExtResource("2_weapon")
+id = &"W03"
+delivery = 2
+damage = 24
+cooldown_ticks = 72
+reach = 360.0
+delay_ticks = 24
+area_radius = 65.0
+
+[resource]
+script = ExtResource("1_rules")
+weapons = Array[ExtResource("2_weapon")]([SubResource("Sword"), SubResource("Bow"), SubResource("Staff")])
