@@ -11,3 +11,15 @@ A clean archive, isolated Windows profile, Godot 4.7.stable.official.5b4e0cb0f, 
 | `export.log` | `149d1b5623c70e9bc2f27cab028bbf11aac14a44c1bfb2ffb3938b0135ab30b0` |
 | `manifest.txt` | `6c1f86ef93d87aceb271b303d4c63d332710394f769e624310551dbaeb5e3b7f` |
 | `boot.log` | `150bd02025bc1b327f915c5215b6091ba953106ccfadee74008d89162364a3ff` |
+
+## Independent verification (6b1bd17)
+
+Antigravity/Gemini verified all 5 writer digests above and reproduced detached composition `6b1bd17c428ea61f5e1f41afd4bb1bb11934687f` from a clean archive under pinned Godot `4.7.stable.official.5b4e0cb0f` (`GODOT_MCP_RUNTIME=off`, isolated Windows profile, `.qa-evidence/dev-composition-review-6b1bd17/`): cold import, **284/284 GUT tests (8,142 assertions, 0 failures)**, clean 227-file `Windows Player` export matching all 227 pack entries (passing all forbidden/required boundary checks), and isolated `AGIP_BOOT ... flavor=player ... renderer=gl_compatibility` boot matching `boot.log` byte-for-byte. Individual package gates and `C24`'s writer-in-progress review boundary remain in force.
+
+| File under `.qa-evidence/dev-composition-review-6b1bd17/` | SHA-256 |
+|---|---|
+| `bootstrap.log` | `92caa13a01b0af7c7dd5bde87e58bd517e95ec9a5b9b80356eaf28926da66b98` |
+| `import.log` | `6cc75b6af13bd933e760575e16da4586c39a2346d091ff6419d99c77e7687352` |
+| `gut.xml` | `7ff25c557361d69ea8262fd0ef710c75c83bba6927221b24a40bd258dc2c089d` |
+| `player-pack.txt` | `70dfa32db9ce04248e1acfbba2948b7d0d46ae8ede2f08ffb1bf4f49b126747b` |
+| `boot-player.log` | `150bd02025bc1b327f915c5215b6091ba953106ccfadee74008d89162364a3ff` |
