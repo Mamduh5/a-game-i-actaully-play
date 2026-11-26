@@ -186,6 +186,13 @@ func contains_cell(cell: Vector2i) -> bool:
 	return _cells.has(cell)
 
 
+func module_at(point: RealmSweep.Point) -> StringName:
+	if (point == null or not is_finite(point.x) or not is_finite(point.y)
+			or absf(point.x) > 1000000.0 or absf(point.y) > 1000000.0):
+		return &""
+	return _cells.get(Vector2i(floori(point.x / MODULE_SIZE), floori(point.y / MODULE_SIZE)), &"")
+
+
 func center(id: StringName) -> RealmSweep.Point:
 	var item: Module = _modules.get(id)
 	if item == null:

@@ -35,7 +35,8 @@ var _critical: Array[StringName] = []
 var _approaches: Dictionary[StringName, RealmSweep.Point] = {}
 
 
-static func create(layout: WorldTopology, geometry: RealmGeometry, mask: int, radius: float) -> WorldRouteGraph:
+static func create(layout: WorldTopology, geometry: RealmGeometry, mask: int, radius: float,
+		require_critical_routes: bool = true) -> WorldRouteGraph:
 	if layout == null or geometry == null or geometry.realm_id != layout.realm or mask <= 0 or not is_finite(radius) or radius <= 0:
 		return null
 	var graph := WorldRouteGraph.new()
@@ -56,7 +57,7 @@ static func create(layout: WorldTopology, geometry: RealmGeometry, mask: int, ra
 	else:
 		graph._critical = [WorldTopology.ENTRY, WorldTopology.RETURN_EXIT]
 	graph._refresh(geometry)
-	return graph if graph._connected(geometry, graph._clear) else null
+	return graph if not require_critical_routes or graph._connected(geometry, graph._clear) else null
 
 
 func route(geometry: RealmGeometry, origin: StringName, destination: StringName) -> Array[RealmSweep.Point]:
@@ -79,6 +80,58 @@ func route(geometry: RealmGeometry, origin: StringName, destination: StringName)
 	result.append(_point_copy(start))
 	result.reverse()
 	return result
+
+
+## Find the next reachable waypoint to a known position. Both arbitrary
+## endpoints must connect to the same physically supported route.
+func waypoint(geometry: RealmGeometry, origin: RealmSweep.Point, destination: RealmSweep.Point) -> RealmSweep.Point:
+	if geometry == null or geometry.realm_id != _realm or not _local_point(origin) or not _local_point(destination):
+		return null
+	if _sweep_clear(geometry, origin, destination):
+		return RealmSweep.Point.new(destination.x, destination.y)
+	if _revision != geometry.compatible_revision(_mask):
+		_refresh(geometry)
+	var starts := _connections(geometry, origin)
+	var ends := _connections(geometry, destination)
+	var previous: Dictionary[Vector2i, Vector2i] = {}
+	var queue: Array[Vector2i] = []
+	for start: Vector2i in starts:
+		queue.append(start)
+		previous[start] = start
+	var index := 0
+	while index < queue.size():
+		var cell := queue[index]
+		index += 1
+		if cell in ends:
+			while previous[cell] != cell and not _sweep_clear(geometry, origin, _points[cell]):
+				cell = previous[cell]
+			return _point_copy(cell)
+		for edge: int in _outgoing[cell]:
+			if not _clear[edge]:
+				continue
+			var link := _links[edge]
+			var adjoining := link.finish if link.start == cell else link.start
+			if not previous.has(adjoining):
+				previous[adjoining] = cell
+				queue.append(adjoining)
+	return null
+
+
+func _connections(geometry: RealmGeometry, point: RealmSweep.Point) -> Array[Vector2i]:
+	var connected: Array[Vector2i] = []
+	var base := _module_base(point)
+	for y: int in range(1, CELLS_PER_MODULE):
+		for x: int in range(1, CELLS_PER_MODULE):
+			var cell := base + Vector2i(x, y)
+			if _points.has(cell) and _sweep_clear(geometry, point, _points[cell]):
+				connected.append(cell)
+	connected.sort_custom(func(first: Vector2i, second: Vector2i) -> bool:
+		var nearer := _distance(point, _points[first])
+		var farther := _distance(point, _points[second])
+		if nearer == farther:
+			return first.x < second.x if first.y == second.y else first.y < second.y
+		return nearer < farther)
+	return connected
 
 
 func reserve_approach(geometry: RealmGeometry, id: StringName, point: RealmSweep.Point) -> bool:

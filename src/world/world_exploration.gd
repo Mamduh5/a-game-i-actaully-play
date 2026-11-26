@@ -31,6 +31,7 @@ var _explored: Dictionary[Vector2i, bool] = {}
 var _present: Dictionary[StringName, Vector2i] = {}
 var _shortcut_open := false
 var _routes: WorldRouteGraph
+var _enemy_routes: Dictionary[float, WorldRouteGraph] = {}
 var _route_solids: Dictionary[StringName, float] = {}
 var _durability: Dictionary[StringName, Quantity] = {}
 
@@ -77,6 +78,10 @@ func geometry() -> RealmGeometry:
 	return _geometry
 
 
+func module_at(point: RealmSweep.Point) -> StringName:
+	return _layout.module_at(point)
+
+
 func route(origin: StringName, destination: StringName) -> Array[StringName]:
 	return _layout.route(origin, destination, _shortcut_open)
 
@@ -85,6 +90,23 @@ func physical_route(origin: StringName, destination: StringName) -> Array[RealmS
 	if not _ensure_routes():
 		return []
 	return _routes.route(_geometry, origin, destination)
+
+
+## Enemy footprints need clearance to their actual destination. Larger
+## creatures can still use the portion of the map that admits their shape.
+func enemy_waypoint(origin: RealmSweep.Point, destination: RealmSweep.Point, radius: float) -> RealmSweep.Point:
+	if module_at(origin).is_empty() or module_at(destination).is_empty() or radius <= 0.0 or not is_finite(radius):
+		return null
+	var direct := _geometry.certify_frozen_path(_layout.realm, origin, destination, radius, BLOCKER)
+	if direct != null and direct.contacts.is_empty() and direct.unresolved.is_empty():
+		return RealmSweep.Point.new(destination.x, destination.y)
+	var navigation: WorldRouteGraph = _enemy_routes.get(radius)
+	if navigation == null:
+		navigation = WorldRouteGraph.create(_layout, _geometry, BLOCKER, radius, false)
+		if navigation == null:
+			return null
+		_enemy_routes[radius] = navigation
+	return navigation.waypoint(_geometry, origin, destination)
 
 
 ## The run reserves reachable occupied or rescue positions by stable ID.

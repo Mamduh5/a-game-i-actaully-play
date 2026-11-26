@@ -222,6 +222,26 @@ func revive_player(id: StringName, life: int, now: CombatInstant,
 	return true
 
 
+## Restore an authored enemy life at a closed boundary. Work already in
+## flight keeps the old activation and can never hit this new life by replay.
+func reanimate_spawn(id: StringName, life: int, now: CombatInstant, fraction: Quantity) -> bool:
+	var actor: CombatantState = _actors.get(id)
+	if (not _accepting() or actor == null or actor.provenance != CombatOrigin.Provenance.SPAWN
+			or actor.life != life or actor.is_alive() or life == Quantity.INT_MAX or actor.max_hp == null
+			or _closed == null or _closed.order_against(now) != RealmCircleTime.Order.SAME
+			or fraction == null or fraction.sign_value <= 0 or fraction.compare(Quantity.from_count(1)) > 0):
+		return false
+	var restored := actor.max_hp.multiply(fraction)
+	if restored == null or restored.sign_value <= 0:
+		return false
+	actor.life += 1
+	actor.hp = QuantityLayerLedger.Pool.new(restored, QuantityErrorBounds.new())
+	actor.statuses.clear()
+	actor.barriers.clear()
+	actor.end_rates(CombatAction.Damage.PHYSICAL | CombatAction.Damage.MAGICAL)
+	return true
+
+
 static func _is_player_life(actor: CombatantState, life: int) -> bool:
 	return (actor != null and actor.life == life and actor.provenance == CombatOrigin.Provenance.SEAT
 		and actor.controller.is_empty())
