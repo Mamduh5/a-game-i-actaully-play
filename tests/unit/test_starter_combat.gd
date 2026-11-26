@@ -230,6 +230,10 @@ func test_bleed_refresh_keeps_first_tick_and_new_stack_waits_until_following_tic
 	var arena := Arena.new(&"W01", &"H01", false, &"R01")
 	assert_true(arena.add(&"aim", 30, 0, 200))
 	for tick: int in [1, 61]:
+		if tick == 61:
+			for step: int in range(2, tick):
+				assert_true(arena.combat.advance(step))
+				arena.settle(step)
 		assert_eq(arena.attack(tick), Committed)
 		assert_true(arena.combat.advance(tick))
 		var hits := arena.settle(tick)
