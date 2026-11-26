@@ -253,6 +253,49 @@ func test_undying_distinguishes_own_ally_and_object_kills_and_caps_personal_harv
 	assert_null(arena.layer(StarterCombatRules.HARVEST).expires)
 
 
+func test_post_death_committed_sigil_eliminates_without_harvest_before_or_after_rescue() -> void:
+	var arena := Arena.new(&"W03")
+	assert_true(arena.add(&"target", 120, 0, 10))
+	assert_true(arena.add(&"slayer", -100, 0, 100, HOSTILE, false))
+	assert_eq(arena.attack(1), Committed)
+	assert_true(arena.combat.advance(1))
+	assert_true(arena.settle(1).is_empty())
+	assert_true(arena.swing_from(&"slayer", HERO, 300, 2))
+	assert_true(arena.combat.advance(2))
+	assert_eq(arena.settle(2).size(), 1)
+	assert_eq(arena.hp(HERO).sign_value, 0)
+	for tick: int in range(3, 25):
+		assert_true(arena.combat.advance(tick))
+		assert_true(arena.settle(tick).is_empty())
+	assert_true(arena.combat.advance(25))
+	var released := arena.settle(25)
+	assert_eq(released.size(), 1)
+	if released.size() == 1:
+		assert_eq(released[0].target, &"target")
+		assert_true(released[0].eliminated)
+		assert_eq(released[0].granted_barrier, &"")
+	assert_null(arena.layer(StarterCombatRules.HARVEST))
+	assert_true(arena.kernel.revive_player(HERO, 1, CombatInstant.at_tick(26), Quantity.from_count(5, 1), 60))
+	assert_eq(arena.kernel.actor_snapshot(HERO).life, 2)
+	assert_null(arena.layer(StarterCombatRules.HARVEST))
+
+
+func test_same_wave_mutual_elimination_grants_no_life_harvest() -> void:
+	var arena := Arena.new(&"W01")
+	assert_true(arena.add(&"target", 30, 0, 10))
+	assert_eq(arena.attack(1), Committed)
+	assert_true(arena.combat.advance(1))
+	assert_true(arena.swing_from(&"target", HERO, 300, 1))
+	var hits := arena.settle(1)
+	assert_eq(hits.size(), 2)
+	for hit: CombatKernel.Hit in hits:
+		assert_true(hit.eliminated)
+		assert_eq(hit.granted_barrier, &"")
+	assert_eq(arena.hp(HERO).sign_value, 0)
+	assert_eq(arena.hp(&"target").sign_value, 0)
+	assert_null(arena.layer(StarterCombatRules.HARVEST))
+
+
 func test_siphon_converts_actual_hp_and_keeps_temporary_layer_before_harvest() -> void:
 	var arena := Arena.new(&"W02")
 	assert_true(arena.add(&"sacrificial", 10, 0, 10))

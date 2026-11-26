@@ -859,7 +859,7 @@ static func _earn_elimination_barrier(group: Group, hit: Hit) -> bool:
 		return true
 	var source: CombatantState = group.actors.get(hit.source)
 	var owner := _controller(group.actors, source) if source != null else null
-	if owner == null or owner.owner != hit.origin.owner or owner.barrier_on_elimination == null:
+	if owner == null or not owner.is_alive() or owner.owner != hit.origin.owner or owner.barrier_on_elimination == null:
 		return true
 	return _grant_barrier(group, _edit_actor(group, owner.id), hit, owner.barrier_on_elimination)
 
