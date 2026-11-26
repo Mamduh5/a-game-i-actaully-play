@@ -25,6 +25,25 @@ var claims: Array[String] = []
 var grants: Array[Grant] = []
 var acknowledgements: Dictionary[String, String] = {}
 var frontier: Frontier
+var grant_binding: ProfileGrant.Binding
+
+
+static func retain_binding(binding: ProfileGrant.Binding) -> ProfileMutation:
+	var mutation := ProfileMutation.new()
+	mutation.id = ProfileGrant.binding_id(binding.run, binding.recipient)
+	mutation.rules = binding.rules
+	mutation.catalog = binding.catalog
+	mutation.grant_binding = binding
+	return mutation
+
+
+static func restore_binding(request: Variant) -> ProfileGrant.Binding:
+	if not request is Array or request.size() != 10 or request[0] != 2:
+		return null
+	var bound := ProfileGrant.Binding.restore(request[9])
+	if bound == null or JSON.parse_string(retain_binding(bound).record()) != request:
+		return null
+	return bound
 
 
 ## Preserve exact deltas and payload digests for replay and backup validation.
@@ -64,7 +83,19 @@ func record() -> String:
 				or frontier.image.size() > MAX_BYTES - payload_size):
 			return ""
 		saved = [frontier.run, str(frontier.epoch), str(frontier.tick), sha256(frontier.image)]
-	return JSON.stringify([1, id, rules, catalog, amounts, unique_claims, grant_digests, acknowledgements, saved], "", true)
+	var request: Array = [1, id, rules, catalog, amounts, unique_claims, grant_digests, acknowledgements, saved]
+	if grant_binding != null:
+		var bound := grant_binding.record()
+		if (bound.is_empty() or id != ProfileGrant.binding_id(grant_binding.run, grant_binding.recipient)
+				or rules != grant_binding.rules or catalog != grant_binding.catalog
+				or not (deltas.is_empty() and claims.is_empty() and grants.is_empty()
+					and acknowledgements.is_empty() and frontier == null)):
+			return ""
+		request[0] = 2
+		request.append(bound)
+	elif id.begins_with(ProfileGrant.BINDING_PREFIX):
+		return ""
+	return JSON.stringify(request, "", true)
 
 
 static func valid_id(value: String) -> bool:

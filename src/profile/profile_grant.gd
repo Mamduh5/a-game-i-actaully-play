@@ -12,6 +12,8 @@ const MAX_SIGNATURE := 512
 const HEADER := 3
 const GRANT_DOMAIN := "AGIP/profile-grant/v1"
 const ACK_DOMAIN := "AGIP/profile-grant-ack/v1"
+const BINDING_PREFIX := "grant-binding/"
+const MAX_PUBLIC_KEY_BYTES := 1024
 
 class Binding:
 	var run: String
@@ -30,6 +32,41 @@ class Binding:
 			and ProfileGrant.valid_field(catalog) and ProfileStore.valid_identity(recipient)
 			and not ProfileGrant.fingerprint(issuer).is_empty()
 			and not ProfileGrant.fingerprint(recipient_key).is_empty())
+
+	func record() -> Array[String]:
+		if not is_valid():
+			return []
+		var issuer_public := issuer.save_to_string(true)
+		var recipient_public := recipient_key.save_to_string(true)
+		if not _public_pem(issuer_public) or not _public_pem(recipient_public):
+			return []
+		return [run, rules, catalog, recipient, issuer_public, recipient_public]
+
+	static func restore(saved: Variant) -> Binding:
+		if not saved is Array or saved.size() != 6:
+			return null
+		for field: Variant in saved:
+			if not field is String:
+				return null
+		if not _public_pem(saved[4]) or not _public_pem(saved[5]):
+			return null
+		var binding := Binding.new()
+		binding.run = saved[0]
+		binding.rules = saved[1]
+		binding.catalog = saved[2]
+		binding.recipient = saved[3]
+		binding.issuer = CryptoKey.new()
+		binding.recipient_key = CryptoKey.new()
+		if (binding.issuer.load_from_string(saved[4], true) != OK
+				or binding.recipient_key.load_from_string(saved[5], true) != OK
+				or binding.record() != saved):
+			return null
+		return binding
+
+	static func _public_pem(pem: String) -> bool:
+		return (pem.length() <= MAX_PUBLIC_KEY_BYTES
+			and pem.begins_with("-----BEGIN PUBLIC KEY-----\n")
+			and pem.ends_with("-----END PUBLIC KEY-----\n"))
 
 var occurrence: String
 var kind: Kind
@@ -130,6 +167,10 @@ static func open_acknowledgement(bytes: PackedByteArray, binding: Binding) -> Ar
 
 static func fingerprint(key_value: CryptoKey) -> String:
 	return NativeJoinChallenge.key_fingerprint(key_value).hex_encode()
+
+
+static func binding_id(run: String, recipient: String) -> String:
+	return BINDING_PREFIX + _identity([run, recipient])
 
 
 static func valid_field(value: String) -> bool:

@@ -15,6 +15,18 @@ class Application:
 	var acknowledgement: PackedByteArray
 
 
+## Called at original pairing from the local identity and authenticated peer
+## identities. Receiving an envelope never enrolls or replaces a binding.
+static func retain_original_binding(store: ProfileStore, binding: ProfileGrant.Binding,
+		local_key: CryptoKey) -> ProfileStore.Receipt:
+	if store == null or binding == null or not binding.is_valid() or local_key == null or local_key.is_public_only():
+		return _invalid()
+	var expected := binding.recipient_key if store.identity() == binding.recipient else binding.issuer
+	if ProfileGrant.fingerprint(local_key) != ProfileGrant.fingerprint(expected):
+		return _invalid()
+	return _commit(store, ProfileMutation.retain_binding(binding))
+
+
 ## One transaction records the shared occurrence, each personal envelope
 ## and the replayable authoritative frontier. The caller owns eligibility.
 static func issue(store: ProfileStore, issuer: CryptoKey, entitlements: Array[Entitlement],

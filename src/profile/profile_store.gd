@@ -13,6 +13,7 @@ class Receipt:
 	var generation: int
 	var anchor: String
 	var balances: Dictionary[String, Quantity] = {}
+	var grant_binding: ProfileGrant.Binding
 
 const APPLICATION_ID := 1095190864 # ASCII AGIP.
 const SCHEMA_VERSION := 2
@@ -107,6 +108,18 @@ func frontier(run_id: String) -> Dictionary:
 
 func grant(key: String) -> Dictionary:
 	return _grant(_db, key) if _available() and ProfileMutation.valid_id(key) else {}
+
+
+func grant_binding(run: String, recipient: String) -> ProfileGrant.Binding:
+	if not ProfileGrant.valid_field(run) or not valid_identity(recipient):
+		return null
+	if _db == null or _needs_reopen or not bool(_db.call(&"get_autocommit")):
+		return null
+	var operation := ProfileGrant.binding_id(run, recipient)
+	# Immutable trust can be read while a different operation is unresolved.
+	# Settlement still has to look up that exact pending receipt to unfence it.
+	var saved := lookup(operation) if _pending_operation == operation else _lookup(_db, operation)
+	return saved.grant_binding if saved.status == CommitResult.COMMITTED else null
 
 
 func pending_grants(after_key: String = "", limit: int = 64) -> Array:
@@ -285,6 +298,9 @@ func _draft_commit(mutation: ProfileMutation, digest: String, request: String) -
 	result.generation = generation
 	result.anchor = anchor
 	result.balances = posted
+	if mutation.grant_binding != null:
+		# The receipt never retains a reference to a caller's private key.
+		result.grant_binding = ProfileMutation.restore_binding(JSON.parse_string(request))
 	return result
 
 
@@ -378,6 +394,15 @@ static func _decode_receipt(saved: Dictionary, operation: String) -> Receipt:
 	result.generation = saved.generation
 	result.digest = saved.digest
 	result.anchor = saved.anchor
+	if operation.begins_with(ProfileGrant.BINDING_PREFIX):
+		var request: Variant = JSON.parse_string(saved.request)
+		# Older ledgers allowed the prefix for ordinary mutation IDs.
+		if request is Array and request.size() == 9 and request[0] == 1:
+			return result
+		result.grant_binding = ProfileMutation.restore_binding(request)
+		if (result.grant_binding == null or not result.balances.is_empty()
+				or ProfileGrant.binding_id(result.grant_binding.run, result.grant_binding.recipient) != operation):
+			return _receipt(CommitResult.CORRUPT, operation)
 	return result
 
 
@@ -599,6 +624,8 @@ static func _validate_image(connection: Object, profile_id: String) -> bool:
 
 
 static func _replay_request(body: String, receipt: Receipt, history: Dictionary) -> bool:
+	if receipt.grant_binding != null:
+		return true # _decode_receipt validated the binding-only request.
 	var request: Variant = JSON.parse_string(body)
 	if (not request is Array or request.size() != 9 or request[0] != 1 or request[1] != receipt.id
 			or not request[2] is String or not request[3] is String or not ProfileMutation.valid_id(receipt.id)

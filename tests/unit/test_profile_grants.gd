@@ -230,6 +230,91 @@ func test_discovery_is_unique_across_issuer_and_occurrence() -> void:
 	assert_true(guest.close())
 
 
+func test_original_pairing_survives_backup_and_conflicting_reenrollment() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-grant-trust")
+	var guest := ProfileStore.new()
+	assert_eq(guest.open("bob", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var binding := _binding()
+	assert_eq(ProfileGrantSettlement.retain_original_binding(guest, binding, _issuer).status, Commit.INVALID)
+	var first := ProfileGrantSettlement.retain_original_binding(guest, binding, _guest)
+	assert_eq(first.status, Commit.COMMITTED)
+	assert_eq(ProfileGrantSettlement.retain_original_binding(guest, binding, _guest).status, Commit.DUPLICATE)
+	var other := _binding()
+	other.issuer = _public(_outsider)
+	assert_eq(ProfileGrantSettlement.retain_original_binding(guest, other, _guest).status, Commit.CONFLICT)
+	other = _binding()
+	other.catalog = "new-catalog"
+	assert_eq(ProfileGrantSettlement.retain_original_binding(guest, other, _guest).status, Commit.CONFLICT)
+	assert_eq(guest.checkpoint()["generation"], 1)
+	assert_eq(guest.save_backup("paired"), ProfileStore.BackupResult.SAVED)
+	assert_eq(guest.restore_backup("paired", first.generation, first.anchor), ProfileStore.BackupResult.RESTORED)
+	assert_true(guest.close())
+	assert_eq(guest.open("bob", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var retained := guest.grant_binding(binding.run, binding.recipient)
+	assert_eq(retained.fields(), binding.fields())
+	assert_true(retained.issuer.is_public_only())
+	assert_true(retained.recipient_key.is_public_only())
+	assert_null(guest.grant_binding("new-run", binding.recipient))
+	assert_null(guest.grant_binding(binding.run, "eve"))
+	assert_true(guest.close())
+
+
+func test_native_exchange_requires_retained_pairing_and_identical_durable_payload() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-grant-exchange")
+	var issuer := ProfileStore.new()
+	var guest := ProfileStore.new()
+	assert_eq(issuer.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(guest.open("bob", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var binding := _binding()
+	var issuing := ProfileGrantExchange.new(issuer, _issuer)
+	var receiving := ProfileGrantExchange.new(guest, _guest)
+	var item := _entitlement(binding, "quest-11", 17)
+	assert_eq(ProfileGrantSettlement.issue(issuer, _issuer, [item], _frontier(binding.run, 7)).status, Commit.COMMITTED)
+	var row: Dictionary = issuer.pending_grants()[0]
+	assert_true(issuing.delivery(binding.run, "bob", row.grant_key).is_empty())
+	assert_eq(ProfileGrantSettlement.retain_original_binding(issuer, binding, _issuer).status, Commit.COMMITTED)
+	assert_true(issuing.delivery(binding.run, "eve", row.grant_key).is_empty())
+	var payload := issuing.delivery(binding.run, "bob", row.grant_key)
+	var decoded := _grant_frame(payload)
+	assert_true(ProfileGrantExchange.recognizes(decoded))
+	assert_eq(receiving.receive(decoded).receipt.status, Commit.INVALID)
+	assert_eq(guest.balance(Currency).native_at_scale(0), 0)
+	assert_eq(ProfileGrantSettlement.retain_original_binding(guest, binding, _guest).status, Commit.COMMITTED)
+	var wrong_channel := _grant_frame(payload, NativeSessionFrame.Kind.SEQUENCED)
+	assert_eq(receiving.receive(wrong_channel).receipt.status, Commit.INVALID)
+	var changed := payload.duplicate()
+	changed[changed.size() - 1] ^= 1
+	assert_eq(receiving.receive(_grant_frame(changed)).receipt.status, Commit.INVALID)
+	var changed_route := payload.duplicate()
+	changed_route[ProfileGrantExchange.HEADER] = 97
+	assert_eq(receiving.receive(_grant_frame(changed_route)).receipt.status, Commit.INVALID)
+	assert_eq(guest.checkpoint()["generation"], 1)
+	var accepted := receiving.receive(decoded)
+	var duplicated := receiving.receive(decoded)
+	assert_eq(accepted.receipt.status, Commit.COMMITTED)
+	assert_eq(duplicated.receipt.status, Commit.DUPLICATE)
+	assert_eq(duplicated.reply, accepted.reply)
+	assert_eq(guest.balance(Currency).native_at_scale(0), 17)
+	assert_eq(issuer.pending_grants().size(), 1)
+	assert_eq(issuing.receive(_grant_frame(duplicated.reply)).receipt.status, Commit.COMMITTED)
+	assert_eq(issuing.receive(_grant_frame(accepted.reply)).receipt.status, Commit.DUPLICATE)
+	assert_true(issuer.pending_grants().is_empty())
+	assert_true(issuing.delivery(binding.run, "bob", row.grant_key).is_empty())
+	assert_eq(issuer.grant(row.grant_key)["digest"], row.digest)
+	assert_true(issuer.close())
+	assert_true(guest.close())
+
+
+static func _grant_frame(payload: PackedByteArray,
+		kind: NativeSessionFrame.Kind = NativeSessionFrame.Kind.RELIABLE) -> NativeSessionFrame:
+	var packet := NativeSessionFrame.pack(kind, 3, 1, payload)
+	return NativeSessionFrame.read(packet, NativeSessionFrame.channel(kind))
+
+
 func _binding() -> ProfileGrant.Binding:
 	var result := ProfileGrant.Binding.new()
 	result.recipient = "bob"
