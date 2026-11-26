@@ -49,6 +49,7 @@ var barriers: Array[Barrier] = []
 var physical := Defense.new()
 var magical := Defense.new()
 var prevents_hit: bool
+var accepts_new_actions := true
 var revival_protected_until: CombatInstant
 var statuses: Dictionary[StringName, int] = {}
 var resources: Dictionary[StringName, Quantity] = {}
@@ -109,6 +110,7 @@ func copy() -> CombatantState:
 	result.physical = physical.copy()
 	result.magical = magical.copy()
 	result.prevents_hit = prevents_hit
+	result.accepts_new_actions = accepts_new_actions
 	result.revival_protected_until = revival_protected_until
 	result.statuses = statuses.duplicate()
 	result.resources = resources.duplicate()

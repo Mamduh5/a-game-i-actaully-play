@@ -36,6 +36,11 @@ func movement_snapshot() -> PlayerCommand:
 	return PlayerCommand.new(PlayerCommand.MOVE_AXES, _axis.x, _axis.y)
 
 
+func release_movement() -> void:
+	_axis = RealmSweep.Point.new(0.0, 0.0)
+	_destination = null
+
+
 func step(geometry: RealmGeometry, actor: StringName, slot: int, blockers: int,
 		speed: float, seconds: float) -> RealmSweep.Point:
 	var start := geometry.circle_center(actor, slot)

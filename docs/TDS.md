@@ -240,6 +240,8 @@ Trust only an explicitly invited participant. Bind loopback for local automation
 
 **Death and connectivity.** Store body location, cumulative revive waits, retained channel progress, participants, interruption reason, partial revived HP and protection on the authority. Rescue requires real access to the corpse, including across realms. Additional rescuers share one diminishing-return meter. Dead players may spectate the corpse/an eligible living teammate and choose frozen rewards. Disconnect releases movement input. The character stays stationary at its actual position, vulnerable, and committed effects follow their lifecycles. A living disconnected character counts toward survival only within finite grace. Grace expiry changes wipe eligibility, not physical HP. Reconnect to authoritative living or dead state, pending rewards, timers and world epoch. Use PR05–PR07 for prototype eligibility, the ordinary guest clock, reconnect and the tested party envelope.
 
+WP22 composes the initialized roster with ordinary command admission, the combat kernel's closed hit and activation receipts, and the recipient projection. The run samples encounter presence from authoritative realm poses before locking local entitlement. Personal kill and assist credit uses source-specific closed combat evidence. Both remain independent of the shared XP frontier. Original-host frontier proof and durable personal settlement retain their own packages. [WP22 implementation and evidence](records/WP22.md)
+
 <a id="tds-host"></a>
 
 ### Original-host recovery (OWNER-T01, F-03, NF-02)

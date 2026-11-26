@@ -444,6 +444,8 @@ Revival protection blocks external enemy/environmental damage. It does not make 
 
 A body stays where it fell: no carrying, dragging, pushing or convenience teleport. The final party gateway is the explicit transport exception, and dead players arrive still dead. Geography must preserve a physically traversable rescue path, even if dangerous or long. This is route existence, not guaranteed survival.
 
+**WP22 provisional tuning under OWNER-T04.** The initial wait is 5 seconds, with 3 seconds added per death up to 20 seconds. An unobstructed rescue interaction reaches 32 movement units. One helper fills the shared meter in 2 seconds, with the second and third helpers adding one half and one quarter of the first helper's rate. Moving farther from the body or taking an actual hostile HP or barrier debit stops the current channel and retains progress. Revival restores 30% of maximum HP and grants 2 seconds of protection. The parameters live in the WP22 roster rules and remain open to owner playtest. [WP22 record](records/WP22.md)
+
 ### 5.5 Spectating and disconnected characters
 
 Dead players can view their corpse or a living teammate across regions, communicate and use permitted party pings, inspect revive wait/progress and choose their own earned frozen rewards. They cannot independently scout hidden geography, attack, interact or gain omniscient offscreen information.

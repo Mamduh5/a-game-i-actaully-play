@@ -63,6 +63,7 @@ class Hit:
 	var target_life: int
 	var shape: int
 	var accepted: bool
+	var hostile: bool
 	var eliminated: bool
 	var wave: int
 	var event: int
@@ -76,6 +77,17 @@ class Hit:
 	var before_statuses: Dictionary[StringName, int] = {}
 	var death_statuses: Dictionary[StringName, int] = {}
 	var components: Array[ComponentReceipt] = []
+
+	func dealt_hostile_damage() -> bool:
+		if not accepted or not hostile:
+			return false
+		for component: ComponentReceipt in components:
+			if component.hostile_hp_removed.sign_value > 0:
+				return true
+			for barrier: LayerReceipt in component.barriers:
+				if barrier.absorbed.sign_value > 0:
+					return true
+		return false
 
 class WaveResult:
 	var result: Result
@@ -173,6 +185,41 @@ func actor_snapshot(id: StringName) -> CombatantState:
 func change_max_hp(id: StringName, life: int, maximum: Quantity) -> bool:
 	var actor: CombatantState = _actors.get(id)
 	return _accepting() and actor != null and actor.life == life and actor.change_max_hp(maximum)
+
+
+## Loss of input control fences new commitments by this seat and its summons.
+## Already committed effects still follow their original continuation rule.
+func set_player_control(id: StringName, life: int, enabled: bool) -> bool:
+	var actor: CombatantState = _actors.get(id)
+	if not _accepting() or not _is_player_life(actor, life):
+		return false
+	actor.accepts_new_actions = enabled
+	return true
+
+
+func revive_player(id: StringName, life: int, now: CombatInstant,
+		hp_fraction: Quantity, protection_ticks: int) -> bool:
+	var actor: CombatantState = _actors.get(id)
+	if (not _accepting() or not _is_player_life(actor, life) or actor.is_alive() or life == Quantity.INT_MAX
+			or actor.max_hp == null or now == null or hp_fraction == null or hp_fraction.sign_value <= 0
+			or hp_fraction.compare(Quantity.from_count(1)) > 0 or protection_ticks <= 0):
+		return false
+	if _closed != null and _closed.order_against(now) not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]:
+		return false
+	var protection := now.after_ticks(protection_ticks)
+	var restored := actor.max_hp.multiply(hp_fraction)
+	if protection == null or restored == null or restored.sign_value <= 0:
+		return false
+	actor.life += 1
+	actor.hp = QuantityLayerLedger.Pool.new(restored, QuantityErrorBounds.new())
+	actor.revival_protected_until = protection
+	actor.end_rates(CombatAction.Damage.PHYSICAL | CombatAction.Damage.MAGICAL)
+	return true
+
+
+static func _is_player_life(actor: CombatantState, life: int) -> bool:
+	return (actor != null and actor.life == life and actor.provenance == CombatOrigin.Provenance.SEAT
+		and actor.controller.is_empty())
 
 
 ## Called by the run at the closed boundary when the authored change is due.
@@ -298,8 +345,10 @@ func _activation_source(action: CombatAction) -> CombatantState:
 	if not _accepting() or action == null or not action.is_valid():
 		return null
 	var source: CombatantState = _actors.get(action.source)
+	var controller := _controller(_actors, source) if source != null else null
 	var origin := action.origin
-	if (source == null or source.life != action.source_life or not _live_controller(_actors, source)
+	if (source == null or source.life != action.source_life or not source.is_alive()
+			or controller == null or not controller.is_alive() or not controller.accepts_new_actions
 			or source.owner != origin.owner or source.provenance != origin.provenance
 			or (_closed != null and _closed.order_against(origin.committed_at) != RealmCircleTime.Order.BEFORE)
 			or origin.activation <= int(_latest_activation.get(origin.activation_stream_key(), 0))):
@@ -516,7 +565,7 @@ func _resolve_wave(group: Group) -> StringName:
 		var before := group.actors[id]
 		var after := before.copy()
 		for impact: Impact in per_target[id]:
-			var hit := _draft_hit(impact, before, after)
+			var hit := _draft_hit(impact, before, after, group.receipt.due)
 			if hit == null:
 				return &"numeric_posting"
 			hit.wave = group.receipt.waves
@@ -989,7 +1038,7 @@ static func _insert_claim(ordered: Array, impact: Impact) -> bool:
 	return true
 
 
-func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState) -> Hit:
+func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState, now: CombatInstant) -> Hit:
 	var hit := Hit.new()
 	hit.origin = impact.origin.copy()
 	hit.family = impact.action.family
@@ -998,6 +1047,7 @@ func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState) -
 	hit.target = impact.target
 	hit.target_life = impact.target_life
 	hit.shape = impact.shape
+	hit.hostile = impact.hostile
 	hit.parent = impact.parent
 	hit.reaction = impact.reaction
 	if before.life != impact.target_life or not before.is_alive():
@@ -1006,6 +1056,10 @@ func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState) -
 	hit.accepted = not before.prevents_hit
 	if not hit.accepted:
 		return hit
+	if impact.hostile and before.revival_protected_until != null:
+		match now.order_against(before.revival_protected_until):
+			RealmCircleTime.Order.UNRESOLVED: return null
+			RealmCircleTime.Order.BEFORE: return hit
 	var lived_before_posting := after.is_alive()
 	for component: CombatAction.Component in impact.action.components:
 		var uses_physical := component.kind == CombatAction.Damage.PHYSICAL
