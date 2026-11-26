@@ -55,6 +55,8 @@ class ActivationReceipt:
 	var death_statuses: Dictionary[StringName, int] = {}
 
 class Hit:
+	var wake_duration: int
+	var wake_radius: float
 	var arc_start: RealmSweep.Point
 	var arc_end: RealmSweep.Point
 	var origin: CombatOrigin
@@ -967,14 +969,16 @@ func _displace(group: Group, postings: Array[Posting]) -> bool:
 			if hit.hostile and action.wake_targets > 0 and posting.before_bleed != null and posting.before_bleed.has_owner(hit.origin):
 				var wake := Wake.new()
 				wake.realm = realm
-				wake.start = start
-				wake.finish = settled
+				wake.start = PlayerControlState.copy_point(start)
+				wake.finish = PlayerControlState.copy_point(settled)
 				wake.action = action
 				wake.origin = hit.origin.copy()
 				wake.cadence = CombatDeliverySchedule.create(group.receipt.due, action.wake_duration, action.wake_period)
 				if wake.cadence == null:
 					return false
 				group.wakes.append(wake)
+				hit.wake_duration = action.wake_duration
+				hit.wake_radius = action.wake_radius
 			var poses: Dictionary = group.displaced_poses.get_or_add(target.id, {})
 			poses[hit.shape] = [settled.x, settled.y]
 	return true

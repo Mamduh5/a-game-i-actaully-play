@@ -32,6 +32,16 @@ func _draw() -> void:
 					center - axis * 5.0 + axis.orthogonal() * 4.0,
 					center - axis * 5.0 - axis.orthogonal() * 4.0]), ARROW)
 			&"W03": _circle(center, cue.reach, SIGIL, _tick >= cue.impact)
+			&"RP02.blood_wake":
+				var end := center + Vector2(cue.heading.x, cue.heading.y) * cue.reach
+				var ink := Color("#e78491")
+				var side := Vector2(cue.heading.x, cue.heading.y).orthogonal() * cue.radius
+				if not _reduce_fill:
+					draw_line(center, end, Color(ink, 0.32), cue.radius * 2.0, true)
+				draw_line(center + side, end + side, ink, 1.5, true)
+				draw_line(center - side, end - side, ink, 1.5, true)
+				draw_arc(center, cue.radius, side.angle(), side.angle() + PI, 12, ink, 1.5, true)
+				draw_arc(end, cue.radius, side.angle() - PI, side.angle(), 12, ink, 1.5, true)
 			StarterCombatRules.SIPHON: _circle(center, cue.reach, SIPHON, true)
 			StarterCombatRules.HARMONIC_BURST, &"R02.lightning", &"RP03.storm_relay":
 				var end := center + Vector2(cue.heading.x, cue.heading.y) * cue.reach

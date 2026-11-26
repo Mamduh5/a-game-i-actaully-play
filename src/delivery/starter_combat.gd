@@ -7,6 +7,7 @@ enum Attempt { COMMITTED, NO_TARGET, REJECTED, FAULT }
 const WEAPON_COOLDOWN := &"main_weapon"
 
 class Cue:
+	var radius: float
 	var id: StringName
 	var position: RealmSweep.Point
 	var heading: RealmSweep.Point
@@ -222,6 +223,14 @@ func observe_closed_group(group: CombatKernel.WaveResult) -> void:
 		return
 	_last_observed_group = group.due
 	for hit: CombatKernel.Hit in group.hits:
+		if hit.source == _actor and hit.wake_duration > 0:
+			var motion := hit.displacement
+			var length := sqrt((motion.finish.x - motion.start.x) ** 2 + (motion.finish.y - motion.start.y) ** 2)
+			var cue := _ring(&"RP02.blood_wake", PlayerControlState.copy_point(motion.start), length,
+				group.due.tick, group.due.tick + hit.wake_duration + 1)
+			cue.radius = hit.wake_radius
+			cue.heading = PlayerControlState.direction(motion.start, motion.finish, RealmSweep.Point.new(1.0, 0.0))
+			_effects.append(cue)
 		if hit.source == _actor and hit.accepted and hit.arc_start != null and hit.arc_end != null:
 			var distance := sqrt((hit.arc_end.x - hit.arc_start.x) ** 2 + (hit.arc_end.y - hit.arc_start.y) ** 2)
 			var cue := _ring(hit.family, hit.arc_start, distance, group.due.tick, mini(group.due.tick, RunAuthority.MAX_TICK - 10) + 10)
@@ -466,5 +475,6 @@ static func _ring(id: StringName, at: RealmSweep.Point, radius: float, impact: i
 static func _copy_cue(cue: Cue) -> Cue:
 	var result := _ring(cue.id, PlayerControlState.copy_point(cue.position), cue.reach, cue.impact, cue.ends)
 	result.half_angle = cue.half_angle
+	result.radius = cue.radius
 	result.heading = PlayerControlState.copy_point(cue.heading) if cue.heading != null else null
 	return result

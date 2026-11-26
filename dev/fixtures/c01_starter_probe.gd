@@ -28,7 +28,7 @@ class Rules extends RunAuthority:
 		var tuning: StarterCombatRules = load("res://src/catalog/starter_combat.tres")
 		var roster: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		var catalog := roster.compile()
-		var weapon := &"W01" if which in ["sword", "bleed", "conductor-charged"] else (&"W03" if which == "sigil" else &"W02")
+		var weapon := &"W01" if which in ["sword", "bleed", "wake", "conductor-charged"] else (&"W03" if which == "sigil" else &"W02")
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
@@ -38,6 +38,8 @@ class Rules extends RunAuthority:
 			runes.assign([&"R02", &"R03"])
 		elif which == "bleed":
 			runes[0] = &"R01"
+		elif which == "wake":
+			runes.assign([&"R01", &"R03"])
 		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, {})
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
@@ -59,6 +61,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"wake":
+				return _enemy(&"near", 357, 380, 200) and _enemy(&"visitor", 510, 380, 100, false)
 			"bleed":
 				return _enemy(&"near", 357, 380, 100)
 			"storm-relay":
@@ -116,7 +120,7 @@ class Rules extends RunAuthority:
 				axes += int(intent.action == PlayerCommand.MOVE_AXES and intent.command.y < 0.0)
 				controls.apply(intent.command)
 		passed = passed and controls.step(geometry, Player, 0, Wall, 100.0, 1.0 / 60.0) != null
-		if tick == 8 and scenario != "undying":
+		if (tick == 8 and scenario != "undying") or (tick == 68 and scenario == "wake"):
 			launches += int(combat.try_weapon(tick, targeting, targets) == StarterCombat.Attempt.COMMITTED)
 		if tick == 11 and scenario in ["bow", "bow-miss"]:
 			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(570, 500))
@@ -127,6 +131,9 @@ class Rules extends RunAuthority:
 			passed = passed and geometry.commit_circle_pose(&"arrival", 0, RealmSweep.Point.new(603, 401))
 		if tick == 5 and scenario == "undying":
 			passed = passed and _ally_elimination(tick)
+		if scenario == "wake" and tick in [83, 98]:
+			passed = passed and geometry.commit_circle_pose(&"visitor", 0,
+				RealmSweep.Point.new(387, 389 if tick == 83 else 410))
 		passed = passed and combat.advance(tick) and _settle(now, true)
 		if kernel.advance_survival(now).result == CombatKernel.Result.INTERRUPTED:
 			passed = false
@@ -183,6 +190,14 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"wake":
+				var contacts: Array = []
+				for row: Array in trace:
+					if row[1] == "RP02.blood_wake":
+						contacts.append([row[0], row[2]])
+				return (launches == 2 and contacts == [[83, "near"], [83, "visitor"], [98, "near"], [113, "near"]]
+					and kernel.actor_snapshot(&"visitor").hp.amount.native_at_scale(0) == 96
+					and kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0) == 145)
 			"bleed":
 				return (launches == 1 and kernel.pending_count() == 0
 					and kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0) == 71
@@ -261,6 +276,8 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "Lightning + Force\nStorm Relay"
 	elif _case == "bleed":
 		_hud.text = "Bleed\nTarget HP %d" % _rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0)
+	elif _case == "wake":
+		_hud.text = "Bleed + Force\nBlood Wake"
 	else:
 		_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
 			{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
@@ -268,9 +285,10 @@ func _physics_process(_delta: float) -> void:
 		]
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
-			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17], "bleed": [190]}[_case]:
+			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
+			"bleed": [190], "wake": [85]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
-	if tick >= int({"conductor-charged": 252, "bleed": 192}.get(_case, 59)) or not _rules.passed:
+	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
 		var pose := _rules.geometry.circle_center(Player, 0)
 		var facts := [_case, _rules.trace, snappedf(pose.y, 0.001), _rules.launches, _rules.manual,
