@@ -1,4 +1,4 @@
-"""Exercise grant commit deaths and bounded ordinary-currency capacity failure."""
+"""Exercise grant commit deaths, ordinary-currency deadlines and bounded capacity failure."""
 
 import argparse
 import json
@@ -78,6 +78,7 @@ def exercise(exe, evidence, root):
         results[label] = run(label, "inspect-ordinary")
     results["ordinary_replay"] = run("ordinary-replay", "ordinary-write")
     results["ordinary_full"] = run("ordinary-full", "ordinary-full", full=True)
+    results["ordinary_elapsed"] = run("ordinary-elapsed", "ordinary-elapsed")
     assert results["issue-before"] == {"pending": 0, "generation": 0, "tick": -1, "balance": 0}
     assert results["issue-after"] == {"pending": 1, "generation": 1, "tick": 4, "balance": 0}
     assert results["courier"] == {"pending": 1}
@@ -95,6 +96,9 @@ def exercise(exe, evidence, root):
     assert results["ordinary_replay"] == {"already_issued": True, "balance": 3}
     assert results["ordinary_full"] == {"balance": 528, "settled": True, "generation": 1,
                                        "fault_usec": 250000, "fenced": False, "same_operation": True}
+    assert results["ordinary_elapsed"] == {"newer_before_deadline": True, "fenced": True,
+                                          "original_preserved": True, "settled": True,
+                                          "balance": 40, "generation": 2}
     return results
 
 

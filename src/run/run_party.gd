@@ -57,12 +57,17 @@ var _tick: int
 var _last_combat: CombatInstant
 var _terminal: CombatKernel.Terminal
 var _terminal_tick: int
+var _currency_authority: WeakRef
+var _settlement_pending := false
 
 var terminal: CombatKernel.Terminal:
-	get: return _terminal
+	get: return CombatKernel.Terminal.ACTIVE if _settlement_pending else _terminal
 
 var defeated: bool:
-	get: return _terminal == CombatKernel.Terminal.DEFEAT
+	get: return terminal == CombatKernel.Terminal.DEFEAT
+
+var settlement_pending: bool:
+	get: return _settlement_pending
 
 
 static func begin(setup: RunSetup, host: StringName, kernel: CombatKernel,
@@ -104,6 +109,14 @@ func initialized_seats() -> Array[StringName]:
 
 func belongs_to(run: StringName, epoch: int) -> bool:
 	return run == _run and epoch > 0 and epoch == _epoch
+
+
+func attach_currency_authority(authority: RunAuthority) -> bool:
+	if (_currency_authority != null or authority == null or _tick != 0
+			or _terminal != CombatKernel.Terminal.ACTIVE or not authority.belongs_to(_run, _epoch)):
+		return false
+	_currency_authority = weakref(authority)
+	return true
 
 
 func hp_scale() -> Quantity:
@@ -253,13 +266,13 @@ func observe_combat(wave: CombatKernel.WaveResult) -> bool:
 		if activation.outcome == CombatKernel.ActivationOutcome.LETHAL:
 			_record_death(activation.source, activation.life, wave.due)
 	_last_combat = wave.due
-	_terminal = wave.terminal
-	if _terminal == CombatKernel.Terminal.ACTIVE and not _has_survivor(wave.due):
+	var terminal_result := wave.terminal
+	if terminal_result == CombatKernel.Terminal.ACTIVE and not _has_survivor(wave.due):
 		if not _kernel.end_party_defeat():
 			return false
-		_terminal = CombatKernel.Terminal.DEFEAT
-	if _terminal != CombatKernel.Terminal.ACTIVE:
-		_terminal_tick = _tick + 1
+		terminal_result = CombatKernel.Terminal.DEFEAT
+	if terminal_result != CombatKernel.Terminal.ACTIVE:
+		_stage_terminal(terminal_result, _tick + 1)
 	return true
 
 
@@ -270,8 +283,7 @@ func close_tick(tick: int) -> bool:
 			or (_terminal != CombatKernel.Terminal.ACTIVE and tick != _terminal_tick)):
 		return false
 	if _terminal != CombatKernel.Terminal.ACTIVE:
-		_tick = tick
-		return true
+		return _close_terminal()
 	var now := CombatInstant.at_tick(tick)
 	var helpers: Dictionary[StringName, int] = {}
 	for helper: Member in _members.values():
@@ -303,8 +315,25 @@ func close_tick(tick: int) -> bool:
 	if not _has_survivor(now):
 		if not _kernel.end_party_defeat():
 			return false
-		_terminal = CombatKernel.Terminal.DEFEAT
+		_stage_terminal(CombatKernel.Terminal.DEFEAT, tick)
+		return _close_terminal()
 	_tick = tick
+	return true
+
+
+func _stage_terminal(result: CombatKernel.Terminal, tick: int) -> void:
+	_terminal = result
+	_terminal_tick = tick
+	_settlement_pending = _currency_authority != null
+
+
+func _close_terminal() -> bool:
+	if _settlement_pending:
+		var authority := _currency_authority.get_ref() as RunAuthority
+		if authority == null or not authority.flush_ordinary_currency():
+			return false
+		_settlement_pending = false
+	_tick = _terminal_tick
 	return true
 
 

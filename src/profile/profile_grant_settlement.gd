@@ -30,9 +30,10 @@ static func retain_original_binding(store: ProfileStore, binding: ProfileGrant.B
 ## One transaction records the shared occurrence, each personal envelope
 ## and the replayable authoritative frontier. The caller owns eligibility.
 static func issue(store: ProfileStore, issuer: CryptoKey, entitlements: Array[Entitlement],
-		frontier: ProfileMutation.Frontier) -> ProfileStore.Receipt:
+		frontier: ProfileMutation.Frontier, authority: RunAuthority = null) -> ProfileStore.Receipt:
 	if (store == null or frontier == null or entitlements.is_empty()
-			or entitlements.size() > ProfileMutation.MAX_ITEMS):
+			or entitlements.size() > ProfileMutation.MAX_ITEMS
+			or (authority != null and not authority.belongs_to(StringName(frontier.run), frontier.epoch))):
 		return _invalid()
 	var mutation := ProfileMutation.new()
 	mutation.frontier = frontier
@@ -63,6 +64,13 @@ static func issue(store: ProfileStore, issuer: CryptoKey, entitlements: Array[En
 		saved.recipient = bound.recipient
 		saved.envelope = bytes
 		mutation.grants.append(saved)
+	if authority != null:
+		for entitlement: Entitlement in entitlements:
+			if not authority.flush_ordinary_currency(entitlement.binding.recipient):
+				var pending := ProfileStore.Receipt.new()
+				pending.id = mutation.id
+				pending.status = ProfileStore.CommitResult.UNAVAILABLE
+				return pending
 	return _issue_with_local(store, mutation, local) if local != null else store.commit_confirmed(mutation)
 
 

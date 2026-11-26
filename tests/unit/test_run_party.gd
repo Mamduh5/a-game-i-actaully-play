@@ -10,7 +10,7 @@ const ENEMY := &"enemy"
 const BLOCKERS := 2
 const Commit := ProfileStore.CommitResult
 
-class BlessingStore extends ProfileStore:
+class UnconfirmedStore extends ProfileStore:
 	var persist := false
 
 	func _commit_io() -> bool:
@@ -372,7 +372,7 @@ func test_blessing_award_recovers_in_its_original_run_and_stays_out_of_profile_b
 	var presence := RunEncounterPresence.start(run.party, &"boss/first", FIRST, RealmSweep.Point.new(0, 0), 20.0,
 		CombatInstant.at_tick(0))
 	var scratch := DirAccess.create_temp("agip-run-blessing")
-	var store := BlessingStore.new()
+	var store := UnconfirmedStore.new()
 	assert_eq(store.open("host", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
 	var blessing := &"primal_instinct"
 	assert_eq(progression.settle_blessing(store, presence, blessing, 1).status, Commit.INVALID)
@@ -411,6 +411,51 @@ func test_blessing_award_recovers_in_its_original_run_and_stays_out_of_profile_b
 	assert_eq(next.settle_blessing(store, presence, blessing, 1).status, Commit.INVALID)
 	assert_null(PartyProgression.reopen(run.setup, catalog, frontier))
 	assert_true(store.close())
+
+
+func test_terminal_result_waits_for_ordinary_currency_flush_before_publication() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var signer := Crypto.new().generate_rsa(2048)
+	for outcome: CombatKernel.Terminal in [CombatKernel.Terminal.DEFEAT, CombatKernel.Terminal.VICTORY]:
+		var run := Scenario.new([HOST])
+		var scratch := DirAccess.create_temp("agip-terminal-currency")
+		var store := UnconfirmedStore.new()
+		assert_eq(store.open("host", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+		var paired := ProfileGrant.Binding.new()
+		paired.run = String(run.setup.run_id)
+		paired.rules = String(run.setup.rules_revision)
+		paired.catalog = String(run.setup.catalog_revision)
+		paired.recipient = "host"
+		paired.issuer = signer
+		paired.recipient_key = signer
+		var earnings := OrdinaryCurrency.begin(store, paired, signer, "currency/permanent")
+		var authority := RunAuthority.new()
+		assert_true(authority.start(run.setup, run.setup.authority_id))
+		assert_true(authority.attach_ordinary_currency(earnings))
+		assert_true(run.party.attach_currency_authority(authority))
+		assert_eq(earnings.accrue("ordinary-enemy/9", Quantity.from_count(7)), OrdinaryCurrency.Eligibility.QUEUED)
+		if outcome == CombatKernel.Terminal.VICTORY:
+			assert_true(run.kernel.configure_terminal(ENEMY, [HOST]))
+			assert_not_null(run.hit(HOST, ENEMY, 1, 100))
+		else:
+			assert_not_null(run.hit(ENEMY, HOST, 1, 100))
+		assert_true(run.party.settlement_pending)
+		assert_eq(run.party.terminal, CombatKernel.Terminal.ACTIVE)
+		assert_false(run.party.close_tick(1))
+		assert_false(run.party.close_tick(2))
+		assert_eq(earnings.pending_amount().native_at_scale(0), 7)
+		assert_eq(store.balance("currency/permanent").native_at_scale(0), 0)
+		store.persist = true
+		assert_true(run.party.close_tick(1))
+		assert_eq(run.party.terminal, outcome)
+		assert_false(run.party.settlement_pending)
+		assert_false(run.party.close_tick(1))
+		assert_true(store.close())
+		assert_eq(store.open("host", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+		assert_eq(store.balance("currency/permanent").native_at_scale(0), 7)
+		assert_eq(store.checkpoint()["generation"], 1)
+		assert_true(store.close())
 
 
 func test_connected_spectator_retains_personal_reward_and_can_follow_a_living_teammate() -> void:

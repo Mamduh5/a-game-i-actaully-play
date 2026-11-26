@@ -34,6 +34,10 @@ func next_tick() -> int:
 	return _closed_tick + 1
 
 
+func belongs_to(run: StringName, epoch: int) -> bool:
+	return not _identity.is_empty() and _identity["run"] == run and _identity["epoch"] == epoch
+
+
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
 	if (_identity.is_empty() or earnings == null
 			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])):

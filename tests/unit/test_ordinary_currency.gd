@@ -161,6 +161,44 @@ func test_recipient_flush_issues_one_remote_batch_and_keeps_local_earnings_pendi
 	assert_true(guest.close())
 
 
+func test_important_issue_waits_for_its_recipient_currency_flush() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-ordinary-important")
+	var store := LostResultStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var bound := _binding("alice", _issuer)
+	var authority := _authority()
+	var earnings := OrdinaryCurrency.begin(store, bound, _issuer, Currency)
+	assert_true(authority.attach_ordinary_currency(earnings))
+	assert_eq(earnings.accrue("ordinary/1", Quantity.from_count(4)), Add.QUEUED)
+	var frontier := ProfileMutation.Frontier.new()
+	frontier.run = bound.run
+	frontier.epoch = 1
+	frontier.tick = 1
+	frontier.image = PackedByteArray([1])
+	var important := ProfileGrantSettlement.Entitlement.new()
+	important.binding = bound
+	important.occurrence = "regional-boss/1"
+	important.kind = ProfileGrant.Kind.CURRENCY
+	important.award = Currency
+	important.amount = Quantity.from_count(9)
+	var pending := ProfileGrantSettlement.issue(store, _issuer, [important], frontier, authority)
+	assert_eq(pending.status, Commit.UNAVAILABLE)
+	assert_eq(earnings.pending_amount().native_at_scale(0), 4)
+	assert_eq(store.balance(Currency).native_at_scale(0), 0)
+	assert_true(store.frontier(bound.run).is_empty())
+	store.keep = true
+	var settled := ProfileGrantSettlement.issue(store, _issuer, [important], frontier, authority)
+	assert_eq(settled.status, Commit.COMMITTED)
+	assert_eq(settled.id, pending.id)
+	assert_eq(settled.generation, 2)
+	assert_eq(store.frontier(bound.run)["operation"], settled.id)
+	assert_eq(store.balance(Currency).native_at_scale(0), 13)
+	assert_eq(earnings.oldest_eligible_usec(), -1)
+	assert_true(store.close())
+
+
 func _binding(profile: String, recipient: CryptoKey) -> ProfileGrant.Binding:
 	var result := ProfileGrant.Binding.new()
 	result.run = "ordinary-run"

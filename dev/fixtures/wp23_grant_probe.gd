@@ -72,6 +72,8 @@ func _ready() -> void:
 		local = "ordinary"
 	elif role == "ordinary-full":
 		local = "capacity"
+	elif role == "ordinary-elapsed":
+		local = "elapsed"
 	if not local.is_empty():
 		binding.recipient = local
 		binding.recipient_key = issuer_public
@@ -87,6 +89,7 @@ func _ready() -> void:
 	match role:
 		"issue", "solo-issue": result = _issue(store, root, binding)
 		"ordinary-write", "ordinary-full": result = _ordinary(store, root, binding, role == "ordinary-full")
+		"ordinary-elapsed": result = await _elapsed(store, root, binding)
 		"inspect-issuer", "inspect-recipient", "inspect-solo", "inspect-ordinary":
 			var frontier := store.frontier(binding.run)
 			result = {"pending": store.pending_grants().size(),
@@ -109,6 +112,41 @@ func _ready() -> void:
 			if acked.status in [Commit.COMMITTED, Commit.DUPLICATE]:
 				result = {"status": acked.status, "pending": store.pending_grants().size()}
 	_finish(store.close() and not result.is_empty(), result)
+
+
+func _elapsed(store: ProfileStore, root: String, binding: ProfileGrant.Binding) -> Dictionary:
+	var key := CryptoKey.new()
+	if key.load(root.path_join("issuer.key")) != OK:
+		return {}
+	var earnings := OrdinaryCurrency.begin(store, binding, key, Currency)
+	if earnings == null or earnings.accrue("enemy/1", Quantity.from_count(17)) != OrdinaryCurrency.Eligibility.QUEUED:
+		return {}
+	var beginning := earnings.oldest_eligible_usec()
+	await _wait_until(beginning + OrdinaryCurrency.DISPATCH_AGE_USEC)
+	var first := earnings.dispatch()
+	if first.is_empty() or earnings.accrue("enemy/2", Quantity.from_count(23)) != OrdinaryCurrency.Eligibility.QUEUED:
+		return {}
+	var newer := earnings.dispatch(true)
+	if (newer.is_empty() or earnings.write_batch(newer).status != Commit.COMMITTED
+			or earnings.confirm_batch(newer).status != Commit.COMMITTED or not earnings.can_earn()):
+		return {}
+	var newer_age := Time.get_ticks_usec() - beginning
+	await _wait_until(beginning + OrdinaryCurrency.MAX_AGE_USEC)
+	var fenced := not earnings.can_earn()
+	var observed_age := Time.get_ticks_usec() - beginning
+	var preserved := earnings.oldest_eligible_usec() == beginning and store.lookup(first).status == Commit.MISSING
+	var settled := earnings.flush()
+	print("WP23_TIMING ", JSON.stringify({"newer_commit_usec": newer_age, "fence_observed_usec": observed_age}))
+	return {"newer_before_deadline": newer_age < OrdinaryCurrency.MAX_AGE_USEC,
+		"fenced": fenced, "original_preserved": preserved, "settled": settled and earnings.can_earn(),
+		"balance": store.balance(Currency).native_at_scale(0), "generation": store.checkpoint()["generation"]}
+
+
+func _wait_until(deadline: int) -> void:
+	var remaining := deadline - Time.get_ticks_usec()
+	while remaining > 0:
+		await get_tree().create_timer(float(remaining) / 1_000_000.0, true, false, true).timeout
+		remaining = deadline - Time.get_ticks_usec()
 
 
 static func _ordinary(store: FaultStore, root: String, binding: ProfileGrant.Binding, pressure: bool) -> Dictionary:

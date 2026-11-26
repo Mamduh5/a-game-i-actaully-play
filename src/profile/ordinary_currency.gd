@@ -203,11 +203,7 @@ func confirm_batch(operation: String) -> ProfileStore.Receipt:
 func flush() -> bool:
 	if not _poll():
 		return false
-	# Service all existing drafts once. A later batch can own the store's
-	# unresolved commit fence and must get its own receipt lookup.
-	for operation: String in _in_flight.keys():
-		write_batch(operation)
-		confirm_batch(operation)
+	_service_in_flight()
 	if not _in_flight.is_empty():
 		return false
 	while not _pending.is_empty():
@@ -226,14 +222,19 @@ func service() -> void:
 	if _fault_since >= 0:
 		flush()
 		return
+	_service_in_flight()
 	var operation := dispatch()
 	if not operation.is_empty():
 		write_batch(operation)
 		confirm_batch(operation)
-	elif not _in_flight.is_empty():
-		for pending: String in _in_flight.keys():
-			write_batch(pending)
-			confirm_batch(pending)
+
+
+func _service_in_flight() -> void:
+	# A later batch can own the store's unresolved commit fence and must
+	# get its own receipt lookup even if an earlier draft remains pending.
+	for operation: String in _in_flight.keys():
+		write_batch(operation)
+		confirm_batch(operation)
 
 
 func _draft(entries: Array[Earning], total: Quantity) -> Batch:
