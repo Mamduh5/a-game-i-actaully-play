@@ -300,6 +300,8 @@ Use a stable key comprising the original issuer's persistent public identity, un
 
 The first WP23 increment retains the original run, issuer and recipient public-key pairing in an immutable profile ledger receipt. The signed grant binds those keys, the recipient profile, rules and catalog. Important issuance commits the claim, frontier and each remote outbox envelope, with any issuer-local award in the same transaction. Application and acknowledgement have independent operation IDs. The run progression frontier carries closed eligible blessing awards. The Windows release role-reversal and process-fault witnesses are awaiting independent checkpoint review. [WP23 handoff](records/WP23.md#important-award-increment-review-handoff)
 
+The WP23 ordinary-currency checkpoint batches up to 32 source occurrences per recipient and account, targeting dispatch by four seconds. Each source retains its original elapsed eligibility through dispatch, uncertain writes and reordered confirmations. The authority fences the oldest unconfirmed batch at five seconds, parks unpublished combat work at an earning boundary, and reconciles the exact receipt before resuming. Bound terminal and important-issue paths await the applicable ordinary flush. Remaining lifecycle callers and forced-exit disclosure are tracked on the package. [WP23 ordinary-currency evidence and review](records/WP23.md#ordinary-currency-checkpoint-review-handoff)
+
 <a id="tds-storage"></a>
 
 ### Transaction storage and fault boundaries (F-03, NF-02)
