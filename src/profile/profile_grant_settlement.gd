@@ -58,7 +58,28 @@ static func apply(store: ProfileStore, binding: ProfileGrant.Binding, recipient:
 	var grant := ProfileGrant.open_authorization(bytes, binding)
 	if grant == null:
 		return applied
-	applied.receipt = _commit(store, grant.application())
+	var request := grant.application()
+	var previous := store.lookup(request.id)
+	match previous.status:
+		ProfileStore.CommitResult.COMMITTED:
+			previous.status = (
+				ProfileStore.CommitResult.DUPLICATE if grant.matches_application(previous.digest)
+				else ProfileStore.CommitResult.CONFLICT)
+			applied.receipt = previous
+		ProfileStore.CommitResult.MISSING:
+			if grant.kind == ProfileGrant.Kind.DISCOVERY:
+				var discovered := store.balance("discovery/" + grant.award)
+				if discovered == null:
+					applied.receipt.status = ProfileStore.CommitResult.UNAVAILABLE
+					return applied
+				if discovered.sign_value > 0:
+					if discovered.compare(Quantity.from_count(1)) != 0:
+						applied.receipt.status = ProfileStore.CommitResult.CORRUPT
+						return applied
+					request = grant.application(true)
+			applied.receipt = _commit(store, request)
+		_:
+			applied.receipt = previous
 	applied.acknowledgement = grant.sign_acknowledgement(applied.receipt, recipient)
 	return applied
 
@@ -86,7 +107,7 @@ static func acknowledge(store: ProfileStore, binding: ProfileGrant.Binding,
 	if prior.is_empty() or prior.recipient != binding.recipient or prior.digest != facts[1] or prior.body == null:
 		return _invalid()
 	var grant := ProfileGrant.open_authorization(prior.body, binding)
-	if grant == null or grant.application().record().sha256_text() != facts[2]:
+	if grant == null or not grant.matches_application(facts[2]):
 		return _invalid()
 	return _commit(store, mutation)
 

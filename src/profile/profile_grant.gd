@@ -85,24 +85,29 @@ func issue_id() -> String:
 	return "issue/" + _identity([_binding[4], _binding[0], occurrence, str(kind), award])
 
 
-func application() -> ProfileMutation:
+func application(discovery_already_recorded: bool = false) -> ProfileMutation:
 	var mutation := ProfileMutation.new()
 	mutation.id = "apply/" + key
 	mutation.rules = _binding[1]
 	mutation.catalog = _binding[2]
 	mutation.claims.append("grant-body/" + digest)
 	if kind == Kind.DISCOVERY:
-		mutation.claims.append("discovery/" + award)
-		mutation.deltas["discovery/" + award] = amount
+		if not discovery_already_recorded:
+			mutation.claims.append("discovery/" + award)
+			mutation.deltas["discovery/" + award] = amount
 	else:
 		mutation.deltas[award] = amount
 	return mutation
 
 
+func matches_application(receipt_digest: String) -> bool:
+	return (receipt_digest == application().record().sha256_text()
+		or (kind == Kind.DISCOVERY and receipt_digest == application(true).record().sha256_text()))
+
+
 func sign_acknowledgement(receipt: ProfileStore.Receipt, signer: CryptoKey) -> PackedByteArray:
-	var expected := application()
 	if (receipt == null or receipt.status not in [ProfileStore.CommitResult.COMMITTED, ProfileStore.CommitResult.DUPLICATE]
-			or receipt.id != expected.id or receipt.digest != expected.record().sha256_text()
+			or receipt.id != "apply/" + key or not matches_application(receipt.digest)
 			or fingerprint(signer) != _binding[5]):
 		return PackedByteArray()
 	var body: Array = _binding.duplicate()

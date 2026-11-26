@@ -202,12 +202,25 @@ func test_discovery_is_unique_across_issuer_and_occurrence() -> void:
 	late.run = "later-run"
 	var one := Quantity.from_count(1)
 	var earned := ProfileGrant.sign_authorization(first, _issuer, "forge-1", ProfileGrant.Kind.DISCOVERY, "rune-R04", one)
-	var repeated := ProfileGrant.sign_authorization(late, _outsider, "forge-2", ProfileGrant.Kind.DISCOVERY, "rune-R04", one)
+	var later_issuer := ProfileStore.new()
+	assert_eq(later_issuer.open("ruth", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var discovered := _entitlement(late, "forge-2", 1)
+	discovered.kind = ProfileGrant.Kind.DISCOVERY
+	discovered.award = "rune-R04"
+	assert_eq(ProfileGrantSettlement.issue(later_issuer, _outsider, [discovered], _frontier(late.run, 1)).status, Commit.COMMITTED)
+	var repeated: PackedByteArray = later_issuer.pending_grants()[0].body
 	assert_eq(ProfileGrantSettlement.apply(guest, first, _guest, earned).receipt.status, Commit.COMMITTED)
 	var duplicate := ProfileGrantSettlement.apply(guest, late, _guest, repeated)
-	assert_eq(duplicate.receipt.status, Commit.CONFLICT)
-	assert_true(duplicate.acknowledgement.is_empty())
+	assert_eq(duplicate.receipt.status, Commit.COMMITTED)
+	assert_false(duplicate.acknowledgement.is_empty())
+	var replay := ProfileGrantSettlement.apply(guest, late, _guest, repeated)
+	assert_eq(replay.receipt.status, Commit.DUPLICATE)
+	assert_eq(replay.acknowledgement, duplicate.acknowledgement)
 	assert_eq(guest.balance("discovery/rune-R04").native_at_scale(0), 1)
+	assert_eq(guest.checkpoint()["generation"], 2)
+	assert_eq(ProfileGrantSettlement.acknowledge(later_issuer, late, replay.acknowledgement).status, Commit.COMMITTED)
+	assert_true(later_issuer.pending_grants().is_empty())
+	assert_true(later_issuer.close())
 	assert_true(guest.close())
 
 
