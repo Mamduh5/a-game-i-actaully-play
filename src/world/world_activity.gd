@@ -271,6 +271,7 @@ func _spawn(id: StringName, realm: StringName, rules: WorldEnemy.Rules, at: Real
 	actor.realm = realm
 	actor.life = 1
 	actor.max_hp = rules.hp
+	actor.displacement_resistance = rules.displacement_resistance
 	actor.hp = QuantityLayerLedger.Pool.new(rules.hp, QuantityErrorBounds.new())
 	if not _kernel.add_actor(actor):
 		geometry.remove_mutable(id, 0)

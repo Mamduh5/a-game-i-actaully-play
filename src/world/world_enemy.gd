@@ -13,6 +13,7 @@ class Rules:
 	var damage: Quantity
 	var damage_kind: CombatAction.Damage = CombatAction.Damage.PHYSICAL
 	var radius: float
+	var displacement_resistance: float
 	var sight: float
 	var stride: float
 	var attack_range: float
@@ -26,6 +27,7 @@ class Rules:
 		return (not faction.is_empty() and faction != PARTY and not family.is_empty()
 			and hp != null and hp.sign_value > 0 and damage != null and damage.sign_value > 0
 			and damage_kind in CombatAction.Damage.values() and radius > 0.0 and is_finite(radius)
+			and is_finite(displacement_resistance) and displacement_resistance >= 0.0 and displacement_resistance <= 1.0
 			and sight > 0.0 and is_finite(sight) and stride >= 0.0 and is_finite(stride)
 			and attack_range > 0.0 and is_finite(attack_range) and attack_radius > 0.0 and is_finite(attack_radius)
 			and windup_ticks > 0 and recovery_ticks > 0 and pursuit_ticks >= 0
@@ -40,6 +42,7 @@ class Rules:
 		captured.damage = damage
 		captured.damage_kind = damage_kind
 		captured.radius = radius
+		captured.displacement_resistance = displacement_resistance
 		captured.sight = sight
 		captured.stride = stride
 		captured.attack_range = attack_range

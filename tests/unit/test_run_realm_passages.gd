@@ -373,6 +373,7 @@ func test_first_entry_and_return_observe_the_same_already_active_optional_world(
 	resident.faction = &"archive"
 	resident.family = &"fixture"
 	resident.hp = Quantity.from_count(40)
+	resident.displacement_resistance = 0.75
 	resident.damage = Quantity.from_count(1)
 	resident.radius = 4.0
 	resident.sight = 20.0
@@ -389,9 +390,11 @@ func test_first_entry_and_return_observe_the_same_already_active_optional_world(
 	site.period = 3
 	site.limit = 1
 	assert_true(activity.schedule_spawn(site))
+	resident.displacement_resistance = 0.0
 	assert_true(route.authority.close_tick())
 	assert_true(route.authority.closed_party)
 	var id := &"spawn/7:archive/1"
+	assert_eq(route.kernel.actor_snapshot(id).displacement_resistance, 0.75)
 	var active: Array = activity.snapshot().actors[id]
 	assert_eq(route.inner.view(Guest).visible, [])
 	var enter := route.input(Guest, PlayerCommand.INTERACT, route.handle)
