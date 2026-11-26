@@ -197,12 +197,13 @@ func _run_guest() -> void:
 
 
 func _finish(passed: bool) -> void:
+	set_process(false)
 	var state := {}
 	if not _store.identity().is_empty():
 		var pending := _store.pending_grants().size()
 		var balance: Variant = _store.balance(Currency).native_at_scale(0)
 		var generation: int = _store.checkpoint().get("generation", -1)
-		var expected: Array[int]
+		var expected: Array
 		if _reverse:
 			expected = [Commit.COMMITTED, Commit.DUPLICATE, Commit.COMMITTED] if _original_issuer else [
 				Commit.INVALID, Commit.INVALID, Commit.DUPLICATE, Commit.COMMITTED]
