@@ -322,6 +322,130 @@ func test_xp_requirements_transition_by_level_with_whole_xp_ceiling() -> void:
 	assert_null(PartyProgression.xp_to_next(0))
 
 
+func test_rank_five_evolution_cards_rotate_and_reciprocal_forms_work_in_both_orders() -> void:
+	for first: StringName in [&"E07A", &"E12A"]:
+		var preparation := _recipe_preparation([&"", &""])
+		var queue := RunRewardQueue.begin(preparation, RunRandom.new(6), &"host")
+		_rank_recipe_bases(queue)
+		var first_bonus := queue.read_offer(queue.earn(11))
+		var second_bonus := queue.read_offer(queue.earn(12))
+		assert_true(first_bonus.evolution in [&"E07A", &"E12A"])
+		assert_true(second_bonus.evolution in [&"E07A", &"E12A"])
+		assert_ne(first_bonus.evolution, second_bonus.evolution)
+		assert_eq(queue.active_form(&"P07"), &"P07")
+		assert_eq(queue.active_form(&"P12"), &"P12")
+		var resumed := RunRewardQueue.begin(preparation, RunRandom.new(6), &"host")
+		assert_true(resumed.restore(queue.checkpoint(), 12, 12))
+		var rotated := resumed.read_offer(resumed.earn(13))
+		assert_eq(rotated.evolution, first_bonus.evolution)
+		assert_eq(resumed.read_offer(11).options, first_bonus.options)
+		assert_eq(resumed.read_offer(12).options, second_bonus.options)
+		var chosen := first_bonus if first_bonus.evolution == first else second_bonus
+		var remaining := second_bonus if chosen.ordinal == first_bonus.ordinal else first_bonus
+		assert_eq(resumed.select(chosen.ordinal, chosen.evolution), Selection.APPLIED)
+		assert_eq(resumed.select(chosen.ordinal, chosen.options.keys()[0]), Selection.UNKNOWN_REWARD)
+		assert_eq(resumed.select(remaining.ordinal, remaining.evolution), Selection.APPLIED)
+		assert_eq(resumed.active_form(&"P07"), &"E07A")
+		assert_eq(resumed.active_form(&"P12"), &"E12A")
+		assert_eq(resumed.ranks(), {&"P07": 5, &"P12": 5})
+		var restored := RunRewardQueue.begin(preparation, RunRandom.new(6), &"host")
+		assert_true(restored.restore(resumed.checkpoint(), 13, 13))
+		assert_eq(restored.active_form(&"P07"), &"E07A")
+		assert_eq(restored.active_form(&"P12"), &"E12A")
+		assert_eq(restored.read_offer(restored.earn(14)).evolution, &"")
+
+
+func test_selected_alternative_invalidates_its_sibling_and_lost_catalyst_without_reroll() -> void:
+	var preparation := _recipe_preparation([&"", &"R02"])
+	var queue := RunRewardQueue.begin(preparation, RunRandom.new(6), &"host")
+	_rank_recipe_bases(queue)
+	var bonuses: Dictionary[StringName, int] = {}
+	for tick: int in range(11, 14):
+		var frozen := queue.read_offer(queue.earn(tick))
+		bonuses[frozen.evolution] = frozen.ordinal
+	assert_eq(bonuses.size(), 3)
+	assert_true(bonuses.has(&"E07A"))
+	assert_true(bonuses.has(&"E07B"))
+	assert_true(bonuses.has(&"E12A"))
+	var earlier := queue.read_offer(bonuses[&"E12A"])
+	assert_eq(queue.select(bonuses[&"E07B"], &"E07B"), Selection.APPLIED)
+	assert_eq(queue.select(bonuses[&"E07A"], &"E07A"), Selection.STALE_OPTION)
+	assert_eq(queue.select(earlier.ordinal, &"E12A"), Selection.STALE_OPTION)
+	assert_eq(queue.read_offer(earlier.ordinal).options, earlier.options)
+	assert_eq(queue.active_form(&"P07"), &"E07B")
+	assert_eq(queue.active_form(&"P12"), &"P12")
+	assert_eq(queue.read_offer(queue.earn(14)).evolution, &"")
+	var incompatible := RunRewardQueue.begin(_recipe_preparation([&"", &""]), RunRandom.new(6), &"host")
+	assert_false(incompatible.restore(queue.checkpoint(), 14, 14))
+
+
+func test_evolution_choices_and_active_slot_survive_native_progression_reopen() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var prep := _recipe_preparation([&"", &""])
+	var setup := _setup()
+	setup.role = RunSetup.Role.SOLO
+	setup.initial_realms = {&"host": &"core"}
+	setup.catalog_revision = prep.catalog_revision
+	var party := PartyProgression.begin(setup, {&"host": prep})
+	for ordinal: int in range(1, 13):
+		var need := PartyProgression.xp_to_next(party.level())
+		assert_eq(party.grant_xp(StringName("fixture/%d" % ordinal), need, ordinal), PartyProgression.Award.APPLIED)
+		if ordinal <= 10:
+			assert_eq(party.select(&"host", ordinal, &"P07" if ordinal <= 5 else &"P12"), Selection.APPLIED)
+	var chosen := party.offer(&"host", 12)
+	var pending := party.offer(&"host", 11)
+	assert_eq(party.select(&"host", chosen.ordinal, chosen.evolution), Selection.APPLIED)
+	var choice := prep.catalog.lookup(chosen.evolution)
+	var mutation := ProfileMutation.new()
+	mutation.id = "wp20/evolution"
+	mutation.rules = String(setup.rules_revision)
+	mutation.catalog = String(setup.catalog_revision)
+	mutation.frontier = party.frontier(12)
+	var scratch := DirAccess.create_temp("agip-evolution")
+	var store := ProfileStore.new()
+	assert_eq(store.open("hero", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(store.commit(mutation).status, ProfileStore.CommitResult.COMMITTED)
+	assert_true(store.close())
+	assert_eq(store.open("hero", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var recovered := PartyProgression.reopen(setup, prep.catalog, store.frontier(String(setup.run_id)))
+	assert_not_null(recovered)
+	assert_eq(recovered.frontier(12).image, mutation.frontier.image)
+	assert_eq(recovered.active_power_form(&"host", choice.base.id), chosen.evolution)
+	assert_eq(recovered.offer(&"host", pending.ordinal).options, pending.options)
+	assert_eq(recovered.select(&"host", pending.ordinal, pending.evolution), Selection.APPLIED)
+	assert_true(store.close())
+
+
+func _rank_recipe_bases(queue: RunRewardQueue) -> void:
+	var tick := 0
+	for base: StringName in [&"P07", &"P12"]:
+		for rank: int in range(1, 6):
+			tick += 1
+			var offer := queue.read_offer(queue.earn(tick))
+			assert_eq(offer.options.get(base), rank)
+			assert_eq(queue.select(offer.ordinal, base), Selection.APPLIED)
+
+
+static func _recipe_preparation(runes: Array[StringName]) -> RunPreparation:
+	var bundle: CatalogBundle = load("res://dev/fixtures/catalog_reciprocal.tres")
+	var entries: Array[CatalogEntry] = [_entry(&"H01", Kind.HERO), _entry(&"W01", Kind.WEAPON),
+		_entry(&"R02", Kind.RUNE)]
+	entries.append_array(bundle.entries)
+	var alternate := _entry(&"E07B", Kind.EVOLUTION, Eligibility.RUN_RECIPE)
+	alternate.lifetime = CatalogEntry.Lifetime.RUN
+	alternate.base = CatalogReference.new()
+	alternate.base.target_id = &"P07"
+	alternate.catalyst = CatalogReference.new()
+	alternate.catalyst.target_id = &"R02"
+	entries.append(alternate)
+	var candidates := _slots()
+	candidates[0] = &"P07"
+	candidates[1] = &"P12"
+	return RunPreparation.select(DefinitionCatalog.compile(&"fixture_evolutions", entries),
+		&"H01", &"W01", runes, candidates, {&"P07": true, &"P12": true})
+
+
 static func _setup() -> RunSetup:
 	var setup := RunSetup.new()
 	setup.role = RunSetup.Role.HOST

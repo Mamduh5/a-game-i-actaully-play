@@ -17,6 +17,7 @@ class Offer:
 	var ordinal: int
 	var earned_at: int
 	var kind: Kind
+	var evolution: StringName
 	var options: Dictionary[StringName, int] = {}
 
 	func copy() -> Offer:
@@ -24,6 +25,7 @@ class Offer:
 		result.ordinal = ordinal
 		result.earned_at = earned_at
 		result.kind = kind
+		result.evolution = evolution
 		result.options = options.duplicate()
 		return result
 
@@ -32,10 +34,12 @@ var _random: RunRandom
 var _stream: StringName
 var _last_offer: int
 var _ranks: Dictionary[StringName, int] = {}
+var _evolved: Dictionary[StringName, StringName] = {}
 var _overflow: Dictionary[StringName, int] = {}
 var _trade_shards := Quantity.from_count(0)
 var _open: Dictionary[int, Offer] = {}
 var _last_shown: Dictionary[StringName, int] = {}
+var _evolution_shown: Dictionary[StringName, int] = {}
 
 
 static func begin(preparation: RunPreparation, random: RunRandom, bound_seat: StringName) -> RunRewardQueue:
@@ -74,6 +78,10 @@ func earn(tick: int) -> int:
 		if offer.options.is_empty():
 			offer.kind = Kind.UTILITY
 			offer.options[SHARD_OPTION] = 1
+	offer.evolution = _next_evolution()
+	if not offer.evolution.is_empty():
+		offer.options[offer.evolution] = 1
+		_evolution_shown[offer.evolution] = offer.ordinal
 	_open[offer.ordinal] = offer
 	return offer.ordinal
 
@@ -95,10 +103,13 @@ func select(ordinal: int, id: StringName) -> Selection:
 		return Selection.INVALID_OPTION
 	if not _still_eligible(offer, id):
 		return compensate_if_stale(ordinal)
-	match offer.kind:
-		Kind.POWER: _ranks[id] = offer.options[id]
-		Kind.OVERFLOW: _overflow[id] = offer.options[id]
-		Kind.UTILITY: return _grant_shard(ordinal, Selection.APPLIED)
+	if id == offer.evolution:
+		_evolved[_preparation.catalog.lookup(id).base.id] = id
+	else:
+		match offer.kind:
+			Kind.POWER: _ranks[id] = offer.options[id]
+			Kind.OVERFLOW: _overflow[id] = offer.options[id]
+			Kind.UTILITY: return _grant_shard(ordinal, Selection.APPLIED)
 	_open.erase(ordinal)
 	return Selection.APPLIED
 
@@ -117,6 +128,10 @@ func ranks() -> Dictionary[StringName, int]:
 	return _ranks.duplicate()
 
 
+func active_form(base: StringName) -> StringName:
+	return _evolved.get(base, base) if _ranks.has(base) else &""
+
+
 func trade_shards() -> Quantity:
 	return _trade_shards
 
@@ -131,9 +146,17 @@ func overflow_bonus_basis_points(stat: StringName) -> int:
 func checkpoint() -> Dictionary:
 	var pending: Array[Array] = []
 	for offer: Offer in _open.values():
-		pending.append([offer.ordinal, offer.earned_at, offer.options.duplicate(), offer.kind])
-	return {"ordinal": _last_offer, "ranks": _ranks.duplicate(), "shown": _last_shown.duplicate(), "pending": pending,
+		var row: Array = [offer.ordinal, offer.earned_at, offer.options.duplicate(), offer.kind]
+		if not offer.evolution.is_empty():
+			row.append(offer.evolution)
+		pending.append(row)
+	var saved := {"ordinal": _last_offer, "ranks": _ranks.duplicate(), "shown": _last_shown.duplicate(), "pending": pending,
 		"overflow": _overflow.duplicate(), "shards": QuantityCodec.encode(_trade_shards)}
+	if not _evolution_shown.is_empty():
+		saved["evolution_shown"] = _evolution_shown.duplicate()
+	if not _evolved.is_empty():
+		saved["evolution_order"] = _evolved.values()
+	return saved
 
 
 ## Import into a fresh, already scoped queue. Only validated local recovery
@@ -148,9 +171,12 @@ func restore(image: Dictionary, expected_offers: int, closed_tick: int) -> bool:
 	var shards: Variant = image.get("shards", QuantityCodec.encode(Quantity.from_count(0)))
 	var shown: Variant = image.get("shown")
 	var pending: Variant = image.get("pending")
+	var evolution_shown: Variant = image.get("evolution_shown", {})
+	var order: Variant = image.get("evolution_order", [])
 	if (not _valid_options(saved_ranks, POWER_SLOTS, eligible, MAX_RANK) or not shown is Dictionary
 			or not _valid_options(overflow, OVERFLOW_STATS.size(), OVERFLOW_STATS, OVERFLOW_STEPS.size())
-			or not shards is PackedByteArray or not pending is Array or pending.size() > expected_offers):
+			or not shards is PackedByteArray or not pending is Array or pending.size() > expected_offers
+			or not evolution_shown is Dictionary or not order is Array or order.size() > POWER_SLOTS):
 		return false
 	var wallet := QuantityCodec.decode_fields(shards, 0, 1)
 	if wallet.size() != 1 or wallet[0].sign_value < 0 or wallet[0].scale != 0:
@@ -159,30 +185,51 @@ func restore(image: Dictionary, expected_offers: int, closed_tick: int) -> bool:
 		if (not power is StringName or not power in eligible or not shown[power] is int
 				or shown[power] < 1 or shown[power] > expected_offers):
 			return false
+	for id: Variant in evolution_shown:
+		if (not id is StringName or _evolution_definition(id) == null or not evolution_shown[id] is int
+				or evolution_shown[id] < 1 or evolution_shown[id] > expected_offers):
+			return false
+	var restored: Dictionary[StringName, StringName] = {}
+	for id: Variant in order:
+		if not id is StringName or not evolution_shown.has(id) or not _eligible_evolution(id, saved_ranks, restored):
+			return false
+		restored[_evolution_definition(id).base.id] = id
 	var offers: Dictionary[int, Offer] = {}
 	var previous_ordinal := 0
 	var previous_tick := 0
 	for row: Variant in pending:
-		if (not row is Array or row.size() not in [3, 4] or not row[0] is int or not row[1] is int
+		if (not row is Array or row.size() not in [3, 4, 5] or not row[0] is int or not row[1] is int
 				or row[0] <= previous_ordinal or row[0] > expected_offers or row[1] < previous_tick
-				or row[1] > closed_tick):
+				or row[1] > closed_tick or not row[2] is Dictionary):
 			return false
-		var kind: Variant = row[3] if row.size() == 4 else Kind.POWER
-		if not kind is int or not _valid_frozen_options(kind, row[2], eligible, shown, row[0]):
+		var kind: Variant = row[3] if row.size() >= 4 else Kind.POWER
+		var bonus: StringName
+		var ordinary: Dictionary = row[2]
+		if row.size() == 5:
+			if (not row[4] is StringName or not evolution_shown.has(row[4])
+					or evolution_shown[row[4]] < row[0] or ordinary.get(row[4]) != 1):
+				return false
+			bonus = row[4]
+			ordinary = ordinary.duplicate()
+			ordinary.erase(bonus)
+		if not kind is int or not _valid_frozen_options(kind, ordinary, eligible, shown, row[0]):
 			return false
 		var offer := Offer.new()
 		offer.ordinal = row[0]
 		offer.earned_at = row[1]
 		offer.kind = kind
+		offer.evolution = bonus
 		offer.options.assign(row[2])
 		offers[offer.ordinal] = offer
 		previous_ordinal = offer.ordinal
 		previous_tick = offer.earned_at
 	_last_offer = expected_offers
 	_ranks.assign(saved_ranks)
+	_evolved = restored
 	_overflow.assign(overflow)
 	_trade_shards = wallet[0]
 	_last_shown.assign(shown)
+	_evolution_shown.assign(evolution_shown)
 	_open = offers
 	return true
 
@@ -249,7 +296,38 @@ func _next_overflow(stat: StringName) -> int:
 	return current + 1 if current < OVERFLOW_STEPS.size() else 0
 
 
+func _next_evolution() -> StringName:
+	var next: StringName
+	var last := _last_offer
+	for id: StringName in _preparation.catalog.ids_of_kind(CatalogEntry.Kind.EVOLUTION):
+		var shown: int = _evolution_shown.get(id, 0)
+		if shown < last and _eligible_evolution(id, _ranks, _evolved):
+			next = id
+			last = shown
+	return next
+
+
+func _evolution_definition(id: StringName) -> CatalogDefinition:
+	var definition := _preparation.catalog.lookup(id)
+	return definition if definition != null and definition.kind == CatalogEntry.Kind.EVOLUTION else null
+
+
+func _eligible_evolution(id: StringName, ranks_by_base: Dictionary, evolved_by_base: Dictionary) -> bool:
+	var form := _evolution_definition(id)
+	if form == null or ranks_by_base.get(form.base.id, 0) != MAX_RANK or evolved_by_base.has(form.base.id):
+		return false
+	var catalyst := _preparation.catalog.resolve(form.catalyst)
+	if catalyst.kind == CatalogEntry.Kind.RUNE:
+		return catalyst.id in _preparation.runes()
+	if not ranks_by_base.has(catalyst.id):
+		return false
+	var provided := _preparation.catalog.lookup(evolved_by_base.get(catalyst.id, catalyst.id))
+	return form.catalyst_capability in provided.capabilities
+
+
 func _still_eligible(offer: Offer, id: StringName) -> bool:
+	if id == offer.evolution:
+		return _eligible_evolution(id, _ranks, _evolved)
 	match offer.kind:
 		Kind.POWER: return _next_rank(id) == offer.options[id]
 		Kind.OVERFLOW: return _next_overflow(id) == offer.options[id]

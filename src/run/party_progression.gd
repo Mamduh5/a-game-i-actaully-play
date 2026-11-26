@@ -106,6 +106,11 @@ func compensate_if_stale(bound_seat: StringName, ordinal: int) -> RunRewardQueue
 	return queue.compensate_if_stale(ordinal) if queue != null else RunRewardQueue.Selection.UNKNOWN_REWARD
 
 
+func active_power_form(bound_seat: StringName, base: StringName) -> StringName:
+	var queue: RunRewardQueue = _queues.get(bound_seat)
+	return queue.active_form(base) if queue != null else &""
+
+
 func trade_shards(bound_seat: StringName) -> Quantity:
 	var queue: RunRewardQueue = _queues.get(bound_seat)
 	return queue.trade_shards() if queue != null else null

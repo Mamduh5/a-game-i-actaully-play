@@ -7,13 +7,15 @@ const RUNE_SLOTS := 2
 const CANDIDATE_SLOTS := 10
 
 var catalog_revision: StringName:
-	get: return _catalog_revision
+	get: return _catalog.revision if _catalog != null else &""
+var catalog: DefinitionCatalog:
+	get: return _catalog
 var hero: StringName:
 	get: return _hero
 var weapon: StringName:
 	get: return _weapon
 
-var _catalog_revision: StringName
+var _catalog: DefinitionCatalog
 var _hero: StringName
 var _weapon: StringName
 var _runes: Array[StringName] = []
@@ -37,7 +39,7 @@ static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: S
 	if not _valid_slots(rune_slots, eligible_runes) or not _valid_slots(candidate_slots, eligible_powers):
 		return null
 	var result := RunPreparation.new()
-	result._catalog_revision = catalog.revision
+	result._catalog = catalog
 	result._hero = hero_id
 	result._weapon = weapon_id
 	result._runes = rune_slots.duplicate()
