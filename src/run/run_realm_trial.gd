@@ -14,7 +14,6 @@ var _center: RealmSweep.Point
 var _radius: float
 var _resettable: bool
 var _corpses_relevant: bool
-var _latest: CombatInstant
 var _phase: Phase
 
 var phase: Phase:
@@ -40,28 +39,25 @@ static func declare(party: RunParty, space: WorldExploration, center: RealmSweep
 ## Called after an authored interaction has been accepted at the current
 ## clock. Proximity by itself never initiates a dormant optional trial.
 func start(seat: StringName, now: CombatInstant) -> bool:
-	if (not _ordered(now) or _phase != Phase.DORMANT or now.tick >= COLLAPSE_TICK
-			or now.order_against(CombatInstant.at_tick(_party.closed_tick)) != RealmCircleTime.Order.SAME
+	if (not _at_party_boundary(now) or _phase != Phase.DORMANT or now.tick >= COLLAPSE_TICK
 			or not _party.can_control(seat)):
 		return false
 	var entrant := _party.view(seat, now)
 	if entrant == null or not entrant.alive or not entrant.connected or _location(entrant) != RealmCircleTime.Result.HIT:
 		return false
 	_phase = Phase.ACTIVE
-	_latest = now
 	return true
 
 
 func complete(now: CombatInstant) -> bool:
-	if not _ordered(now) or _phase != Phase.ACTIVE:
+	if not _at_party_boundary(now) or _phase != Phase.ACTIVE:
 		return false
 	_phase = Phase.COMPLETED
-	_latest = now
 	return true
 
 
 func observe(now: CombatInstant) -> Observation:
-	if not _ordered(now):
+	if not _at_party_boundary(now):
 		return Observation.INVALID
 	if _phase == Phase.ACTIVE and _resettable:
 		for seat: StringName in _party.initialized_seats():
@@ -72,18 +68,15 @@ func observe(now: CombatInstant) -> Observation:
 				RealmCircleTime.Result.UNRESOLVED:
 					return Observation.INVALID
 				RealmCircleTime.Result.HIT:
-					_latest = now
 					return Observation.RETAINED
 		_phase = Phase.DORMANT
-		_latest = now
 		return Observation.RESET
-	_latest = now
 	return Observation.RETAINED
 
 
-func _ordered(now: CombatInstant) -> bool:
-	return (_party != null and now != null and (_latest == null
-		or _latest.order_against(now) in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]))
+func _at_party_boundary(now: CombatInstant) -> bool:
+	return (_party != null and now != null
+		and now.order_against(CombatInstant.at_tick(_party.closed_tick)) == RealmCircleTime.Order.SAME)
 
 
 func _location(participant: RunParty.View) -> RealmCircleTime.Result:
