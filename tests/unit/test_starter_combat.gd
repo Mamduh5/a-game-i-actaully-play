@@ -289,6 +289,46 @@ func test_thunder_rupture_consumes_each_secondary_targets_owned_pre_arc_stack_on
 		assert_null(arena.kernel.next_due())
 
 
+func test_bleed_keeps_committed_offense_after_owner_death_and_uses_live_defense() -> void:
+	var arena := Arena.new(&"W01", &"H01", false, &"R01")
+	assert_true(arena.add(&"aim", 30, 0, 200))
+	var bonus := QuantityFormula.BonusCategory.new()
+	bonus.values = [Quantity.from_count(1)]
+	assert_eq(arena.combat.try_weapon(1, arena.targeting, arena.candidates, [bonus]), Committed)
+	bonus.values.clear()
+	arena.settle(1)
+	assert_eq(arena.hp(&"aim").native_at_scale(0), 160)
+	assert_true(arena.swing_from(&"aim", HERO, 250, 2))
+	arena.settle(2)
+	assert_false(arena.kernel.actor_snapshot(HERO).is_alive())
+	var defense := CombatantState.Defense.new()
+	defense.vulnerability = Quantity.from_count(2)
+	assert_true(arena.kernel.set_defense(&"aim", 1, CombatAction.Damage.PHYSICAL, defense))
+	var hits := arena.settle(61)
+	assert_eq(hits.size(), 1)
+	if hits.size() == 1:
+		assert_eq(hits[0].origin.owner, HERO)
+	assert_eq(arena.hp(&"aim").native_at_scale(0), 148)
+	defense.immune = true
+	assert_true(arena.kernel.set_defense(&"aim", 1, CombatAction.Damage.PHYSICAL, defense))
+	arena.settle(121)
+	assert_eq(arena.hp(&"aim").native_at_scale(0), 148)
+
+
+func test_lethal_lightning_rechecks_bleed_before_recording_death_statuses() -> void:
+	var arena := Arena.new(&"W01", &"H01", false, &"R01", &"R02")
+	assert_true(arena.add(&"front", 30, 0, 25))
+	assert_true(arena.add(&"flank", 40, 10, 100))
+	assert_eq(arena.attack(1), Committed)
+	var lethal := 0
+	for hit: CombatKernel.Hit in arena.settle(1):
+		if hit.eliminated:
+			lethal += 1
+			assert_eq(hit.family, &"R02.lightning")
+			assert_false(hit.death_statuses.has(&"R01"))
+	assert_eq(lethal, 1)
+
+
 func test_blood_wake_samples_real_motion_only_after_owned_bleed_exists() -> void:
 	for resistance: float in [0.0, 1.0]:
 		var arena := Arena.new(&"W01", &"H01", false, &"R01", &"R03")

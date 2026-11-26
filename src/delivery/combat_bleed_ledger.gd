@@ -86,6 +86,13 @@ func owners() -> Array[String]:
 	return _owners.keys()
 
 
+func stack_count() -> int:
+	var count := 0
+	for entry: Owner in _owners.values():
+		count += entry.stacks.size()
+	return count
+
+
 static func create(target: StringName, life: int) -> CombatBleedLedger:
 	if target.is_empty() or life <= 0:
 		return null

@@ -112,6 +112,7 @@ class Commitment:
 	var payment_pending: bool
 
 class Impact:
+	var pre_parent_bleed: CombatBleedLedger.Prestate
 	var arc_start: RealmSweep.Point
 	var arc_end: RealmSweep.Point
 	var action: CombatAction
@@ -135,6 +136,7 @@ class Ancestry:
 	var previous: Ancestry
 
 class Posting:
+	var rupture_stacks: int
 	var before_bleed: CombatBleedLedger.Prestate
 	var impact: Impact
 	var hit: Hit
@@ -777,6 +779,8 @@ static func _settle_hp_activation(group: Group, held: Commitment) -> ActivationR
 	receipt.outcome = ActivationOutcome.LETHAL if lethal else ActivationOutcome.PAID
 	if lethal:
 		receipt.death_statuses = draft.statuses.duplicate()
+		if group.bleeds.has(actor.id):
+			receipt.death_statuses[&"R01"] = group.bleeds[actor.id].stack_count()
 		draft.end_rates(CombatAction.Damage.PHYSICAL | CombatAction.Damage.MAGICAL)
 	return receipt
 
@@ -811,6 +815,17 @@ func _resolve_wave(group: Group) -> StringName:
 				postings.append(posting)
 		group.actors[id] = after
 		group.touched[id] = true
+	for posting: Posting in postings:
+		var hit := posting.hit
+		var impact := posting.impact
+		if impact.reaction != &"R02.lightning" or impact.action.rupture_per_stack <= 0 or not group.bleeds.has(hit.target):
+			continue
+		var eligible := CombatRuneGate.lightning_prestate(group.receipt.hits[hit.parent - 1], hit,
+			impact.pre_parent_bleed, posting.before_bleed)
+		var ledger := group.bleeds[hit.target]
+		posting.rupture_stacks = ledger.consume(hit.origin, eligible, group.receipt.due, ledger.stack_count()).size()
+		if ledger.owners().is_empty():
+			group.bleeds.erase(hit.target)
 	_apply_statuses(group, postings)
 	for posting: Posting in postings:
 		var application := posting.impact.action.bleed
@@ -828,6 +843,8 @@ func _resolve_wave(group: Group) -> StringName:
 	for posting: Posting in postings:
 		if posting.hit.eliminated:
 			posting.hit.death_statuses = group.actors[posting.hit.target].statuses.duplicate()
+			if group.bleeds.has(posting.hit.target):
+				posting.hit.death_statuses[&"R01"] = group.bleeds[posting.hit.target].stack_count()
 			group.receipt.eliminations.append(posting.hit)
 			if not _earn_elimination_barrier(group, posting.hit):
 				return &"elimination_barrier"
@@ -1123,7 +1140,7 @@ func _queue_descendants(group: Group, postings: Array[Posting]) -> StringName:
 		if source != null and (source.life != posting.hit.source_life or source.realm != target.realm):
 			source = null
 		if source != null:
-			if posting.impact.reaction == &"R02.lightning" and posting.impact.action.rupture_per_stack > 0:
+			if posting.rupture_stacks > 0 and target.is_alive():
 				_queue_rupture(group, claims, posting, source)
 			if posting.hit.hostile and posting.impact.action.lightning_damage != null:
 				var arc_failure := _queue_lightning(group, claims, posting, source)
@@ -1144,20 +1161,12 @@ func _queue_descendants(group: Group, postings: Array[Posting]) -> StringName:
 
 static func _queue_rupture(group: Group, claims: Array[ReactionClaim], posting: Posting, source: CombatantState) -> void:
 	var hit := posting.hit
-	var ledger: CombatBleedLedger = group.bleeds.get(hit.target)
-	if ledger == null or posting.before_bleed == null or not group.actors[hit.target].is_alive():
-		return
-	var stacks := ledger.consume(hit.origin, posting.before_bleed, group.receipt.due, 0x7fffffff)
-	if stacks.is_empty():
-		return
-	if ledger.owners().is_empty():
-		group.bleeds.erase(hit.target)
 	var rule := CombatFollowUp.new()
 	rule.id = &"RP01.thunder_rupture"
 	rule.family = rule.id
 	rule.component = CombatAction.Component.new()
 	rule.component.kind = CombatAction.Damage.MAGICAL
-	rule.component.base = Quantity.from_count(posting.impact.action.rupture_per_stack).multiply(Quantity.from_count(stacks.size()))
+	rule.component.base = Quantity.from_count(posting.impact.action.rupture_per_stack).multiply(Quantity.from_count(posting.rupture_stacks))
 	var claim := ReactionClaim.new()
 	claim.rule = rule
 	claim.posting = posting
@@ -1354,6 +1363,8 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 	action.damage_recovery = rule.damage_recovery
 	action.consume_status = rule.consume_status
 	var child := Impact.new()
+	if rule.id == &"R02.lightning":
+		child.pre_parent_bleed = claim.posting.before_bleed
 	child.action = action
 	child.origin = action.origin
 	child.root_occurrence = cause.root_occurrence
