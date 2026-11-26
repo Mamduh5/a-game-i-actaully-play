@@ -33,10 +33,11 @@ func _draw() -> void:
 					center - axis * 5.0 - axis.orthogonal() * 4.0]), ARROW)
 			&"W03": _circle(center, cue.reach, SIGIL, _tick >= cue.impact)
 			StarterCombatRules.SIPHON: _circle(center, cue.reach, SIPHON, true)
-			StarterCombatRules.HARMONIC_BURST:
+			StarterCombatRules.HARMONIC_BURST, &"R02.lightning", &"RP03.storm_relay":
 				var end := center + Vector2(cue.heading.x, cue.heading.y) * cue.reach
-				draw_line(center, end, SIGIL, 3.0, true)
-				draw_arc(end, 7.0, 0, TAU, 20, SIGIL, 2.0, true)
+				var ink := SWORD if cue.id == &"RP03.storm_relay" else SIGIL
+				draw_line(center, end, ink, 3.0, true)
+				draw_arc(end, 7.0, 0, TAU, 20, ink, 2.0, true)
 
 
 func _fan(center: Vector2, cue: StarterCombat.Cue) -> void:

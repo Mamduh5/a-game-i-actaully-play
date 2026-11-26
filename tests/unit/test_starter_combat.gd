@@ -291,6 +291,8 @@ func test_lightning_and_storm_relay_choose_from_the_struck_and_displaced_positio
 				assert_eq(hit.parent, hits[0].event)
 				assert_eq(hit.wave, hits[0].wave + 1)
 				assert_eq(hit.family, &"R02.lightning" if hit.target == &"first" else &"RP03.storm_relay")
+				assert_eq(hit.arc_start.x, 50.0 if hit.target == &"first" else 70.0)
+				assert_eq(hit.arc_end.x, 30.0 if hit.target == &"first" else 90.0)
 
 
 func test_lightning_refuses_a_secondary_behind_cover_or_outside_reach() -> void:

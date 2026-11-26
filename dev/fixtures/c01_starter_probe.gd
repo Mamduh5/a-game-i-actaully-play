@@ -33,7 +33,8 @@ class Rules extends RunAuthority:
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
 		var hero := StarterCombatRules.CONDUCTOR if which.begins_with("conductor") else StarterCombatRules.UNDYING
-		var prep := RunPreparation.select(catalog, hero, weapon, [&"", &""], slots, {})
+		var runes: Array[StringName] = [&"R02", &"R03"] if which == "storm-relay" else [&"", &""]
+		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, {})
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
@@ -54,6 +55,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"storm-relay":
+				return _enemy(&"primary", 390, 380, 100) and _enemy(&"first", 370, 415, 100, false) and _enemy(&"relay", 435, 405, 100, false)
 			"conductor-charged":
 				return _enemy(&"near", 357, 380, 500) and _enemy(&"far", 320, 451, 500)
 			"conductor":
@@ -174,6 +177,12 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"storm-relay":
+				return (launches == 1 and geometry.circle_center(&"primary", 0).x == 410.0
+					and trace.size() == 3 and trace[0].slice(1) == ["W02", "primary", false]
+					and trace[1].slice(1) == ["R02.lightning", "first", false]
+					and trace[2].slice(1) == ["RP03.storm_relay", "relay", false]
+					and trace[0][0] == trace[1][0] and trace[1][0] == trace[2][0])
 			"conductor-charged":
 				return (manual == 2 and launches == 1 and combat.resonance == 0 and trace == [
 					[2, "H03.harmonic_burst", "near", false], [8, "W01", "near", false],
@@ -236,6 +245,8 @@ func _physics_process(_delta: float) -> void:
 	_view.present(_rules.combat.cues(), tick, _reduced)
 	if _case.begins_with("conductor"):
 		_hud.text = "The Conductor\nResonance %d" % _rules.combat.resonance
+	elif _case == "storm-relay":
+		_hud.text = "Lightning + Force\nStorm Relay"
 	else:
 		_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
 			{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
@@ -243,7 +254,7 @@ func _physics_process(_delta: float) -> void:
 		]
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
-			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244]}[_case]:
+			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= (252 if _case == "conductor-charged" else 59) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success

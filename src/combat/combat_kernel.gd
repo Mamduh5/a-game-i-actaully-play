@@ -55,6 +55,8 @@ class ActivationReceipt:
 	var death_statuses: Dictionary[StringName, int] = {}
 
 class Hit:
+	var arc_start: RealmSweep.Point
+	var arc_end: RealmSweep.Point
 	var origin: CombatOrigin
 	var source: StringName
 	var source_life: int
@@ -108,6 +110,8 @@ class Commitment:
 	var payment_pending: bool
 
 class Impact:
+	var arc_start: RealmSweep.Point
+	var arc_end: RealmSweep.Point
 	var action: CombatAction
 	var origin: CombatOrigin
 	var root_occurrence: String
@@ -138,6 +142,8 @@ class BarrierCredit:
 	var hp := Quantity.from_count(0)
 
 class ReactionClaim:
+	var arc_start: RealmSweep.Point
+	var arc_end: RealmSweep.Point
 	var rule: CombatFollowUp
 	var posting: Posting
 	var actor: CombatantState
@@ -1014,6 +1020,8 @@ func _queue_lightning(group: Group, claims: Array[ReactionClaim], posting: Posti
 		claim.actor = source
 		claim.target = group.actors[selected.entity]
 		claim.shape = selected.shape
+		claim.arc_start = at
+		claim.arc_end = geometry.circle_center(selected.entity, selected.shape)
 		claims.append(claim)
 	return &""
 
@@ -1157,6 +1165,8 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 	child.hostile = cause.hostile
 	child.parent = receipt.event
 	child.reaction = rule.id
+	child.arc_start = claim.arc_start
+	child.arc_end = claim.arc_end
 	child.ancestry = Ancestry.new()
 	child.ancestry.previous = cause.ancestry
 	if rule.inherit_parent_statuses and child.target == receipt.target:
@@ -1241,6 +1251,8 @@ func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState, n
 	hit.hostile = impact.hostile
 	hit.parent = impact.parent
 	hit.reaction = impact.reaction
+	hit.arc_start = impact.arc_start
+	hit.arc_end = impact.arc_end
 	if before.life != impact.target_life or before.realm_visit != impact.target_visit or not before.is_alive():
 		return hit
 	hit.before_statuses = impact.inherited_statuses.duplicate() if impact.uses_inherited_statuses else before.statuses.duplicate()

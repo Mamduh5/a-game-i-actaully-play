@@ -42,7 +42,7 @@ var _sigils: Array[Sigil] = []
 var _effects: Array[Cue] = []
 var _resonance: int
 var _linked_lives: Dictionary[StringName, int] = {}
-var _last_resonance_group: CombatInstant
+var _last_observed_group: CombatInstant
 
 var resonance: int:
 	get: return _resonance
@@ -205,11 +205,18 @@ func _harmonic_burst(tick: int, source: CombatantState, center: RealmSweep.Point
 ## An owned weapon following a landed Burst link on the same life earns one
 ## charge. Snapshot earlier links so contacts in one group cannot self-prime.
 func observe_closed_group(group: CombatKernel.WaveResult) -> void:
-	if (_hero != StarterCombatRules.CONDUCTOR or group == null or group.result != CombatKernel.Result.CLOSED
-			or group.due == null or (_last_resonance_group != null
-			and _last_resonance_group.order_against(group.due) != RealmCircleTime.Order.BEFORE)):
+	if (group == null or group.result != CombatKernel.Result.CLOSED or group.due == null or (_last_observed_group != null
+			and _last_observed_group.order_against(group.due) != RealmCircleTime.Order.BEFORE)):
 		return
-	_last_resonance_group = group.due
+	_last_observed_group = group.due
+	for hit: CombatKernel.Hit in group.hits:
+		if hit.source == _actor and hit.accepted and hit.arc_start != null and hit.arc_end != null:
+			var distance := sqrt((hit.arc_end.x - hit.arc_start.x) ** 2 + (hit.arc_end.y - hit.arc_start.y) ** 2)
+			var cue := _ring(hit.family, hit.arc_start, distance, group.due.tick, mini(group.due.tick, RunAuthority.MAX_TICK - 10) + 10)
+			cue.heading = PlayerControlState.direction(hit.arc_start, hit.arc_end, RealmSweep.Point.new(1.0, 0.0))
+			_effects.append(cue)
+	if _hero != StarterCombatRules.CONDUCTOR:
+		return
 	var actor := _kernel.actor_snapshot(_actor)
 	if actor == null or not actor.is_alive():
 		return
