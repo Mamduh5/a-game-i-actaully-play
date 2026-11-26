@@ -28,11 +28,11 @@ class Rules extends RunAuthority:
 		var tuning: StarterCombatRules = load("res://src/catalog/starter_combat.tres")
 		var roster: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		var catalog := roster.compile()
-		var weapon := &"W01" if which == "sword" else (&"W03" if which == "sigil" else &"W02")
+		var weapon := &"W01" if which in ["sword", "conductor-charged"] else (&"W03" if which == "sigil" else &"W02")
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
-		var hero := StarterCombatRules.CONDUCTOR if which == "conductor" else StarterCombatRules.UNDYING
+		var hero := StarterCombatRules.CONDUCTOR if which.begins_with("conductor") else StarterCombatRules.UNDYING
 		var prep := RunPreparation.select(catalog, hero, weapon, [&"", &""], slots, {})
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
@@ -54,6 +54,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"conductor-charged":
+				return _enemy(&"near", 357, 380, 500) and _enemy(&"far", 320, 451, 500)
 			"conductor":
 				return _enemy(&"near", 380, 367, 100) and _enemy(&"far", 343, 452, 100)
 			"sword":
@@ -172,6 +174,10 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"conductor-charged":
+				return (manual == 2 and launches == 1 and combat.resonance == 0 and trace == [
+					[2, "H03.harmonic_burst", "near", false], [8, "W01", "near", false],
+					[242, "H03.harmonic_burst", "far", false], [242, "H03.harmonic_burst", "near", false]])
 			"conductor":
 				return (manual == 1 and launches == 1 and trace.size() == 2
 					and trace[0].slice(1) == ["W02", "near", false]
@@ -228,8 +234,8 @@ func _physics_process(_delta: float) -> void:
 			_rules.passed = false
 	_rules.passed = _rules.passed and _rules.close_tick()
 	_view.present(_rules.combat.cues(), tick, _reduced)
-	if _case == "conductor":
-		_hud.text = "The Conductor\nHarmonic Burst"
+	if _case.begins_with("conductor"):
+		_hud.text = "The Conductor\nResonance %d" % _rules.combat.resonance
 	else:
 		_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
 			{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
@@ -237,9 +243,9 @@ func _physics_process(_delta: float) -> void:
 		]
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
-			"sigil": [20, 34], "undying": [18], "conductor": [18]}[_case]:
+			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
-	if tick >= 59 or not _rules.passed:
+	if tick >= (252 if _case == "conductor-charged" else 59) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
 		var pose := _rules.geometry.circle_center(Player, 0)
 		var facts := [_case, _rules.trace, snappedf(pose.y, 0.001), _rules.launches, _rules.manual,
@@ -255,7 +261,7 @@ func _drive_visible_inputs(tick: int) -> void:
 		event.physical_keycode = KEY_W
 		event.pressed = tick == 1
 		Input.parse_input_event(event)
-	if _case in ["undying", "conductor"] and tick == 16:
+	if (_case in ["undying", "conductor"] and tick == 16) or (_case == "conductor-charged" and tick in [2, 242]):
 		for pressed: bool in [true, false]:
 			var event := InputEventMouseButton.new()
 			event.button_index = MOUSE_BUTTON_LEFT
