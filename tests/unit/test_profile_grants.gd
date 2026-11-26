@@ -131,6 +131,12 @@ func test_receipts_keep_out_of_order_gaps_and_reject_changed_grant_or_ack() -> v
 	assert_eq(ProfileGrantSettlement.acknowledge(host, binding, wrong_proof).status, Commit.INVALID)
 	assert_eq(ProfileGrantSettlement.acknowledge(host, binding, applied.acknowledgement).status, Commit.COMMITTED)
 	assert_eq(ProfileGrantSettlement.acknowledge(host, binding, wrong_proof).status, Commit.CONFLICT)
+	var different_run := _binding()
+	different_run.run = "another-run"
+	var rebound: Array = different_run.fields()
+	rebound.append_array([original.key, original.digest, applied.receipt.digest])
+	var wrong_run := ProfileGrant._sign(ProfileGrant.ACK_DOMAIN, rebound, _guest)
+	assert_eq(ProfileGrantSettlement.acknowledge(host, different_run, wrong_run).status, Commit.CONFLICT)
 	assert_eq(host.pending_grants().size(), 2)
 	for row: Dictionary in host.pending_grants():
 		var remaining := ProfileGrantSettlement.apply(guest, binding, _guest, row.body)

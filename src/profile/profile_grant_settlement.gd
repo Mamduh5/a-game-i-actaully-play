@@ -94,6 +94,7 @@ static func acknowledge(store: ProfileStore, binding: ProfileGrant.Binding,
 	mutation.rules = binding.rules
 	mutation.catalog = binding.catalog
 	mutation.claims.append("application-proof/" + facts[2])
+	mutation.claims.append("ack-binding/" + JSON.stringify([binding.fields(), facts]).sha256_text())
 	mutation.acknowledgements[facts[0]] = facts[1]
 	var previous := store.lookup(mutation.id)
 	if previous.status == ProfileStore.CommitResult.COMMITTED:
