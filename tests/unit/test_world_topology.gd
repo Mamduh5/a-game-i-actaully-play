@@ -132,6 +132,117 @@ func test_checkpoint_accepts_legacy_module_order_and_rejects_duplicate_rows() ->
 
 
 static func _contacts(visit: WorldExploration, start: RealmSweep.Point, finish: RealmSweep.Point) -> int:
-	var proof := visit.geometry().certify_circle_sweep(WorldTopology.OVERWORLD, start, finish, 14.0,
+	var proof := visit.geometry().certify_circle_sweep(visit.geometry().realm_id, start, finish, 14.0,
 		WorldExploration.BLOCKER)
 	return proof.contacts.size() if proof != null and proof.unresolved.is_empty() else -1
+
+
+func test_route_geometry_recertifies_the_shortcut_after_opening() -> void:
+	var layout := WorldTopology.generate(193)
+	var world := WorldExploration.create(layout, [&"host"])
+	var ends: Array[StringName] = layout.manifest()["shortcut"]
+	var before := world.physical_route(ends[0], ends[1])
+	assert_gt(before.size(), 1)
+	assert_true(world.open_shortcut())
+	var after := world.physical_route(ends[0], ends[1])
+	assert_gt(after.size(), 1)
+	assert_lt(after.size(), before.size())
+	for index: int in range(1, after.size()):
+		assert_eq(_contacts(world, after[index - 1], after[index]), 0)
+	assert_true(world.view(&"host")["explored"].is_empty())
+
+
+func test_staged_obstacle_preserves_last_exit_and_removal_restores_shorter_physical_route() -> void:
+	var layout := WorldTopology.generate_optional(34, &"silent_garden")
+	var world := WorldExploration.create(layout, [&"host"])
+	var modules := layout.route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT)
+	var entry := layout.center(modules[0])
+	var next := layout.center(modules[1])
+	var dx := next.x - entry.x
+	var dy := next.y - entry.y
+	var seam := RealmSweep.Point.new(entry.x + dx * 0.5, entry.y + dy * 0.5)
+	var inside := RealmSweep.Point.new(entry.x + dx * 0.25, entry.y + dy * 0.25)
+	assert_true(world.place_route_solid(&"alternate_blocker", _alternate_seam(layout, modules[1]), 33.0))
+	var base := world.physical_route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT)
+	var initial := world.geometry().revision
+	assert_gt(base.size(), 1)
+	assert_false(world.place_route_solid(&"exit_blocker", seam, 33.0))
+	assert_eq(world.geometry().revision, initial)
+	assert_null(world.geometry().circle_center(&"exit_blocker", 0))
+	assert_true(world.reserve_route_approach(&"body", inside))
+	assert_false(world.place_route_solid(&"destructible", inside, 14.0))
+	assert_eq(world.geometry().revision, initial)
+	assert_true(world.release_route_approach(&"body"))
+	assert_true(world.place_route_solid(&"destructible", inside, 14.0))
+	assert_eq(world.geometry().revision, initial + 1)
+	assert_eq(_contacts(world, entry, next), 1)
+	var detour := world.physical_route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT)
+	assert_gt(detour.size(), base.size())
+	for index: int in range(1, detour.size()):
+		assert_eq(_contacts(world, detour[index - 1], detour[index]), 0)
+	var saved := world.checkpoint()
+	var reopened := WorldExploration.restore(saved, [&"host"])
+	assert_not_null(reopened)
+	if reopened != null:
+		assert_eq(reopened.checkpoint(), saved)
+		assert_eq(reopened.physical_route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT).size(), detour.size())
+	var invalid := saved.duplicate(true)
+	invalid["solids"].append(invalid["solids"][0])
+	assert_null(WorldExploration.restore(invalid, [&"host"]))
+	assert_false(world.remove_route_solid(&"exit_blocker"))
+	assert_true(world.remove_route_solid(&"destructible"))
+	assert_eq(world.geometry().revision, initial + 2)
+	assert_eq(_contacts(world, entry, next), 0)
+	assert_eq(world.physical_route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT).size(), base.size())
+	assert_true(world.view(&"host")["explored"].is_empty())
+
+
+func test_moved_obstruction_clamps_before_the_last_exit_with_no_physical_hit() -> void:
+	var layout := WorldTopology.generate_optional(-4, &"inverted_archive")
+	var world := WorldExploration.create(layout, [&"host"])
+	var path := layout.route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT)
+	var entry := layout.center(path[0])
+	var next := layout.center(path[1])
+	var dx := next.x - entry.x
+	var dy := next.y - entry.y
+	var start := RealmSweep.Point.new(entry.x + dx * 0.2 - dy * 0.25, entry.y + dy * 0.2 + dx * 0.25)
+	var seam := RealmSweep.Point.new(entry.x + dx * 0.5, entry.y + dy * 0.5)
+	assert_true(world.place_route_solid(&"alternate_blocker", _alternate_seam(layout, path[1]), 33.0))
+	var side_start := RealmSweep.Point.new(seam.x - (dx + dy) * 0.09375, seam.y + (dx - dy) * 0.09375)
+	var side_end := RealmSweep.Point.new(seam.x + (dx - dy) * 0.09375, seam.y + (dx + dy) * 0.09375)
+	assert_true(world.place_route_solid(&"small", side_start, 3.0))
+	var crossing := world.move_route_solid(&"small", side_end)
+	assert_not_null(crossing)
+	if crossing != null:
+		assert_false(crossing.route_limited)
+		assert_eq(crossing.motion.finish.x, side_end.x)
+		assert_eq(crossing.motion.finish.y, side_end.y)
+	assert_true(world.remove_route_solid(&"small"))
+	assert_true(world.place_route_solid(&"moved", start, 33.0))
+	var before := world.geometry().revision
+	var movement := world.move_route_solid(&"moved", seam)
+	assert_not_null(movement)
+	if movement == null:
+		return
+	assert_true(movement.route_limited)
+	assert_true(movement.motion.stopped_by.is_empty())
+	assert_gt(world.geometry().revision, before)
+	assert_eq(world.geometry().revision, movement.motion.revision)
+	var center := world.geometry().circle_center(&"moved", 0)
+	assert_eq(center.x, movement.motion.finish.x)
+	assert_eq(center.y, movement.motion.finish.y)
+	assert_true(center.x != start.x or center.y != start.y)
+	assert_true(center.x != seam.x or center.y != seam.y)
+	assert_false(world.physical_route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT).is_empty())
+
+
+static func _alternate_seam(layout: WorldTopology, main_neighbor: StringName) -> RealmSweep.Point:
+	for module: Dictionary in layout.manifest()["modules"]:
+		if module["id"] != WorldTopology.ENTRY:
+			continue
+		for neighbor: StringName in module["neighbors"]:
+			if neighbor != main_neighbor:
+				var entry := layout.center(WorldTopology.ENTRY)
+				var next := layout.center(neighbor)
+				return RealmSweep.Point.new((entry.x + next.x) * 0.5, (entry.y + next.y) * 0.5)
+	return null
