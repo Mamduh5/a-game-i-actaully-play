@@ -154,6 +154,13 @@ func latest_packet() -> PackedByteArray:
 		MovementFrame.pack(_confirmed.epoch, _confirmed.baseline, sample.sequence, sample.command))
 
 
+func interaction_packet(command: PlayerCommand) -> PackedByteArray:
+	if _needs_baseline or _confirmed == null:
+		return PackedByteArray()
+	return ReplicationMessage.pack(ReplicationMessage.Kind.INTERACTION,
+		RealmInteractionFrame.pack(_confirmed.epoch, _confirmed.baseline, command))
+
+
 func resync_request() -> PackedByteArray:
 	if not _needs_baseline:
 		return PackedByteArray()
