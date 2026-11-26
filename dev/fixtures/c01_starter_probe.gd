@@ -32,7 +32,8 @@ class Rules extends RunAuthority:
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
-		var prep := RunPreparation.select(catalog, &"H01", weapon, [&"", &""], slots, {})
+		var hero := StarterCombatRules.CONDUCTOR if which == "conductor" else StarterCombatRules.UNDYING
+		var prep := RunPreparation.select(catalog, hero, weapon, [&"", &""], slots, {})
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
@@ -53,6 +54,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"conductor":
+				return _enemy(&"near", 380, 367, 100) and _enemy(&"far", 343, 452, 100)
 			"sword":
 				return _enemy(&"front", 375, 380, 20) and _enemy(&"flank", 364, 419, 80) and _enemy(&"rear", 245, 380, 80, false)
 			"bow", "bow-miss":
@@ -168,6 +171,10 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"conductor":
+				return (manual == 1 and launches == 1 and trace.size() == 2
+					and trace[0].slice(1) == ["W02", "near", false]
+					and trace[1] == [16, "H03.harmonic_burst", "near", false])
 			"sword":
 				return (trace == [[8, "W01", "flank", false], [8, "W01", "front", true]] and launches == 1
 					and axes > 0 and is_equal_approx(player.y, 330.0) and layer_units(StarterCombatRules.HARVEST) == 2)
@@ -220,13 +227,16 @@ func _physics_process(_delta: float) -> void:
 			_rules.passed = false
 	_rules.passed = _rules.passed and _rules.close_tick()
 	_view.present(_rules.combat.cues(), tick, _reduced)
-	_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
-		{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
-		_rules.layer_units(StarterCombatRules.HARVEST), _rules.layer_units(StarterCombatRules.SIPHON),
-	]
+	if _case == "conductor":
+		_hud.text = "The Conductor\nHarmonic Burst"
+	else:
+		_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
+			{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
+			_rules.layer_units(StarterCombatRules.HARVEST), _rules.layer_units(StarterCombatRules.SIPHON),
+		]
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
-			"sigil": [20, 34], "undying": [18]}[_case]:
+			"sigil": [20, 34], "undying": [18], "conductor": [18]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= 59 or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -244,7 +254,7 @@ func _drive_visible_inputs(tick: int) -> void:
 		event.physical_keycode = KEY_W
 		event.pressed = tick == 1
 		Input.parse_input_event(event)
-	if _case == "undying" and tick == 16:
+	if _case in ["undying", "conductor"] and tick == 16:
 		for pressed: bool in [true, false]:
 			var event := InputEventMouseButton.new()
 			event.button_index = MOUSE_BUTTON_LEFT

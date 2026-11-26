@@ -162,7 +162,13 @@ func _harmonic_burst(tick: int, source: CombatantState, center: RealmSweep.Point
 			links.assign([contact])
 	var action := _action(source, tick, 1, StarterCombatRules.HARMONIC_BURST, _rules.harmonic_damage,
 		_rules.harmonic_cooldown, CombatAction.Damage.MAGICAL)
-	return _instant_delivery(action, tick, links)
+	var result := _instant_delivery(action, tick, links)
+	if result == Attempt.COMMITTED and not links.is_empty():
+		var at := _geometry.circle_center(links[0].entity, links[0].shape)
+		var cue := _ring(StarterCombatRules.HARMONIC_BURST, center, sqrt(nearest), tick, tick + 10)
+		cue.heading = PlayerControlState.direction(center, at, RealmSweep.Point.new(1.0, 0.0))
+		_effects.append(cue)
+	return result
 
 
 ## A run supplies the settled poses and planned obstacle motion at this
