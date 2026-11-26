@@ -137,7 +137,7 @@ func _physics_process(_delta: float) -> void:
 		var previous := _kernel.actor_snapshot(&"prowler")
 		_maximum_changed = (_kernel.change_max_hp(previous.id, previous.life, Quantity.from_count(60))
 			and _kernel.actor_snapshot(previous.id).hp.amount.compare(previous.hp.amount) == 0)
-	if _tick in [4, 5, 6]:
+	if _tick >= 4 and _tick <= 9:
 		var target := _seam + _along * (24 + (_tick - 3) * 38)
 		_controls.apply(PlayerCommand.new(PlayerCommand.MOVE_TO, target.x, target.y))
 		if _controls.step(_rooms[Overworld].geometry(), Rider, 0, WorldExploration.BLOCKER, 2400.0, 1.0 / 60.0) == null:
