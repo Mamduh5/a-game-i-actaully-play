@@ -69,6 +69,9 @@ var defeated: bool:
 var settlement_pending: bool:
 	get: return _settlement_pending
 
+var closed_tick: int:
+	get: return _tick
+
 
 static func begin(setup: RunSetup, host: StringName, kernel: CombatKernel,
 		realms: Dictionary[StringName, RealmGeometry], actors: Dictionary[StringName, StringName],

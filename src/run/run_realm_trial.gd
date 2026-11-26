@@ -40,7 +40,9 @@ static func declare(party: RunParty, space: WorldExploration, center: RealmSweep
 ## Called after an authored interaction has been accepted at the current
 ## clock. Proximity by itself never initiates a dormant optional trial.
 func start(seat: StringName, now: CombatInstant) -> bool:
-	if not _ordered(now) or _phase != Phase.DORMANT or now.tick >= COLLAPSE_TICK:
+	if (not _ordered(now) or _phase != Phase.DORMANT or now.tick >= COLLAPSE_TICK
+			or now.order_against(CombatInstant.at_tick(_party.closed_tick)) != RealmCircleTime.Order.SAME
+			or not _party.can_control(seat)):
 		return false
 	var entrant := _party.view(seat, now)
 	if entrant == null or not entrant.alive or not entrant.connected or _location(entrant) != RealmCircleTime.Result.HIT:
