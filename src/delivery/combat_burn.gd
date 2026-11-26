@@ -16,6 +16,7 @@ var _origin: CombatOrigin
 var _clock: CombatDeliverySchedule
 var _ignition: CombatInstant
 var _potency: Quantity
+var _potency_intensity: Quantity
 var _growth: Quantity
 var _maximum: Quantity
 var _revision: int
@@ -52,14 +53,19 @@ func refresh(hit: CombatKernel.Hit, now: CombatInstant, duration: int) -> bool:
 		and active_for(hit.origin, now) and _clock.refresh(now, duration))
 
 
-## Compare at the receiver's current intensity and keep its tick phase.
-## The caller supplies the donor's captured unmitigated potency.
-func transfer(cause: CombatOrigin, now: CombatInstant, duration: int, potency: Quantity) -> bool:
-	if not active_for(cause, now) or not cause.valid_for(now) or potency == null or potency.compare(_potency) <= 0:
+## The amount is the donor's bounded, already intensity-adjusted tick.
+## Anchor it to the receiver's next cadence instant and retain later growth.
+func transfer(cause: CombatOrigin, now: CombatInstant, duration: int, next_unmitigated: Quantity) -> bool:
+	if not active_for(cause, now) or not cause.valid_for(now) or next_unmitigated == null:
+		return false
+	var intensity := _intensity_at(_clock.next_tick)
+	var current := _tick_amount(intensity)
+	if current == null or next_unmitigated.compare(current) <= 0:
 		return false
 	if not _clock.replace_remaining(now, duration):
 		return false
-	_potency = potency
+	_potency = next_unmitigated
+	_potency_intensity = intensity
 	_revision += 1
 	return true
 
@@ -74,14 +80,7 @@ func due_through(through: CombatInstant) -> Tick:
 	result.due = event
 	result.origin = _origin.copy()
 	if event.kind == CombatDeliverySchedule.Kind.TICK:
-		var age := event.instant.completed_ticks_since(_ignition)
-		if age < 0:
-			return null
-		var growth := _growth.multiply(Quantity.from_count(age))
-		var intensity := Quantity.from_count(1).add(growth) if growth != null else null
-		if intensity == null:
-			return null
-		result.unmitigated = _potency.multiply(_maximum if intensity.compare(_maximum) > 0 else intensity)
+		result.unmitigated = _tick_amount(_intensity_at(event.instant))
 		if result.unmitigated == null:
 			return null
 	return result
@@ -89,6 +88,29 @@ func due_through(through: CombatInstant) -> Tick:
 
 func settle(tick: Tick) -> bool:
 	return tick != null and tick._burn == self and tick._revision == _revision and _clock.settle(tick.due)
+
+
+func _intensity_at(instant: CombatInstant) -> Quantity:
+	if instant == null:
+		return null
+	var age := instant.completed_ticks_since(_ignition)
+	if age < 0:
+		return null
+	var growth := _growth.multiply(Quantity.from_count(age))
+	var intensity := Quantity.from_count(1).add(growth) if growth != null else null
+	if intensity != null and intensity.compare(_maximum) > 0:
+		return _maximum
+	return intensity
+
+
+func _tick_amount(intensity: Quantity) -> Quantity:
+	if intensity == null:
+		return null
+	if _potency_intensity == null:
+		return _potency.multiply(intensity)
+	if intensity.compare(_potency_intensity) == 0:
+		return _potency
+	return Quantity.quantize_ratio(_potency.multiply(intensity), _potency_intensity)
 
 
 static func _accepted(hit: CombatKernel.Hit, now: CombatInstant) -> bool:

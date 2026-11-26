@@ -3,15 +3,17 @@ extends RefCounted
 ## Separate owned Chill footprints, combined only as a strongest effective slow.
 
 class Chill:
-	var origin: CombatOrigin
 	var begins: CombatInstant
-	var latest: CombatInstant
 	var expiry: CombatInstant
 	var potency: Quantity
 
+class OwnerChill:
+	var latest: CombatInstant
+	var effects: Array[Chill] = []
+
 var _target: StringName
 var _life: int
-var _owned: Dictionary[String, Chill] = {}
+var _owned: Dictionary[String, OwnerChill] = {}
 
 
 static func create(target: StringName, life: int) -> CombatChillLedger:
@@ -32,32 +34,42 @@ func apply(hit: CombatKernel.Hit, now: CombatInstant, potency: Quantity, duratio
 	if expiry == null:
 		return false
 	var key := _key(hit.origin)
-	var prior: Chill = _owned.get(key)
+	var prior: OwnerChill = _owned.get(key)
+	var begins := now
+	var updated := OwnerChill.new()
+	updated.latest = now
 	if prior != null:
 		if prior.latest.order_against(now) not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]:
 			return false
-		match prior.expiry.order_against(now):
-			RealmCircleTime.Order.UNRESOLVED: return false
-			RealmCircleTime.Order.SAME, RealmCircleTime.Order.AFTER:
-				var extension := prior.expiry.order_against(expiry)
-				if extension == RealmCircleTime.Order.UNRESOLVED:
-					return false
-				if extension == RealmCircleTime.Order.BEFORE:
-					prior.expiry = expiry
-				prior.latest = now
-				return true
+		for effect: Chill in prior.effects:
+			match effect.expiry.order_against(now):
+				RealmCircleTime.Order.UNRESOLVED: return false
+				RealmCircleTime.Order.BEFORE: continue
+			if effect.potency.compare(potency) != 0:
+				updated.effects.append(effect)
+				continue
+			match effect.expiry.order_against(expiry):
+				RealmCircleTime.Order.UNRESOLVED: return false
+				RealmCircleTime.Order.AFTER: expiry = effect.expiry
+			begins = effect.begins
 	var chill := Chill.new()
-	chill.origin = hit.origin.copy()
-	chill.begins = now
-	chill.latest = now
+	chill.begins = begins
 	chill.expiry = expiry
 	chill.potency = potency
-	_owned[key] = chill
+	updated.effects.append(chill)
+	_owned[key] = updated
 	return true
 
 
 func owned_at(origin: CombatOrigin, at: CombatInstant) -> bool:
-	return origin != null and _active(_owned.get(_key(origin)), at)
+	if origin == null or at == null:
+		return false
+	var owned: OwnerChill = _owned.get(_key(origin))
+	if owned != null:
+		for effect: Chill in owned.effects:
+			if _active(effect, at):
+				return true
+	return false
 
 
 func strongest_at(at: CombatInstant, resistance: Quantity) -> Quantity:
@@ -65,17 +77,19 @@ func strongest_at(at: CombatInstant, resistance: Quantity) -> Quantity:
 	if at == null or resistance == null or resistance.sign_value < 0 or resistance.compare(one) > 0:
 		return null
 	var strongest := Quantity.from_count(0)
-	for chill: Chill in _owned.values():
-		if (chill.begins.order_against(at) == RealmCircleTime.Order.UNRESOLVED
-				or at.order_against(chill.expiry) == RealmCircleTime.Order.UNRESOLVED):
-			return null
-		if _active(chill, at) and chill.potency.compare(strongest) > 0:
-			strongest = chill.potency
+	for owner: OwnerChill in _owned.values():
+		for chill: Chill in owner.effects:
+			var begins := chill.begins.order_against(at)
+			var ends := at.order_against(chill.expiry)
+			if begins == RealmCircleTime.Order.UNRESOLVED or ends == RealmCircleTime.Order.UNRESOLVED:
+				return null
+			if begins != RealmCircleTime.Order.AFTER and ends != RealmCircleTime.Order.AFTER and chill.potency.compare(strongest) > 0:
+				strongest = chill.potency
 	return strongest.multiply(one.subtract(resistance))
 
 
 static func _active(chill: Chill, at: CombatInstant) -> bool:
-	return (chill != null and at != null and chill.begins.order_against(at) in [
+	return (chill.begins.order_against(at) in [
 		RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]
 		and at.order_against(chill.expiry) in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME])
 

@@ -22,6 +22,10 @@ var _end: End
 var end_reason: End:
 	get: return _end
 
+## The cadence instant before applying the current expiry.
+var next_tick: CombatInstant:
+	get: return _next_tick
+
 
 static func create(start: CombatInstant, duration: int, period: int, immediate_tick: bool = false) -> CombatDeliverySchedule:
 	if start == null or duration <= 0 or period <= 0:

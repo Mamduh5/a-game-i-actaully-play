@@ -352,6 +352,74 @@ func test_returning_flight_tracks_live_anchor_and_keeps_one_frozen_hit_per_phase
 	assert_eq(kernel.actor_snapshot(SOURCE).resources[MANA].native_at_scale(0), 0)
 
 
+func test_returning_flight_leaves_a_certified_clear_pose_at_large_wall_coordinates() -> void:
+	for wall_slant: float in [0.0, 70.0]:
+		var kernel := CombatKernel.new()
+		var source := _actor(SOURCE, 20)
+		source.resources[MANA] = Quantity.from_count(3)
+		assert_true(kernel.add_actor(source))
+		var geometry := RealmGeometry.new(REALM)
+		var edge := RealmOutline.Edge.new()
+		edge.first = RealmSweep.Point.new(1100 - wall_slant, 900)
+		edge.last = RealmSweep.Point.new(1100 + wall_slant, 1100)
+		assert_true(geometry.add_segment(&"wall", 0, edge, 2, true))
+		var launch := RealmSweep.Point.new(1000, 1000)
+		var flight := CombatReturningFlight.create(kernel, _action(1), REALM, launch,
+			RealmSweep.Point.new(1200, 1000), 10)
+		var outward := flight.plan(geometry, null, 150.0, 10.0, 1, 2)
+		assert_not_null(outward)
+		if outward == null:
+			continue
+		assert_eq(outward.sweep.blocker.entity, &"wall")
+		assert_true(outward.finish.x > 1080.0)
+		var stored := geometry.certify_circle_snapshot(REALM, outward.finish, 10.0, 2)
+		assert_true(stored.contacts.is_empty())
+		assert_true(stored.unresolved.is_empty())
+		assert_true(flight.settle(outward))
+		var returning := flight.plan(geometry, launch, 30.0, 10.0, 1, 2)
+		assert_not_null(returning)
+		if returning == null:
+			continue
+		assert_null(returning.sweep.blocker)
+		assert_almost_eq(returning.finish.x, outward.finish.x - 30.0, 0.000001)
+		assert_eq(returning.next_phase, CombatReturningFlight.Phase.RETURNING)
+		assert_true(flight.settle(returning))
+		if returning.sweep.blocker != null:
+			continue
+		var obstruction := RealmOutline.Edge.new()
+		obstruction.first = RealmSweep.Point.new(1020, 900)
+		obstruction.last = RealmSweep.Point.new(1020, 1100)
+		assert_true(geometry.add_segment(&"new_wall", 0, obstruction, 2, true))
+		var intercepted := flight.plan(geometry, launch, 100.0, 10.0, 1, 2)
+		assert_eq(intercepted.sweep.blocker.entity, &"new_wall")
+		assert_eq(intercepted.next_phase, CombatReturningFlight.Phase.FINISHED)
+
+
+func test_returning_flight_clips_against_the_blockers_elapsed_motion() -> void:
+	var kernel := CombatKernel.new()
+	var source := _actor(SOURCE, 20)
+	source.resources[MANA] = Quantity.from_count(3)
+	assert_true(kernel.add_actor(source))
+	var geometry := RealmGeometry.new(REALM)
+	var launch := RealmSweep.Point.new(1000, 1000)
+	var before := RealmSweep.Point.new(1100, 1000)
+	assert_true(geometry.add_circle(&"shield", 0, before, 10.0, 2))
+	assert_true(geometry.stage_circle_motion(&"shield", 0, RealmSweep.Point.new(1140, 1000)))
+	var flight := CombatReturningFlight.create(kernel, _action(1), REALM, launch,
+		RealmSweep.Point.new(1200, 1000), 10)
+	var outward := flight.plan(geometry, null, 150.0, 10.0, 1, 2)
+	assert_not_null(outward)
+	if outward == null:
+		return
+	assert_eq(outward.sweep.blocker.entity, &"shield")
+	assert_almost_eq(outward.finish.x, 1109.090909090909, 0.000001)
+	assert_true(flight.settle(outward))
+	assert_true(geometry.commit_circle_motion(&"shield", 0))
+	var returning := flight.plan(geometry, launch, 30.0, 10.0, 1, 2)
+	assert_null(returning.sweep.blocker)
+	assert_eq(returning.next_phase, CombatReturningFlight.Phase.RETURNING)
+
+
 func test_mines_detonate_on_arming_and_cap_independent_waiting_charge() -> void:
 	var certifier := RealmCircleTime.new()
 	var proof := certifier.measure(RealmSweep.Point.new(0, 0), RealmSweep.Point.new(8, 0), 0.0,
@@ -456,19 +524,60 @@ func test_burn_refresh_and_stronger_transfer_preserve_continuous_intensity_and_p
 	assert_eq(first.unmitigated.native_at_scale(0), 15)
 	assert_true(burn.settle(first))
 	var old_next := burn.due_through(CombatInstant.at_tick(5))
-	assert_true(burn.transfer(owner, CombatInstant.at_tick(4), 3, Quantity.from_count(20)))
+	assert_false(burn.transfer(owner, CombatInstant.at_tick(4), 3, Quantity.from_count(12)))
+	assert_false(burn.transfer(owner, CombatInstant.at_tick(4), 3, Quantity.from_count(20)))
+	assert_true(burn.active_for(owner, CombatInstant.at_tick(11)))
+	assert_true(burn.transfer(owner, CombatInstant.at_tick(4), 3, Quantity.from_count(24)))
 	assert_false(burn.settle(old_next))
 	var second := burn.due_through(CombatInstant.at_tick(5))
 	assert_eq(second.due.instant.tick, 5)
-	assert_eq(second.unmitigated.native_at_scale(0), 40)
+	assert_eq(second.unmitigated.native_at_scale(0), 24)
 	assert_true(burn.settle(second))
 	var last := burn.due_through(CombatInstant.at_tick(7))
-	assert_eq(last.unmitigated.native_at_scale(0), 40)
+	assert_eq(last.unmitigated.native_at_scale(0), 24)
 	assert_true(burn.settle(last))
 	var expiry := burn.due_through(CombatInstant.at_tick(7))
 	assert_eq(expiry.due.kind, CombatDeliverySchedule.Kind.NATURAL_EXPIRY)
 	assert_true(burn.settle(expiry))
 	assert_false(burn.active_for(owner, CombatInstant.at_tick(8)))
+
+
+func test_burn_transfer_uses_ramped_donor_without_multiplying_receiver_intensity() -> void:
+	var kernel := CombatKernel.new()
+	assert_true(kernel.add_actor(_actor(SOURCE, 100)))
+	assert_true(kernel.add_actor(_actor(TARGET, 100)))
+	var recipient := &"recipient"
+	assert_true(kernel.add_actor(_actor(recipient, 100)))
+	var geometry := RealmGeometry.new(REALM)
+	var center := RealmSweep.Point.new(0, 0)
+	assert_true(geometry.add_circle(TARGET, 0, center, 1.0, 1))
+	assert_true(geometry.add_circle(recipient, 0, center, 1.0, 2))
+	var donor_contact := geometry.certify_circle_sweep(REALM, center, center, 0.0, 1).contacts[0]
+	var receiver_contact := geometry.certify_circle_sweep(REALM, center, center, 0.0, 2).contacts[0]
+	var ignition := _realized_hit(kernel, donor_contact, SOURCE, &"fire", 1)
+	var base := Quantity.from_count(10)
+	var growth := Quantity.from_count(25, 2)
+	var cap := Quantity.from_count(2)
+	var donor := CombatBurn.ignite(ignition.hits[0], ignition.due, base, 20, 4, growth, cap)
+	var receiver_hit := _realized_hit(kernel, receiver_contact, SOURCE, &"fire", 4)
+	var receiver := CombatBurn.ignite(receiver_hit.hits[0], receiver_hit.due, base, 20, 1, growth, cap)
+	var first_due := CombatInstant.at_tick(5)
+	var captured := donor.due_through(first_due)
+	assert_eq(captured.unmitigated.native_at_scale(0), 20)
+	var bounded := captured.unmitigated.multiply(Quantity.from_count(75, 2))
+	assert_false(receiver.transfer(receiver_hit.hits[0].origin, receiver_hit.due, 2, base))
+	assert_true(receiver.transfer(receiver_hit.hits[0].origin, receiver_hit.due, 2, bounded))
+	var first := receiver.due_through(first_due)
+	assert_eq(first.due.instant.tick, 5)
+	assert_eq(first.unmitigated.native_at_scale(0), 15)
+	assert_true(receiver.settle(first))
+	var second := receiver.due_through(CombatInstant.at_tick(6))
+	assert_eq(second.unmitigated.native_at_scale(0), 18)
+	assert_true(receiver.settle(second))
+	var expiry := receiver.due_through(CombatInstant.at_tick(6))
+	assert_eq(expiry.due.kind, CombatDeliverySchedule.Kind.NATURAL_EXPIRY)
+	assert_true(receiver.settle(expiry))
+	assert_eq(donor.due_through(first_due).unmitigated.native_at_scale(0), 20)
 
 
 func test_chill_tracks_owners_independently_with_strongest_effective_slow() -> void:
@@ -494,6 +603,28 @@ func test_chill_tracks_owners_independently_with_strongest_effective_slow() -> v
 	assert_eq(chill.strongest_at(CombatInstant.at_tick(4), resistance).native_at_scale(2), 40)
 	assert_false(chill.owned_at(strong.hits[0].origin, CombatInstant.at_tick(6)))
 	assert_eq(chill.strongest_at(CombatInstant.at_tick(6), resistance).native_at_scale(2), 20)
+
+
+func test_chill_same_owner_uses_strongest_active_potency_and_its_own_duration() -> void:
+	var kernel := CombatKernel.new()
+	assert_true(kernel.add_actor(_actor(SOURCE, 100)))
+	assert_true(kernel.add_actor(_actor(TARGET, 100)))
+	var geometry := RealmGeometry.new(REALM)
+	var center := RealmSweep.Point.new(0, 0)
+	assert_true(geometry.add_circle(TARGET, 0, center, 1.0, 1))
+	var proof := geometry.certify_circle_snapshot(REALM, center, 0.0, 1).contacts[0]
+	var chill := CombatChillLedger.create(TARGET, 1)
+	var weak := _realized_hit(kernel, proof, SOURCE, &"frost", 1)
+	var strong := _realized_hit(kernel, proof, SOURCE, &"frost", 2)
+	var reapplied := _realized_hit(kernel, proof, SOURCE, &"frost", 3)
+	assert_true(chill.apply(weak.hits[0], weak.due, Quantity.from_count(2, 1), 6))
+	assert_true(chill.apply(strong.hits[0], strong.due, Quantity.from_count(8, 1), 10))
+	assert_true(chill.apply(reapplied.hits[0], reapplied.due, Quantity.from_count(2, 1), 14))
+	var zero := Quantity.from_count(0)
+	assert_eq(chill.strongest_at(CombatInstant.at_tick(4), zero).native_at_scale(2), 80)
+	assert_eq(chill.strongest_at(CombatInstant.at_tick(12), zero).native_at_scale(2), 80)
+	assert_eq(chill.strongest_at(CombatInstant.at_tick(13), zero).native_at_scale(2), 20)
+	assert_eq(chill.strongest_at(CombatInstant.at_tick(18), zero).native_at_scale(2), 0)
 
 
 func test_fracture_shared_cap_preserves_owned_stacks_and_strongest_exposure() -> void:

@@ -226,6 +226,14 @@ func certify_frozen_path(realm: StringName, start: RealmSweep.Point, finish: Rea
 	return _sweep(realm, start, finish, radius, compatible, except_entity, RealmCircleTime.new(), true)
 
 
+## Use the same blocker motion as the certified delivery, restricted to the
+## tested prefix so rounding is checked at the correct elapsed time.
+func clipped_sweep_finish(start: RealmSweep.Point, requested: RealmSweep.Point, contact: Contact,
+		radius: float, blockers: int, except_entity: StringName) -> RealmSweep.Point:
+	return _verify_clipped_pose(start, requested, contact.proof.earliest, radius, blockers,
+		except_entity, RealmCircleTime.new(), false)
+
+
 ## Commit forced motion against the current geometry revision. A null draft
 ## leaves every pose unchanged. Positive-time blockers retain their proofs.
 func displace_circle(entity: StringName, slot: int, requested: RealmSweep.Point, blockers: int) -> Displacement:
@@ -283,7 +291,7 @@ static func _first_blocker(contacts: Array[Contact]) -> Contact:
 
 
 func _verify_clipped_pose(start: RealmSweep.Point, requested: RealmSweep.Point, time: float, radius: float,
-		blockers: int, entity: StringName, certifier: RealmCircleTime) -> RealmSweep.Point:
+		blockers: int, entity: StringName, certifier: RealmCircleTime, frozen: bool = true) -> RealmSweep.Point:
 	if time <= 0.0:
 		return RealmSweep.Point.new(start.x, start.y)
 	var scratch := PackedByteArray()
@@ -296,7 +304,7 @@ func _verify_clipped_pose(start: RealmSweep.Point, requested: RealmSweep.Point, 
 		var point := RealmSweep.Point.new(lerpf(start.x, requested.x, limit), lerpf(start.y, requested.y, limit))
 		if point.x == start.x and point.y == start.y:
 			return point
-		var prefix := _sweep(realm_id, start, point, radius, blockers, entity, certifier, true, true)
+		var prefix := _sweep(realm_id, start, point, radius, blockers, entity, certifier, frozen, frozen, limit)
 		if prefix != null and prefix.contacts.is_empty() and prefix.unresolved.is_empty():
 			return point
 		retreat *= 2.0
@@ -305,7 +313,7 @@ func _verify_clipped_pose(start: RealmSweep.Point, requested: RealmSweep.Point, 
 
 func _sweep(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
 		compatible: int, except_entity: StringName, certifier: RealmCircleTime, frozen_blockers: bool,
-		allow_departure: bool = false) -> SweepCandidates:
+		allow_departure: bool = false, motion_fraction: float = 1.0) -> SweepCandidates:
 	if realm != realm_id or start == null or finish == null or compatible <= 0:
 		return null
 	var broad := _index.query(RealmBounds.from_sweep(start.x, start.y, finish.x, finish.y, radius))
@@ -321,6 +329,9 @@ func _sweep(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point
 		var proof: RealmCircleTime.Contact
 		if shape.edge == null:
 			var target_end := shape.center if frozen_blockers or shape.motion_end == null else shape.motion_end
+			if target_end != shape.center and motion_fraction < 1.0:
+				target_end = RealmSweep.Point.new(lerpf(shape.center.x, target_end.x, motion_fraction),
+					lerpf(shape.center.y, target_end.y, motion_fraction))
 			if certifier != null:
 				proof = certifier.measure(start, finish, radius, shape.center, target_end, shape.radius)
 			else:

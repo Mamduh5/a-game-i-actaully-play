@@ -58,17 +58,11 @@ func plan(geometry: RealmGeometry, return_anchor: RealmSweep.Point, distance: fl
 	step._ordinal = _ordinal
 	step.phase = _phase
 	step.next_phase = _phase
-	step.sweep = _delivery.plan_sweep(geometry, _position, desired, radius, targets, blockers)
+	step.sweep = _delivery.plan_sweep(geometry, _position, desired, radius, targets, blockers, true)
 	if step.sweep == null:
 		return null
-	step.finish = desired
+	step.finish = step.sweep.finish
 	var arrived := desired.x == goal.x and desired.y == goal.y
-	if step.sweep.blocker != null:
-		var scratch := PackedByteArray()
-		scratch.resize(8)
-		var before_contact := maxf(0.0, RealmBounds.adjacent(step.sweep.blocker.proof.earliest, false, scratch))
-		step.finish = RealmSweep.Point.new(lerpf(_position.x, desired.x, before_contact),
-			lerpf(_position.y, desired.y, before_contact))
 	if arrived or step.sweep.blocker != null:
 		step.next_phase = Phase.RETURNING if _phase == Phase.OUTWARD else Phase.FINISHED
 	if _ordinal + 1 == _max_steps:

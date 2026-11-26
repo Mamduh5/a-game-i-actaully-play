@@ -10,6 +10,7 @@ class SweepPlan:
 	var revision: int
 	var blocker: RealmGeometry.Contact
 	var contacts: Array[RealmGeometry.Contact] = []
+	var finish: RealmSweep.Point
 
 class PulseStart:
 	var result: PulseResult
@@ -77,12 +78,13 @@ static func activate_pulse(schedule: CombatDeliverySchedule, due: CombatDelivery
 ## Interception wins an equal-time contact and unresolved shape order fails
 ## before any contact or target cadence is posted.
 func plan_sweep(geometry: RealmGeometry, start: RealmSweep.Point, finish: RealmSweep.Point,
-		radius: float, target_mask: int, blocker_mask: int = 0) -> SweepPlan:
+		radius: float, target_mask: int, blocker_mask: int = 0, clip_to_blocker: bool = false) -> SweepPlan:
 	if (_commitment.is_empty() or geometry == null or geometry.realm_id != _realm
 			or target_mask <= 0 or blocker_mask < 0):
 		return null
 	var plan := SweepPlan.new()
 	plan.revision = geometry.revision
+	plan.finish = finish
 	if blocker_mask > 0:
 		var blockers := geometry.certify_circle_sweep(_realm, start, finish, radius, blocker_mask, _source)
 		if blockers == null or not blockers.unresolved.is_empty():
@@ -94,6 +96,10 @@ func plan_sweep(geometry: RealmGeometry, start: RealmSweep.Point, finish: RealmS
 			match _contact_order(candidate, plan.blocker):
 				RealmCircleTime.Order.BEFORE: plan.blocker = candidate
 				RealmCircleTime.Order.UNRESOLVED: return null
+		if clip_to_blocker and plan.blocker != null:
+			plan.finish = geometry.clipped_sweep_finish(start, finish, plan.blocker, radius, blocker_mask, _source)
+			if plan.finish == null:
+				return null
 	var targets := geometry.certify_circle_sweep(_realm, start, finish, radius, target_mask, _source)
 	if targets == null or not targets.unresolved.is_empty():
 		return null
