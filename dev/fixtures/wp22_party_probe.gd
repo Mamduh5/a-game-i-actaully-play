@@ -153,6 +153,12 @@ func _record_guest_loss(seats: Array[int]) -> bool:
 		return false
 	_results["host_frozen"] = host_offer.options.keys()
 	_results["guest_frozen"] = guest_offer.options.keys()
+	var host_choice: StringName = host_offer.options.keys()[0]
+	if (_progression.select(HOST, 1, host_choice) != RunRewardQueue.Selection.APPLIED
+			or _progression.offer(GUEST, 1).options.keys() != guest_offer.options.keys()):
+		return false
+	_results["host_choice"] = host_choice
+	_results["guest_offer_preserved"] = true
 	var save := ProfileMutation.new()
 	save.id = "wp22-shared-xp"
 	save.rules = "V42.6/R1"

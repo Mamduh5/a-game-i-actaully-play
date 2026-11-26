@@ -60,7 +60,9 @@ def exchange(exe, evidence, secrets, fingerprint):
                   and host_result["outside"] and host_result["disconnected"]
                   and host_result["inclusive_x"] == host_result["return_x"] == host_result["stationary_x"] == 220.0
                   and host_result["host_frontier_tick"] == 4 and host_result["locked_hp_scale"] == 150
-                  and "P01" in host_result["host_frozen"] and "P02" in host_result["guest_frozen"]
+                  and len(host_result["host_frozen"]) == len(host_result["guest_frozen"]) == 3
+                  and host_result["host_frozen"] != host_result["guest_frozen"]
+                  and host_result["host_choice"] in host_result["host_frozen"] and host_result["guest_offer_preserved"]
                   and guest_result["realm"] == "observatory" and guest_result["visible_actor_ids"] == ["guest"]
                   and guest_result["party_status"] == {"host": "living", "guest": "living"}
                   and guest_result["level"] == 2 and guest_result["baseline_ack"] == 3

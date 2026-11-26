@@ -196,6 +196,7 @@ func test_rescue_obeys_physical_access_interruptions_and_shared_diminishing_rate
 	var ready := 1 + RunParty.INITIAL_WAIT
 	assert_true(run.close_through(1, ready - 2))
 	assert_false(run.party.begin_rescue(HOST, GUEST, ready - 1))
+	assert_false(run.party.apply_input(HOST, PlayerCommand.new(PlayerCommand.INTERACT, 10, 0)))
 	assert_true(run.party.close_tick(ready - 1))
 	var edge := RealmOutline.Edge.new()
 	edge.first = RealmSweep.Point.new(5, -10)
@@ -203,7 +204,8 @@ func test_rescue_obeys_physical_access_interruptions_and_shared_diminishing_rate
 	assert_true(run.realms[FIRST].add_segment(&"door", 0, edge, BLOCKERS, false))
 	assert_false(run.party.begin_rescue(HOST, GUEST, ready))
 	assert_false(run.party.begin_rescue(REMOTE, GUEST, ready))
-	assert_true(run.party.begin_rescue(ALLY, GUEST, ready))
+	assert_false(run.party.apply_input(ALLY, PlayerCommand.new(PlayerCommand.INTERACT, 50, 0)))
+	assert_true(run.party.apply_input(ALLY, PlayerCommand.new(PlayerCommand.INTERACT, 10, 0)))
 	assert_true(run.party.close_tick(ready))
 	assert_eq(run.view(GUEST, ready).rescue_progress, 4)
 	assert_true(run.realms[FIRST].remove_mutable(&"door", 0))
@@ -315,6 +317,38 @@ func test_local_encounter_presence_is_inclusive_realm_scoped_and_frozen_once() -
 	assert_false(encounter.settle(CombatInstant.at_tick(4)))
 	assert_true(control.settle(CombatInstant.at_tick(3)))
 	assert_eq(control.recipients(), [HOST])
+
+
+func test_connected_spectator_retains_personal_reward_and_can_follow_a_living_teammate() -> void:
+	var run := Scenario.new([HOST, GUEST, REMOTE])
+	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
+	var catalog := bundle.compile()
+	run.setup.catalog_revision = catalog.revision
+	var slots: Array[StringName] = []
+	slots.resize(RunPreparation.CANDIDATE_SLOTS)
+	slots.fill(&"")
+	var prep := RunPreparation.select(catalog, &"H01", &"W01", [&"", &""], slots, {})
+	var progression := PartyProgression.begin(run.setup, {HOST: prep, GUEST: prep, REMOTE: prep})
+	assert_not_null(run.hit(ENEMY, GUEST, 1, 100))
+	assert_true(run.party.close_tick(1))
+	assert_false(run.party.can_control(GUEST))
+	var corpse := RecipientView.Scope.new()
+	corpse.seat = GUEST
+	corpse.realm = run.view(GUEST, 1).realm
+	var other := RecipientView.Scope.new()
+	other.seat = REMOTE
+	other.realm = run.view(REMOTE, 1).realm
+	var follow := RecipientView.spectator_scope(corpse, REMOTE, {REMOTE: other}, run.party.status_ids())
+	assert_eq(follow.seat, GUEST)
+	assert_eq(follow.realm, SECOND)
+	var unrelated := RecipientView.spectator_scope(corpse, &"unknown", {REMOTE: other}, run.party.status_ids())
+	assert_eq(unrelated.realm, FIRST)
+	assert_eq(progression.grant_xp(&"ordinary", Quantity.from_count(100), 1), PartyProgression.Award.APPLIED)
+	var offer := progression.offer(GUEST, 1)
+	assert_eq(progression.select(GUEST, 1, offer.options.keys()[0]), RunRewardQueue.Selection.APPLIED)
+	assert_not_null(progression.offer(HOST, 1))
+	assert_not_null(progression.offer(REMOTE, 1))
+	assert_false(run.party.can_control(GUEST))
 
 
 func test_personal_kill_assist_and_local_entitlement_use_different_facts() -> void:

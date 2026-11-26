@@ -133,10 +133,34 @@ func can_control(seat: StringName) -> bool:
 func apply_input(seat: StringName, command: PlayerCommand) -> bool:
 	if not can_control(seat) or command == null or not command.valid():
 		return false
+	if command.action == PlayerCommand.INTERACT:
+		return _interact_with_body(seat, RealmSweep.Point.new(command.x, command.y))
 	if command.action not in [PlayerCommand.MOVE_AXES, PlayerCommand.MOVE_TO, PlayerCommand.AIM]:
 		return false
 	_members[seat].controls.apply(command)
 	return true
+
+
+func _interact_with_body(seat: StringName, cursor: RealmSweep.Point) -> bool:
+	var helper := _members[seat]
+	var position := _position(helper)
+	if position == null:
+		return false
+	var possible: Array[PlayerTargeting.Candidate] = []
+	for target_seat: StringName in _members:
+		var target := _members[target_seat]
+		if target.body == null or target.realm != helper.realm:
+			continue
+		var candidate := PlayerTargeting.Candidate.new()
+		candidate.id = target_seat
+		candidate.kind = PlayerTargeting.Kind.PROTECTED
+		candidate.position = target.body.position
+		candidate.pick_radius = _realms[target.realm].circle_radius(target.actor, 0)
+		candidate.known = true
+		candidate.interactable = true
+		possible.append(candidate)
+	var picked := PlayerTargeting.new().interact(position, cursor, RESCUE_REACH, possible)
+	return not picked.is_empty() and begin_rescue(seat, picked, _tick + 1)
 
 
 func step_movement(seat: StringName, speed: float, seconds: float) -> RealmSweep.Point:
