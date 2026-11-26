@@ -73,6 +73,28 @@ func service_ordinary_currency() -> void:
 		earnings.service()
 
 
+## Apply the accepted interact at its closed boundary. Revoke any input
+## already queued for this seat's old realm and keep the shared clock.
+func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, destination: RealmGeometry,
+		at: RealmSweep.Point) -> bool:
+	if (intent == null or party == null or source == null or destination == null
+			or intent.action != PlayerCommand.INTERACT or intent.tick != _closed_tick
+			or not belongs_to(intent.run_id, intent.epoch) or not party.belongs_to(intent.run_id, intent.epoch)
+			or source.realm_id != intent.realm_id or _realms.get(intent.seat_id) != source.realm_id
+			or intent.receipt() not in _observation["accepted"]):
+		return false
+	var seat := intent.seat_id
+	if not party.transfer_living(seat, _closed_tick, source, destination, at):
+		return false
+	for sequence: int in _pending[seat]:
+		_last_sequences[seat] = maxi(_last_sequences[seat], sequence)
+	_pending[seat].clear()
+	_overflowed.erase(seat)
+	_realms[seat] = destination.realm_id
+	_observation["outcomes"].append({"seat": seat, "realm_entered": destination.realm_id})
+	return true
+
+
 ## The binding is supplied by the adapter. The intent alone cannot nominate its sender.
 func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
 	if _identity.is_empty() or intent == null or _closed_tick >= MAX_TICK:
@@ -153,7 +175,7 @@ func closed_result() -> Dictionary:
 func checkpoint() -> Dictionary:
 	if _identity.is_empty():
 		return {}
-	return {
+	var saved := {
 		"version": CHECKPOINT_VERSION,
 		"engine": Engine.get_version_info()["hash"],
 		"identity": _identity.duplicate(true),
@@ -161,6 +183,9 @@ func checkpoint() -> Dictionary:
 		"sequences": _last_sequences.duplicate(),
 		"random": _random.checkpoint(),
 	}
+	if _realms != _identity["initial_realms"]:
+		saved["current_realms"] = _realms.duplicate()
+	return saved
 
 
 ## Restores locally supplied, same-build data into a new authority. WP24 owns recovery proof.
@@ -175,11 +200,17 @@ func restore(setup: RunSetup, local_authority_id: StringName, saved: Dictionary)
 	if tick < 0 or tick > MAX_TICK or not saved.get("sequences") is Dictionary:
 		return false
 	var sequences: Dictionary = saved["sequences"]
+	var realms: Variant = saved.get("current_realms", setup.initial_realms)
 	if sequences.size() != setup.initial_realms.size():
+		return false
+	if (not realms is Dictionary or realms.size() != setup.initial_realms.size()
+			or (tick == 0 and realms != setup.initial_realms)):
 		return false
 	for seat: StringName in setup.initial_realms:
 		var sequence: Variant = sequences.get(seat)
-		if not sequence is int or sequence < 0 or (tick == 0 and sequence != 0):
+		var realm: Variant = realms.get(seat)
+		if (not sequence is int or sequence < 0 or (tick == 0 and sequence != 0)
+				or not realm is StringName or realm.is_empty()):
 			return false
 	var random := RunRandom.new(setup.seed)
 	if not saved.get("random") is Dictionary or not random.restore(saved["random"]):
@@ -187,6 +218,7 @@ func restore(setup: RunSetup, local_authority_id: StringName, saved: Dictionary)
 	if tick == 0 and not saved["random"].is_empty():
 		return false
 	_install(setup, random, tick, sequences)
+	_realms.assign(realms)
 	return true
 
 

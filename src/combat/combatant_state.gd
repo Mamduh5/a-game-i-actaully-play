@@ -39,6 +39,7 @@ class Defense:
 
 var id: StringName
 var realm: StringName
+var realm_visit: int
 var life: int
 var owner: StringName
 var controller: StringName
@@ -61,7 +62,7 @@ var _barrier_generations: Dictionary[StringName, int] = {}
 
 
 func is_valid() -> bool:
-	if (id.is_empty() or realm.is_empty() or life <= 0 or owner.is_empty() or controller == id
+	if (id.is_empty() or realm.is_empty() or realm_visit < 0 or life <= 0 or owner.is_empty() or controller == id
 			or provenance not in [CombatOrigin.Provenance.SEAT, CombatOrigin.Provenance.SPAWN]
 			or not _valid_pool(hp) or physical == null or not physical.is_valid()
 			or magical == null or not magical.is_valid()
@@ -103,6 +104,7 @@ func copy() -> CombatantState:
 	var result := CombatantState.new()
 	result.id = id
 	result.realm = realm
+	result.realm_visit = realm_visit
 	result.life = life
 	result.owner = owner
 	result.controller = controller

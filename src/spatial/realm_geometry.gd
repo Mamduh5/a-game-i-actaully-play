@@ -174,6 +174,11 @@ func circle_radius(entity: StringName, slot: int) -> float:
 	return shape.radius if shape != null and shape.center != null else -1.0
 
 
+func circle_category(entity: StringName, slot: int) -> int:
+	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
+	return shape.category if shape != null and shape.center != null else 0
+
+
 func change_category(entity: StringName, slot: int, category: int) -> bool:
 	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
 	if shape == null or shape.fixed or category <= 0:

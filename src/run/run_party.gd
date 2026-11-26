@@ -155,6 +155,21 @@ func can_control(seat: StringName) -> bool:
 	return _terminal == CombatKernel.Terminal.ACTIVE and member != null and member.connected and member.body == null
 
 
+func transfer_living(seat: StringName, tick: int, source: RealmGeometry, destination: RealmGeometry,
+		at: RealmSweep.Point) -> bool:
+	if tick != _tick or not can_control(seat) or source == null or destination == null:
+		return false
+	var member := _members[seat]
+	if (member.realm != source.realm_id or _realms.get(member.realm) != source
+			or _realms.get(destination.realm_id) != destination
+			or not _kernel.transfer_player(member.actor, member.life, source, destination, at)):
+		return false
+	member.realm = destination.realm_id
+	member.controls = PlayerControlState.new()
+	_stop_aiding(member, RescueInterruption.MOVED_AWAY)
+	return true
+
+
 func apply_input(seat: StringName, command: PlayerCommand) -> bool:
 	if not can_control(seat) or command == null or not command.valid():
 		return false

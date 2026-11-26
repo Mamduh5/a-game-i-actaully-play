@@ -1,0 +1,298 @@
+extends GutTest
+
+const Host := &"host"
+const Guest := &"guest"
+const Source := WorldTopology.OVERWORLD
+const Admission := RunAuthority.Admission
+
+class TravelAuthority extends RunAuthority:
+	var party: RunParty
+	var closed_party := false
+
+	func _supports_action(action: StringName) -> bool:
+		return action in [PlayerCommand.INTERACT, PlayerCommand.MOVE_TO]
+
+	func _resolve_tick(tick: int, accepted: Array[RunIntent], _streams: RunRandom) -> Array[Dictionary]:
+		for intent: RunIntent in accepted:
+			if intent.action == PlayerCommand.MOVE_TO:
+				party.apply_input(intent.seat_id, intent.command)
+		for seat: StringName in party.initialized_seats():
+			party.step_movement(seat, 6000.0, 1.0 / 60.0)
+		closed_party = party.close_tick(tick)
+		return []
+
+class Route:
+	const Seed := 2507
+	var outer := WorldExploration.create(WorldTopology.generate(Seed), [Host, Guest])
+	var inner: WorldExploration
+	var kernel := CombatKernel.new()
+	var setup := RunSetup.new()
+	var party: RunParty
+	var authority := TravelAuthority.new()
+	var passages: RunRealmPassages
+	var handle := outer.module_center(WorldTopology.ANCHORS[0])
+	var sequence: int
+
+	func _init(realm: StringName) -> void:
+		inner = WorldExploration.create(WorldTopology.generate_optional(Seed, realm), [Host, Guest])
+
+	func begin() -> bool:
+		setup.run_id = &"passage-test"
+		setup.authority_id = Host
+		setup.initial_realms = {Host: Source, Guest: Source}
+		setup.epoch = 1
+		setup.seed = Seed
+		setup.role = RunSetup.Role.HOST
+		setup.rules_revision = &"V42.6/R1"
+		setup.catalog_revision = &"starter"
+		setup.challenge_id = &"normal"
+		var realms: Dictionary[StringName, RealmGeometry] = {
+			Source: outer.geometry(), inner.geometry().realm_id: inner.geometry(),
+		}
+		for geometry: RealmGeometry in realms.values():
+			if not kernel.attach_geometry(geometry, WorldExploration.BLOCKER):
+				return false
+		if not _add_actor(Host, Source, offset(handle, -96, 0), 20, CombatOrigin.Provenance.SEAT):
+			return false
+		if not _add_actor(Guest, Source, offset(handle, 8, -10), 20, CombatOrigin.Provenance.SEAT):
+			return false
+		party = RunParty.begin(setup, Host, kernel, realms, {Host: Host, Guest: Guest}, WorldExploration.BLOCKER)
+		authority.party = party
+		if party == null or not authority.start(setup, Host):
+			return false
+		passages = RunRealmPassages.new(authority, party)
+		return passages.register_optional(&"test/entry", outer, handle, inner, 36.0, 10.0)
+
+	func input(seat: StringName, action: StringName, point: RealmSweep.Point) -> RunIntent:
+		sequence += 1
+		var tick := authority.next_tick()
+		var state := party.view(seat, CombatInstant.at_tick(tick))
+		return RunIntent.new(setup.run_id, setup.epoch, state.realm, seat, tick, sequence,
+			action, PlayerCommand.new(action, point.x, point.y))
+
+	func submit(intent: RunIntent) -> bool:
+		return (authority.submit(intent.seat_id, intent) == Admission.QUEUED
+			and authority.close_tick() and authority.closed_party)
+
+	func walk_to_exit(seat: StringName) -> bool:
+		var exit := inner.physical_route(WorldTopology.ENTRY, WorldTopology.RETURN_EXIT)
+		if exit.is_empty():
+			return false
+		for waypoint: RealmSweep.Point in exit:
+			if not submit(input(seat, PlayerCommand.MOVE_TO, waypoint)):
+				return false
+		var desired: RealmSweep.Point = exit.back()
+		var landed := party.view(seat, CombatInstant.at_tick(authority.next_tick() - 1)).position
+		return landed.x == desired.x and landed.y == desired.y
+
+	func _add_actor(id: StringName, realm: StringName, at: RealmSweep.Point, life_hp: int,
+			kind: CombatOrigin.Provenance) -> bool:
+		var actor := CombatantState.new()
+		actor.id = id
+		actor.owner = id
+		actor.realm = realm
+		actor.life = 1
+		actor.provenance = kind
+		actor.max_hp = Quantity.from_count(life_hp)
+		actor.hp = QuantityLayerLedger.Pool.new(actor.max_hp, QuantityErrorBounds.new())
+		actor.resources[&"mana"] = Quantity.from_count(7)
+		var room := outer if realm == Source else inner
+		return kernel.add_actor(actor) and room.geometry().add_circle(id, 0, at, 4, 2)
+
+	func add_sentinel(realm: StringName, point: RealmSweep.Point) -> bool:
+		return _add_actor(&"sentinel", realm, point, 100, CombatOrigin.Provenance.SPAWN)
+
+	func admit_sentinel_hit(target: StringName, due_at: int) -> bool:
+		var actor := kernel.actor_snapshot(target)
+		var floor := outer.geometry() if actor.realm == Source else inner.geometry()
+		var pose := floor.circle_center(target, 0)
+		var swept := floor.certify_circle_snapshot(actor.realm, pose, 0.0, 2)
+		for contact: RealmGeometry.Contact in swept.contacts:
+			if contact.entity != target:
+				continue
+			var action := CombatAction.new()
+			action.source = &"sentinel"
+			action.source_life = 1
+			action.family = &"fixture"
+			action.origin = CombatOrigin.new()
+			action.origin.provenance = CombatOrigin.Provenance.SPAWN
+			action.origin.owner = action.source
+			action.origin.activation = 1
+			action.origin.committed_at = CombatInstant.at_tick(authority.next_tick())
+			var part := CombatAction.Component.new()
+			part.base = Quantity.from_count(20)
+			action.components = [part]
+			var delivery := CombatDelivery.activate(kernel, action, actor.realm)
+			return (delivery != null and delivery.admit(due_at, contact, actor.life, true)
+				== CombatDelivery.Result.ADMITTED and delivery.finish())
+		return false
+
+	static func offset(center: RealmSweep.Point, x: float, y: float) -> RealmSweep.Point:
+		return RealmSweep.Point.new(center.x + x, center.y + y)
+
+
+func test_each_optional_realm_has_an_intentional_round_trip_and_keeps_party_clock() -> void:
+	for space: StringName in WorldTopology.OPTIONAL_REALMS:
+		var route := Route.new(space)
+		assert_true(route.begin())
+		assert_true(route.submit(route.input(Host, PlayerCommand.MOVE_TO, route.handle)))
+		var entry := route.input(Host, PlayerCommand.INTERACT, route.handle)
+		assert_false(route.passages.interact(entry))
+		assert_true(route.submit(entry))
+		assert_true(route.passages.interact(entry))
+		var crossed := route.authority.next_tick()
+		assert_false(route.passages.interact(entry))
+		assert_eq(route.authority.next_tick(), crossed)
+		var body := route.kernel.actor_snapshot(Host)
+		assert_eq(body.realm, space)
+		assert_eq(body.realm_visit, 1)
+		assert_eq(body.resources[&"mana"].native_at_scale(0), 7)
+		assert_null(route.outer.geometry().circle_center(Host, 0))
+		assert_not_null(route.outer.geometry().circle_center(Guest, 0))
+		assert_not_null(route.inner.geometry().circle_center(Host, 0))
+		assert_eq(route.outer.view(Host).visible, [])
+		assert_eq(route.inner.view(Host).visible.size(), 1)
+		assert_eq(route.inner.view(Guest).visible, [])
+		var restored := TravelAuthority.new()
+		assert_true(restored.restore(route.setup, Host, route.authority.checkpoint()))
+		var timed := route.input(Host, PlayerCommand.MOVE_TO, route.handle)
+		assert_eq(restored.submit(Host, timed), Admission.QUEUED)
+		assert_true(route.walk_to_exit(Host))
+		var exit := route.input(Host, PlayerCommand.INTERACT, route.inner.module_center(WorldTopology.RETURN_EXIT))
+		assert_true(route.submit(exit))
+		assert_true(route.passages.interact(exit))
+		assert_eq(route.kernel.actor_snapshot(Host).realm, Source)
+		assert_eq(route.kernel.actor_snapshot(Host).realm_visit, 2)
+		assert_eq(route.inner.view(Host).visible, [])
+		assert_eq(route.outer.view(Host).visible.size(), 1)
+
+
+func test_portal_requires_physical_reach_and_clears_the_players_old_queued_scope() -> void:
+	var route := Route.new(&"silent_garden")
+	assert_true(route.begin())
+	var too_far := route.input(Host, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(too_far))
+	assert_false(route.passages.interact(too_far))
+	assert_true(route.submit(route.input(Host, PlayerCommand.MOVE_TO, Route.offset(route.handle, -32, 0))))
+	assert_true(route.outer.place_route_solid(&"screen", Route.offset(route.handle, -24, 0), 3))
+	var blocked := route.input(Host, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(blocked))
+	assert_false(route.passages.interact(blocked))
+	assert_eq(route.kernel.actor_snapshot(Host).realm_visit, 0)
+	assert_true(route.outer.remove_route_solid(&"screen"))
+	var admitted := route.input(Host, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(admitted))
+	var queued := route.input(Host, PlayerCommand.MOVE_TO, Route.offset(route.handle, 40, 0))
+	assert_eq(route.authority.submit(Host, queued), Admission.QUEUED)
+	assert_true(route.passages.interact(admitted))
+	assert_eq(route.authority.submit(Host, queued), Admission.WRONG_REALM)
+	queued.realm_id = &"silent_garden"
+	assert_eq(route.authority.submit(Host, queued), Admission.STALE_SEQUENCE)
+	assert_true(route.authority.close_tick())
+	assert_eq(route.authority.closed_result().accepted.size(), 0)
+
+
+func test_contact_from_an_old_visit_cannot_hit_the_same_life_after_return() -> void:
+	var route := Route.new(&"fractured_beyond")
+	assert_true(route.begin())
+	assert_true(route.submit(route.input(Host, PlayerCommand.MOVE_TO, route.handle)))
+	assert_true(route.add_sentinel(Source, Route.offset(route.handle, -24, 0)))
+	assert_true(route.admit_sentinel_hit(Host, 80))
+	var into_realm := route.input(Host, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(into_realm))
+	assert_true(route.passages.interact(into_realm))
+	assert_true(route.walk_to_exit(Host))
+	var leave := route.input(Host, PlayerCommand.INTERACT, route.inner.module_center(WorldTopology.RETURN_EXIT))
+	assert_true(route.submit(leave))
+	assert_true(route.passages.interact(leave))
+	assert_lt(route.authority.next_tick(), 80)
+	var late := route.kernel.resolve_next(CombatInstant.at_tick(80))
+	assert_eq(late.result, CombatKernel.Result.CLOSED)
+	assert_eq(late.hits.size(), 1)
+	assert_false(late.hits[0].accepted)
+	assert_eq(late.eliminations.size(), 0)
+	assert_eq(route.kernel.actor_snapshot(Host).hp.amount.native_at_scale(0), 20)
+
+
+func test_teammates_body_stays_in_its_realm_and_requires_physical_return_to_rescue() -> void:
+	var route := Route.new(&"silent_garden")
+	assert_true(route.begin())
+	var guest_entry := route.input(Guest, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(guest_entry))
+	assert_true(route.passages.interact(guest_entry))
+	assert_true(route.submit(route.input(Host, PlayerCommand.MOVE_TO, route.handle)))
+	var host_entry := route.input(Host, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(host_entry))
+	assert_true(route.passages.interact(host_entry))
+	var entry := route.inner.module_center(WorldTopology.ENTRY)
+	assert_true(route.add_sentinel(&"silent_garden", Route.offset(entry, -25, 0)))
+	var death_tick := route.authority.next_tick()
+	assert_true(route.admit_sentinel_hit(Guest, death_tick))
+	var wave := route.kernel.resolve_next(CombatInstant.at_tick(death_tick))
+	assert_true(route.party.observe_combat(wave))
+	assert_true(route.authority.close_tick())
+	var defeated := route.party.view(Guest, CombatInstant.at_tick(death_tick))
+	assert_false(defeated.alive)
+	var ready := defeated.wait_until.tick
+	assert_true(route.walk_to_exit(Host))
+	var exit := route.input(Host, PlayerCommand.INTERACT, route.inner.module_center(WorldTopology.RETURN_EXIT))
+	assert_true(route.submit(exit))
+	assert_true(route.passages.interact(exit))
+	var split := route.party.view(Guest, CombatInstant.at_tick(route.authority.next_tick() - 1))
+	assert_eq(split.realm, &"silent_garden")
+	assert_false(split.alive)
+	assert_eq(split.wait_until.tick, ready)
+	assert_eq(split.position.x, defeated.position.x)
+	assert_eq(split.position.y, defeated.position.y)
+	assert_null(route.outer.geometry().circle_center(Guest, 0))
+	while route.authority.next_tick() < ready:
+		if not route.authority.close_tick():
+			fail_test("Authority could not reach the original rescue deadline.")
+			return
+	assert_false(route.party.begin_rescue(Host, Guest, ready))
+	var reentry := route.input(Host, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(reentry))
+	assert_true(route.passages.interact(reentry))
+	assert_true(route.party.begin_rescue(Host, Guest, route.authority.next_tick()))
+	for _tick: int in RunParty.RESCUE_PROGRESS / RunParty.HELPER_RATE[1]:
+		if not route.authority.close_tick():
+			fail_test("Authority could not finish the ordinary rescue.")
+			return
+	var revived := route.party.view(Guest, CombatInstant.at_tick(route.authority.next_tick() - 1))
+	assert_true(revived.alive)
+	assert_eq(revived.realm, &"silent_garden")
+	assert_eq(route.kernel.actor_snapshot(Guest).life, 2)
+	assert_eq(route.kernel.actor_snapshot(Guest).hp.amount.native_at_scale(0), 6)
+
+
+func test_split_serialization_uses_each_seats_actual_scope_and_one_clock() -> void:
+	var route := Route.new(&"inverted_archive")
+	assert_true(route.begin())
+	var cross := route.input(Guest, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(cross))
+	assert_true(route.passages.interact(cross))
+	var now := CombatInstant.at_tick(route.authority.next_tick() - 1)
+	var actors: Array[RecipientView.Actor] = []
+	for id: StringName in [Host, Guest]:
+		var facts := route.party.view(id, now)
+		var row := RecipientView.Actor.new()
+		row.id = id
+		row.realm = facts.realm
+		row.position = facts.position
+		actors.append(row)
+	for row: RecipientView.Actor in actors:
+		var scope := RecipientView.Scope.new()
+		scope.seat = row.id
+		scope.realm = row.realm
+		scope.actors = {Host: true, Guest: true}
+		var map := route.outer if row.realm == Source else route.inner
+		var bytes := RecipientView.pack(scope, 1, 2, now.tick, 3, "9", route.party.status_ids(), actors, [], map)
+		var receipt := RecipientView.read(bytes)
+		assert_not_null(receipt)
+		assert_eq(receipt.tick, now.tick)
+		assert_eq(receipt.level, 3)
+		assert_eq(receipt.xp, "9")
+		assert_eq(receipt.realm, String(row.realm))
+		assert_eq(receipt.actors.keys(), [String(row.id)])
+		assert_eq(receipt.party.size(), 2)
+		assert_eq(receipt.explored.size(), 0 if row.realm == Source else 1)

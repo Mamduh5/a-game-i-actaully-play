@@ -113,6 +113,7 @@ class Impact:
 	var root_occurrence: String
 	var target: StringName
 	var target_life: int
+	var target_visit: int
 	var shape: int
 	var hostile: bool
 	var activation: String
@@ -239,6 +240,35 @@ func reanimate_spawn(id: StringName, life: int, now: CombatInstant, fraction: Qu
 	actor.statuses.clear()
 	actor.barriers.clear()
 	actor.end_rates(CombatAction.Damage.PHYSICAL | CombatAction.Damage.MAGICAL)
+	return true
+
+
+## Move the physical player and its unchanged life between realized realms.
+## Previously admitted contacts still refer to the old visit.
+func transfer_player(id: StringName, life: int, from: RealmGeometry, destination: RealmGeometry,
+		at: RealmSweep.Point) -> bool:
+	var actor: CombatantState = _actors.get(id)
+	if (not _accepting() or not _is_player_life(actor, life) or not actor.is_alive()
+			or actor.realm_visit == Quantity.INT_MAX or from == null or destination == null or at == null
+			or actor.realm != from.realm_id or from == destination or _geometry.get(from.realm_id) != from
+			or _geometry.get(destination.realm_id) != destination):
+		return false
+	var radius := from.circle_radius(id, 0)
+	var category := from.circle_category(id, 0)
+	if radius <= 0.0 or category <= 0:
+		return false
+	var clearance := destination.certify_circle_snapshot(destination.realm_id, at, radius,
+		_blocker_masks[destination.realm_id])
+	if clearance == null or not clearance.contacts.is_empty() or not clearance.unresolved.is_empty():
+		return false
+	var departure := from.fork()
+	var arrival := destination.fork()
+	if not departure.remove_mutable(id, 0) or not arrival.add_circle(id, 0, at, radius, category):
+		return false
+	from.adopt(departure)
+	destination.adopt(arrival)
+	actor.realm = destination.realm_id
+	actor.realm_visit += 1
 	return true
 
 
@@ -432,6 +462,7 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 	impact.root_occurrence = impact.origin.occurrence_key()
 	impact.target = actor.id
 	impact.target_life = target_life
+	impact.target_visit = actor.realm_visit
 	impact.shape = contact.shape
 	impact.hostile = hostile
 	if held.payment_pending:
@@ -1056,6 +1087,7 @@ static func _choose_descendant(group: Group, claim: ReactionClaim) -> StringName
 	child.root_occurrence = cause.root_occurrence
 	child.target = claim.target.id
 	child.target_life = claim.target.life
+	child.target_visit = claim.target.realm_visit
 	child.shape = claim.shape
 	child.hostile = cause.hostile
 	child.parent = receipt.event
@@ -1144,7 +1176,7 @@ func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState, n
 	hit.hostile = impact.hostile
 	hit.parent = impact.parent
 	hit.reaction = impact.reaction
-	if before.life != impact.target_life or not before.is_alive():
+	if before.life != impact.target_life or before.realm_visit != impact.target_visit or not before.is_alive():
 		return hit
 	hit.before_statuses = impact.inherited_statuses.duplicate() if impact.uses_inherited_statuses else before.statuses.duplicate()
 	hit.accepted = not before.prevents_hit

@@ -82,6 +82,10 @@ func module_at(point: RealmSweep.Point) -> StringName:
 	return _layout.module_at(point)
 
 
+func module_center(id: StringName) -> RealmSweep.Point:
+	return _layout.center(id)
+
+
 func route(origin: StringName, destination: StringName) -> Array[StringName]:
 	return _layout.route(origin, destination, _shortcut_open)
 
