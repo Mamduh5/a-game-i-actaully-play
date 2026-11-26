@@ -961,7 +961,7 @@ func _displace(group: Group, postings: Array[Posting]) -> bool:
 			offset = RealmSweep.Point.new(axis.x * action.radial_distance, axis.y * action.radial_distance)
 		var scale := 1.0 - target.displacement_resistance
 		var finish := RealmSweep.Point.new(start.x + offset.x * scale, start.y + offset.y * scale)
-		hit.displacement = geometry.displace_circle(target.id, hit.shape, finish, _blocker_masks[realm])
+		hit.displacement = geometry.displace_body(target.id, hit.shape, finish, _blocker_masks[realm])
 		if hit.displacement == null:
 			return false
 		var settled := hit.displacement.finish

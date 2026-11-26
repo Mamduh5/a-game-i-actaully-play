@@ -310,6 +310,24 @@ func test_blood_wake_samples_real_motion_only_after_owned_bleed_exists() -> void
 		assert_eq(arena.kernel.next_due().tick, 121)
 
 
+func test_force_translates_all_body_circles_and_clips_at_an_unstruck_members_wall() -> void:
+	var arena := Arena.new(&"W01", &"H01", false, &"R03")
+	assert_true(arena.add(&"aim", 30, 0, 100))
+	assert_true(arena.geometry.add_circle(&"aim", 1, RealmSweep.Point.new(30, 90), 3, HOSTILE))
+	assert_true(arena.wall(44, 84, 96))
+	assert_eq(arena.attack(1), Committed)
+	var hits := arena.settle(1)
+	assert_eq(hits.size(), 1)
+	if hits.size() == 1:
+		assert_not_null(hits[0].displacement)
+		assert_eq(hits[0].displacement.stopped_by.size(), 1)
+	var primary := arena.geometry.circle_center(&"aim", 0)
+	var secondary := arena.geometry.circle_center(&"aim", 1)
+	assert_almost_eq(primary.x, 41.0, 0.000001)
+	assert_eq(secondary.x, primary.x)
+	assert_eq(secondary.y - primary.y, 90.0)
+
+
 func test_force_sword_uses_actual_target_direction_resistance_and_wall_clearance() -> void:
 	for rune: StringName in [&"", &"R03"]:
 		var arena := Arena.new(&"W01", &"H01", false, rune)

@@ -36,6 +36,7 @@ var revision: int:
 
 var _index: RealmSpatialIndex
 var _shapes: Dictionary[StringName, Shape] = {}
+var _circle_slots: Dictionary[StringName, Array] = {}
 var _revision := 0
 var _category_revisions: Dictionary[int, int] = {}
 
@@ -50,6 +51,7 @@ func fork() -> RealmGeometry:
 	draft._index = _index.fork()
 	draft._revision = _revision
 	draft._category_revisions = _category_revisions.duplicate()
+	draft._circle_slots = _circle_slots.duplicate(true)
 	for key: StringName in _shapes:
 		var original := _shapes[key]
 		var shape := Shape.new()
@@ -67,6 +69,7 @@ func fork() -> RealmGeometry:
 func adopt(draft: RealmGeometry) -> void:
 	_index = draft._index
 	_shapes = draft._shapes
+	_circle_slots = draft._circle_slots
 	_revision = draft._revision
 	_category_revisions = draft._category_revisions
 
@@ -95,6 +98,8 @@ func add_circle(entity: StringName, slot: int, center: RealmSweep.Point, radius:
 	shape.center = RealmSweep.Point.new(center.x, center.y)
 	shape.radius = radius
 	shape.category = category
+	var slots: Array = _circle_slots.get_or_add(entity, [])
+	slots.append(slot)
 	_shapes[RealmSpatialIndex.shape_key(entity, slot)] = shape
 	_mark_changed(category)
 	return true
@@ -158,6 +163,10 @@ func remove_mutable(entity: StringName, slot: int) -> bool:
 	if shape == null or shape.fixed or not _index.remove(entity, slot):
 		return false
 	_shapes.erase(key)
+	if shape.center != null:
+		_circle_slots[entity].erase(slot)
+		if _circle_slots[entity].is_empty():
+			_circle_slots.erase(entity)
 	_mark_changed(shape.category)
 	return true
 
@@ -271,6 +280,70 @@ func displace_circle(entity: StringName, slot: int, requested: RealmSweep.Point,
 			return null
 	result.revision = revision
 	return result
+
+
+## Force translates a body's circles together. The earliest obstacle for any
+## member limits the entire move, including when it misses the contacted slot.
+func displace_body(entity: StringName, slot: int, requested: RealmSweep.Point, blockers: int) -> Displacement:
+	var slots: Array = _circle_slots.get(entity, [])
+	if slots.size() <= 1:
+		return displace_circle(entity, slot, requested, blockers)
+	var start := circle_center(entity, slot)
+	if start == null or requested == null:
+		return null
+	var dx := requested.x - start.x
+	var dy := requested.y - start.y
+	var contacts: Array[Contact] = []
+	var certifier := RealmCircleTime.new()
+	for member: int in slots:
+		var center := circle_center(entity, member)
+		var finish := RealmSweep.Point.new(center.x + dx, center.y + dy)
+		var path := _sweep(realm_id, center, finish, circle_radius(entity, member), blockers, entity, certifier, true, true)
+		if path == null or not path.unresolved.is_empty():
+			return null
+		contacts.append_array(path.contacts)
+	var result := Displacement.new()
+	result.start = start
+	result.finish = start
+	var limit := 1.0
+	var retreat := 0.0
+	if not contacts.is_empty():
+		var first := _first_blocker(contacts)
+		if first == null:
+			return null
+		var recorded: Dictionary[StringName, bool] = {}
+		for contact: Contact in contacts:
+			var key := RealmSpatialIndex.shape_key(contact.entity, contact.shape)
+			if not recorded.has(key) and (first == contact or first.proof.order_against(contact.proof) == RealmCircleTime.Order.SAME):
+				recorded[key] = true
+				result.stopped_by.append(contact)
+		result.stopped_by.sort_custom(_compare_shape_ids)
+		limit = first.proof.earliest
+		var scratch := PackedByteArray()
+		scratch.resize(8)
+		retreat = limit - RealmBounds.adjacent(limit, false, scratch)
+	for attempt: int in 55:
+		var fraction := maxf(0.0, limit - retreat)
+		var draft := fork()
+		var clear := true
+		for member: int in slots:
+			var center := circle_center(entity, member)
+			var finish := RealmSweep.Point.new(center.x + dx * fraction, center.y + dy * fraction)
+			if finish.x == center.x and finish.y == center.y:
+				continue
+			var prefix := _sweep(realm_id, center, finish, circle_radius(entity, member), blockers, entity, certifier, true, true)
+			if prefix == null or not prefix.unresolved.is_empty() or not prefix.contacts.is_empty():
+				clear = false
+				break
+			if not draft.commit_circle_pose(entity, member, finish):
+				return null
+		if clear:
+			adopt(draft)
+			result.finish = circle_center(entity, slot)
+			result.revision = revision
+			return result
+		retreat *= 2.0
+	return null
 
 
 static func _compare_shape_ids(left: Contact, right: Contact) -> bool:

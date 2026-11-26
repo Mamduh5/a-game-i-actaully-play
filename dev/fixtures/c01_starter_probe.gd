@@ -277,7 +277,9 @@ func _physics_process(_delta: float) -> void:
 	elif _case == "bleed":
 		_hud.text = "Bleed\nTarget HP %d" % _rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0)
 	elif _case == "wake":
-		_hud.text = "Bleed + Force\nBlood Wake"
+		_hud.text = "Blood Wake\nTarget HP %d   Visitor HP %d" % [
+			_rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0),
+			_rules.kernel.actor_snapshot(&"visitor").hp.amount.native_at_scale(0)]
 	else:
 		_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
 			{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
@@ -286,7 +288,7 @@ func _physics_process(_delta: float) -> void:
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
-			"bleed": [190], "wake": [85]}[_case]:
+			"bleed": [190], "wake": [80, 85, 100]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -330,7 +332,8 @@ func _draw() -> void:
 		var living := _rules.kernel.actor_snapshot(target.id).is_alive()
 		draw_circle(location, 12, Color("#df9290") if living else Color("#4b4c57"), true, -1.0, true)
 		draw_arc(location, 12, 0, TAU, 24, Color("#774d59") if living else Color("#69727e"), 1.5, true)
-		draw_string(ThemeDB.fallback_font, location + Vector2(-22, 34), String(target.id),
+		var label_offset := Vector2(-22, -23) if _case == "wake" and target.id == &"near" else Vector2(-22, 34)
+		draw_string(ThemeDB.fallback_font, location + label_offset, String(target.id),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#ded7ca"))
 	draw_circle(Vector2(player.x, player.y), 14, Color("#9fe0c5"), true, -1.0, true)
 	draw_arc(Vector2(player.x, player.y), 15, 0, TAU, 24, Color("#223837"), 2.0, true)
