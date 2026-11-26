@@ -340,7 +340,18 @@ Packages not listed below remain **NOT STARTED**.
 
 Independent review approved **WP20 (`d848b2b`, unlocking `WP21`)**, the **WP23 important-award and ordinary-currency checkpoints (`288f430` / `7d9b1c6`, logging non-blocking `WP23-O1`)**, and the **WP25 optional-travel, PR11 trial and active-realm follow-up checkpoint (`79be605` / `ca8dee6`)**; and returned **C01 (`dfb2d87`, `CHANGES REQUESTED` — `C01-F1`)** and the **WP18 baseline checkpoint (`123f161`, `CHANGES REQUESTED` — `WP18-F1`, logging `WP18-O1`)**. [C01 review](records/C01.md#independent-review-dfb2d87) · [WP20 review](records/WP20.md#independent-review-d848b2b) · [WP23 review](records/WP23.md#independent-checkpoint-review-288f430-7d9b1c6) · [WP18 review](records/WP18.md#independent-baseline-review-123f161) · [WP25 review](records/WP25.md#independent-checkpoint-review-79be605-ca8dee6)
 
-**Next eligible work on `dev`** includes fixing **`C01-F1`** (to unlock `C02`/`C03` and `WP32`), fixing **`WP18-F1`** and completing the integrated WP18 NF-04 offscreen equivalence gate (to unlock `WP27`), starting newly unlocked **`WP21`**, continuing **WP25** native split-peer travel and gateway transfer, finishing remaining **WP23** lifecycle flush consumers (to unlock `WP24`/`WP26`), and starting **`C24`** (both `WP10` and `WP17` approved).
+### Local candidate progress
+
+The code branches below isolate writer work from the independent review checkout. Each listed record is tracked at the stated branch head and can be retrieved with `git show <record-commit>:docs/records/<package>.md`. The established independent dispositions on `dev` still apply.
+
+| Package | Writer status and exact candidate | Durable record and next action |
+|---|---|---|
+| [C01](#c01) | **REVIEW REQUIRED** on `work/review-corrections`, correction `991448ce4d29d86191f2b88016d48caeb3184fc2` | `495b6f9:docs/records/C01.md`. Codex verified 263/263 GUT and five matching headless starter arms on `d4e537a`. Antigravity/Gemini reviews the living-controller guard, the dead caster and rescued life, and the same-wave mutual kill case. Keep C02/C03 gated. |
+| [WP18](#wp18) | **IN PROGRESS** on `work/review-corrections`, correction checkpoint `05df3d64a88183db49d85fa691a11c3b9c32f2f9` | `495b6f9:docs/records/WP18.md`. Codex verified pursuit, expiry, multi-shape cadence and the corrected 18-tick headless fixture. Antigravity/Gemini reviews WP18-F1 and WP18-O1. The rendered/release comparison and the NF-04 clock, activation and cost witnesses remain open. |
+| [C24](#c24) | **IN PROGRESS** on `work/c24`, mechanical checkpoint `ad3fd989ed61a00a05c65a71105544c35c6d81f2` | `61961b6:docs/records/C24.md`. Codex verified 270/270 GUT, including all 11 object cases. Complete elongated footprint, actual creature effects and durable pickup consumers, then collect rendered/exported evidence and assign the verified candidate to Antigravity/Gemini. |
+| [WP21](#wp21) | **IN PROGRESS** on `work/wp21`, profile and purchase checkpoint `23879b8c58fffe7a73138c01ec5b8e5cf697b83b` | `4440ff5:docs/records/WP21.md`. Codex verified 264/264 GUT, including the WP23 purchase flush, locked preparation, personal Codex and one-time debit cases. Connect authoritative discovery and verification facts, contextual mastery and live projection before final review by Antigravity/Gemini. |
+
+**Next eligible work** includes WP25 native split-peer travel and gateway transfer, WP23 orderly quit/suspension and forced-exit disclosure, and the remaining C24 and WP21 consumers. The active-run purchase flush checkpoint above contributes to WP23. Recheck C01 and WP18 correction dispositions before using their dependent packages. WP18 event advancement remains disabled until NF-04 passes.
 
 <a id="plan-promotion"></a>
 
