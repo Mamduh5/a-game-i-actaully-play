@@ -296,6 +296,16 @@ func configure_terminal(creator: StringName, eligible: Array[StringName]) -> boo
 	return true
 
 
+## The roster owner can close an ordinary wipe after its causal group or idle
+## grace boundary. An already decided Creator outcome keeps precedence.
+func end_party_defeat() -> bool:
+	if not _accepting():
+		return false
+	_terminal = Terminal.DEFEAT
+	_retire_combat_work()
+	return true
+
+
 ## Ordinary costs settle now. An HP-priced activation returns a provisional
 ## key and settles at its own instant, before the group's contacts.
 func commit(action: CombatAction) -> String:
@@ -617,11 +627,15 @@ func _publish_group() -> WaveResult:
 	_terminal = _evaluate_terminal()
 	group.receipt.terminal = _terminal
 	if _terminal != Terminal.ACTIVE:
-		_queue = CombatRootQueue.new()
-		_impacts.clear()
-		_actions.clear()
-		_hp_activations.clear()
+		_retire_combat_work()
 	return group.receipt
+
+
+func _retire_combat_work() -> void:
+	_queue = CombatRootQueue.new()
+	_impacts.clear()
+	_actions.clear()
+	_hp_activations.clear()
 
 
 static func _expire_barriers(group: Group, at_deadline: bool) -> bool:

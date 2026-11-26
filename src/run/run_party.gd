@@ -53,10 +53,14 @@ var _realms: Dictionary[StringName, RealmGeometry]
 var _blockers: int
 var _tick: int
 var _last_combat: CombatInstant
-var _defeated: bool
+var _terminal: CombatKernel.Terminal
+var _terminal_tick: int
+
+var terminal: CombatKernel.Terminal:
+	get: return _terminal
 
 var defeated: bool:
-	get: return _defeated
+	get: return _terminal == CombatKernel.Terminal.DEFEAT
 
 
 static func begin(setup: RunSetup, host: StringName, kernel: CombatKernel,
@@ -127,7 +131,7 @@ func set_guest_connected(seat: StringName, connected: bool, tick: int) -> bool:
 
 func can_control(seat: StringName) -> bool:
 	var member: Member = _members.get(seat)
-	return not _defeated and member != null and member.connected and member.body == null
+	return _terminal == CombatKernel.Terminal.ACTIVE and member != null and member.connected and member.body == null
 
 
 func apply_input(seat: StringName, command: PlayerCommand) -> bool:
@@ -224,7 +228,8 @@ func begin_rescue(helper_seat: StringName, body_seat: StringName, tick: int) -> 
 ## Process closed combat groups before publishing rescue and encounter state.
 ## Both hit eliminations and lethal HP prices can create a body.
 func observe_combat(wave: CombatKernel.WaveResult) -> bool:
-	if (_defeated or wave == null or wave.result != CombatKernel.Result.CLOSED or wave.due == null
+	if (_terminal != CombatKernel.Terminal.ACTIVE or wave == null
+			or wave.result != CombatKernel.Result.CLOSED or wave.due == null
 			or wave.due.order_against(CombatInstant.at_tick(_tick)) != RealmCircleTime.Order.AFTER
 			or wave.due.order_against(CombatInstant.at_tick(_tick + 1)) not in [
 				RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]
@@ -240,14 +245,25 @@ func observe_combat(wave: CombatKernel.WaveResult) -> bool:
 		if activation.outcome == CombatKernel.ActivationOutcome.LETHAL:
 			_record_death(activation.source, activation.life, wave.due)
 	_last_combat = wave.due
+	_terminal = wave.terminal
+	if _terminal == CombatKernel.Terminal.ACTIVE and not _has_survivor(wave.due):
+		if not _kernel.end_party_defeat():
+			return false
+		_terminal = CombatKernel.Terminal.DEFEAT
+	if _terminal != CombatKernel.Terminal.ACTIVE:
+		_terminal_tick = _tick + 1
 	return true
 
 
 ## Advance once per active tick, after combat. An original-host suspension
 ## calls neither this step nor the link transition and spends no guest grace.
 func close_tick(tick: int) -> bool:
-	if not _next_tick(tick):
+	if (tick != _tick + 1 or tick > RunAuthority.MAX_TICK
+			or (_terminal != CombatKernel.Terminal.ACTIVE and tick != _terminal_tick)):
 		return false
+	if _terminal != CombatKernel.Terminal.ACTIVE:
+		_tick = tick
+		return true
 	var now := CombatInstant.at_tick(tick)
 	var helpers: Dictionary[StringName, int] = {}
 	for helper: Member in _members.values():
@@ -276,8 +292,11 @@ func close_tick(tick: int) -> bool:
 			for helper: Member in _members.values():
 				if helper.aiding == body_seat:
 					_stop_aiding(helper, RescueInterruption.NONE)
+	if not _has_survivor(now):
+		if not _kernel.end_party_defeat():
+			return false
+		_terminal = CombatKernel.Terminal.DEFEAT
 	_tick = tick
-	_defeated = not _has_survivor(now)
 	return true
 
 
@@ -321,7 +340,7 @@ func _has_survivor(now: CombatInstant) -> bool:
 
 
 func _next_tick(tick: int) -> bool:
-	return not _defeated and tick == _tick + 1 and tick <= RunAuthority.MAX_TICK
+	return _terminal == CombatKernel.Terminal.ACTIVE and tick == _tick + 1 and tick <= RunAuthority.MAX_TICK
 
 
 static func _within_grace(member: Member, now: CombatInstant) -> bool:

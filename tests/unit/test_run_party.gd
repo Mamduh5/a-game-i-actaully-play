@@ -282,15 +282,39 @@ func test_repeated_deaths_cap_the_wait_without_replenishing_resources() -> void:
 
 func test_last_disconnected_survivor_dying_removes_grace_immediately() -> void:
 	var run := Scenario.new([HOST, GUEST])
+	var after_wipe := run.kernel.commit(run.action(GUEST, 1, 100))
+	assert_eq(run.admit(after_wipe, ENEMY, 3, true), CombatRootQueue.Result.ACCEPTED)
 	assert_true(run.party.set_guest_connected(GUEST, false, 1))
 	assert_not_null(run.pay(HOST, 1, 100, false))
 	assert_true(run.party.close_tick(1))
 	assert_false(run.party.defeated)
+	assert_eq(run.kernel.pending_count(), 1)
 	assert_not_null(run.hit(ENEMY, GUEST, 2, 100))
+	assert_eq(run.party.terminal, CombatKernel.Terminal.DEFEAT)
+	assert_eq(run.kernel.pending_count(), 0)
 	assert_true(run.party.close_tick(2))
 	assert_true(run.view(GUEST, 2).within_grace)
 	assert_false(run.view(GUEST, 2).alive)
 	assert_true(run.party.defeated)
+	assert_false(run.party.close_tick(3))
+	assert_eq(run.kernel.actor_snapshot(ENEMY).hp.amount.native_at_scale(0), 100)
+
+
+func test_roster_keeps_same_group_creator_victory_when_the_last_player_dies() -> void:
+	var run := Scenario.new([HOST])
+	assert_false(run.party.close_tick(0))
+	assert_true(run.kernel.configure_terminal(ENEMY, [HOST]))
+	for pair: Array in [[HOST, ENEMY], [ENEMY, HOST]]:
+		var output := run.kernel.commit(run.action(pair[0], 1, 100))
+		assert_eq(run.admit(output, pair[1], 1, true), CombatRootQueue.Result.ACCEPTED)
+		assert_true(run.kernel.finish_delivery(output))
+	var terminal := run.resolve(1)
+	assert_eq(terminal.terminal, CombatKernel.Terminal.VICTORY)
+	assert_eq(run.party.terminal, CombatKernel.Terminal.VICTORY)
+	assert_false(run.party.can_control(HOST))
+	assert_true(run.party.close_tick(1))
+	assert_false(run.party.defeated)
+	assert_false(run.party.close_tick(2))
 
 
 func test_local_encounter_presence_is_inclusive_realm_scoped_and_frozen_once() -> void:
