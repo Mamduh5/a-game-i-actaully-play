@@ -347,7 +347,7 @@ The four approved candidates were integrated on local dev and retested at `b54bc
 
 | Package | Current writer status | Next action |
 |---|---|---|
-| C02 | **IN PROGRESS**, Codex on dev. Conductor, starter Lightning and Force, and Storm Relay checkpoint `6c80256`; Antigravity/Gemini review pending. | Continue owned Bleed application and ticks, PR10 Thunder Rupture, and Blood Wake on actual displacement. WP32 requires completion of C02 and C03. [Evidence and review cases](records/C02.md) |
+| C02 | **IN PROGRESS**, Codex on dev. Conductor, Lightning, Force and Storm Relay checkpoint `6c80256`. Owned Bleed and secondary-target Thunder Rupture checkpoint `a34e3ae`. Antigravity/Gemini review pending. | Continue Blood Wake on actual displacement and remaining pair qualification cases. WP32 requires completion of C02 and C03. [Evidence and review cases](records/C02.md) |
 | C03 | Eligible for implementation | Coordinate shared delivery edits with C02. |
 | WP18 | Full-step corrections integrated | Continue NF-04 clock/activation qualification and dense measurements. Event advancement remains disabled. |
 | WP21 | Personal discovery and purchase checkpoints integrated | Review WP21-O1 correction, complete gameplay predicates, mastery and projection. |

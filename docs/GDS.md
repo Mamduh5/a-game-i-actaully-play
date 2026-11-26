@@ -659,6 +659,8 @@ Eligible successful hits apply capped stacks of physical damage over time. Repea
 
 Offense snapshots at application; live target defense/vulnerability affects ticks. Cadence continues through refresh. Default DoT ticks do not reapply Bleed or receive all direct-hit triggers. Exact per-stack potency, whether all stacks share one refreshed duration, snapshot replacement details and cap values are explicitly authored/tunable rather than inferred from "stacking."
 
+**Starter tuning under OWNER-T04 and PR10.** One owner can retain three stacks per target life. Each accepted stack snapshots three base physical damage and weapon offense bonuses. Hits refresh the shared 180-tick lifetime while preserving the 60-tick cadence and existing snapshots. Thunder Rupture spends all eligible stacks from the trigger owner for six base magical damage per stack on the struck target. These values make the immediate burst compete with future Bleed ticks. Adjust the starter combat rules after owner playtesting. [C02 evidence](records/C02.md)
+
 ### R02. Lightning - starter
 
 Eligible successful hits create chain lightning through a limited number of nearby valid enemies. The originally struck enemy receives the original attack's normal damage; separate electrical arcs deliver additional lightning damage to eligible nearby targets. Default reach and jump count are finite. A miss generates no hit-triggered chain, and a lone target does not guarantee a nearby chain victim.
