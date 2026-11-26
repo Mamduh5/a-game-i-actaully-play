@@ -15,11 +15,19 @@ class Impact:
 	var primary: CombatOrigin
 	var neutral_cause: StringName
 	var participants: Array[CombatOrigin] = []
+	var _normal_x: float
+	var _normal_y: float
+	var _mover: WorldMomentum
+	var _receiver: WorldMomentum
+	var _mover_revision: int
+	var _receiver_revision: int
+	var _transferred: bool
 
 var _mass: float
 var _resistance: float
 var _influences: Dictionary[String, Influence] = {}
 var _contacts: Dictionary[StringName, bool] = {}
+var _revision: int
 
 
 static func create(mass: float, displacement_resistance: float) -> WorldMomentum:
@@ -51,14 +59,23 @@ func apply_impulse(force: RealmSweep.Point, origin: CombatOrigin, neutral_id: St
 	if velocity() == null:
 		_influences.erase(key)
 		return false
+	_revision += 1
 	return true
 
 
 func velocity() -> RealmSweep.Point:
+	return _velocity_with("", null)
+
+
+func _velocity_with(replaced: String, replacement: Influence) -> RealmSweep.Point:
 	var x := 0.0
 	var y := 0.0
-	for key: String in _ordered_keys():
-		var entry := _influences[key]
+	var keys := _ordered_keys()
+	if replacement != null and not _influences.has(replaced):
+		keys.append(replaced)
+		keys.sort()
+	for key: String in keys:
+		var entry := replacement if key == replaced else _influences[key]
 		x += entry.x
 		y += entry.y
 	if not is_finite(x) or not is_finite(y):
@@ -76,11 +93,15 @@ func attenuate(factor: float) -> bool:
 		entry.y *= factor
 		if entry.x == 0.0 and entry.y == 0.0:
 			_influences.erase(key)
+	_revision += 1
 	return true
 
 
 func separate(entity: StringName, slot: int) -> bool:
-	return _contacts.erase(RealmSpatialIndex.shape_key(entity, slot))
+	if not _contacts.erase(RealmSpatialIndex.shape_key(entity, slot)):
+		return false
+	_revision += 1
+	return true
 
 
 func refresh_contacts(near: RealmGeometry.SweepCandidates) -> void:
@@ -90,6 +111,8 @@ func refresh_contacts(near: RealmGeometry.SweepCandidates) -> void:
 			var key := RealmSpatialIndex.shape_key(hit.entity, hit.shape)
 			if _contacts.has(key):
 				remaining[key] = true
+	if remaining.size() != _contacts.size():
+		_revision += 1
 	_contacts = remaining
 
 
@@ -141,6 +164,60 @@ func contact(entity: StringName, slot: int, normal: RealmSweep.Point, minimum_sp
 		return null
 	result.primary = primary.origin.copy() if primary.origin != null else null
 	result.neutral_cause = primary.neutral_id
+	result._normal_x = nx
+	result._normal_y = ny
+	result._mover = self
+	result._receiver = other
+	result._mover_revision = _revision
+	result._receiver_revision = other._revision if other != null else -1
+	return result
+
+
+## Apply a passive normal impulse for an isolated pair. Restitution is
+## bounded, so the contact cannot add energy. Attribution follows the impact.
+func transfer(impact: Impact, mover_id: StringName, mover_shape: int, restitution: float) -> bool:
+	if (impact == null or impact._mover != self or impact._receiver == null or impact._transferred
+			or impact._mover_revision != _revision or impact._receiver_revision != impact._receiver._revision
+			or mover_id.is_empty() or mover_shape < 0 or not is_finite(restitution)
+			or restitution < 0.0 or restitution > 1.0):
+		return false
+	var receiver := impact._receiver
+	var mover_share: float
+	if _mass <= receiver._mass:
+		mover_share = 1.0 / (1.0 + _mass / receiver._mass)
+	else:
+		var ratio := receiver._mass / _mass
+		mover_share = ratio / (1.0 + ratio)
+	var normal_change := impact.approach_speed * (1.0 + restitution)
+	var mover_change := -normal_change * mover_share
+	var receiver_change := normal_change * (1.0 - mover_share)
+	if not is_finite(mover_change) or not is_finite(receiver_change):
+		return false
+	var key := "cause/%s" % impact.primary.occurrence_key() if impact.primary != null else "neutral/%s" % impact.neutral_cause
+	var mover_post := _adjusted_influence(key, impact, mover_change)
+	var receiver_post := receiver._adjusted_influence(key, impact, receiver_change)
+	if mover_post == null or receiver_post == null:
+		return false
+	_influences[key] = mover_post
+	receiver._influences[key] = receiver_post
+	_revision += 1
+	receiver._revision += 1
+	receiver._contacts[RealmSpatialIndex.shape_key(mover_id, mover_shape)] = true
+	impact._transferred = true
+	return true
+
+
+func _adjusted_influence(key: String, impact: Impact, normal_change: float) -> Influence:
+	var previous: Influence = _influences.get(key)
+	var result := Influence.new()
+	result.origin = impact.primary.copy() if impact.primary != null else null
+	result.neutral_id = impact.neutral_cause
+	var dx := normal_change * impact._normal_x
+	var dy := normal_change * impact._normal_y
+	result.x = (previous.x if previous != null else 0.0) + dx
+	result.y = (previous.y if previous != null else 0.0) + dy
+	if not is_finite(result.x) or not is_finite(result.y) or _velocity_with(key, result) == null:
+		return null
 	return result
 
 

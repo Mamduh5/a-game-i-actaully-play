@@ -173,6 +173,17 @@ func circle_radius(entity: StringName, slot: int) -> float:
 	return shape.radius if shape != null and shape.center != null else -1.0
 
 
+func change_category(entity: StringName, slot: int, category: int) -> bool:
+	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
+	if shape == null or shape.fixed or category <= 0:
+		return false
+	if shape.category != category:
+		var previous := shape.category
+		shape.category = category
+		_mark_changed(previous | category)
+	return true
+
+
 ## Vector from the given mover center toward the blocker at contact. The
 ## receiver normalizes it after ruling out a degenerate overlap.
 func blocker_direction(entity: StringName, slot: int, mover: RealmSweep.Point) -> RealmSweep.Point:

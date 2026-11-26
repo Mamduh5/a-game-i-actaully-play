@@ -14,6 +14,15 @@ class SolidMotion:
 class SolidImpact:
 	var contact: RealmGeometry.Contact
 	var impact: WorldMomentum.Impact
+	var transferred: bool
+
+class SolidDamage:
+	var solid: StringName
+	var paid: Quantity
+	var remaining: Quantity
+	var destroyed: bool
+	var origin: CombatOrigin
+	var neutral_cause: StringName
 
 var _layout: WorldTopology
 var _geometry: RealmGeometry
@@ -23,6 +32,7 @@ var _present: Dictionary[StringName, Vector2i] = {}
 var _shortcut_open := false
 var _routes: WorldRouteGraph
 var _route_solids: Dictionary[StringName, float] = {}
+var _durability: Dictionary[StringName, Quantity] = {}
 
 
 static func create(layout: WorldTopology, seats: Array[StringName]) -> WorldExploration:
@@ -94,10 +104,11 @@ func can_escape_warning(warning: WorldPressureHazard.Warning, actor: StringName,
 
 ## A gameplay placement owns its footprint; ordinary actor shapes do not
 ## participate unless included in the realm's navigation blocker mask.
-func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float) -> bool:
+func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float, durability: Quantity = null) -> bool:
 	if (id.is_empty() or _route_solids.has(id) or center == null or not is_finite(radius) or radius <= 0.0
 			or not is_finite(center.x) or not is_finite(center.y)
-			or absf(center.x) > 1000000.0 or absf(center.y) > 1000000.0 or not _ensure_routes()):
+			or absf(center.x) > 1000000.0 or absf(center.y) > 1000000.0
+			or (durability != null and durability.sign_value <= 0) or not _ensure_routes()):
 		return false
 	var cell := Vector2i(floori(center.x / WorldTopology.MODULE_SIZE), floori(center.y / WorldTopology.MODULE_SIZE))
 	if not _layout.contains_cell(cell):
@@ -110,6 +121,8 @@ func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float) 
 	if not draft.add_circle(id, 0, center, radius, BLOCKER) or not _routes.settle(_geometry, draft, footprint):
 		return false
 	_route_solids[id] = radius
+	if durability != null:
+		_durability[id] = durability
 	return true
 
 
@@ -124,7 +137,35 @@ func remove_route_solid(id: StringName) -> bool:
 	if not draft.remove_mutable(id, 0) or not _routes.settle(_geometry, draft, footprint):
 		return false
 	_route_solids.erase(id)
+	_durability.erase(id)
 	return true
+
+
+## Apply an authored durability debit. Only a destructive debit changes the
+## colliders. Secondary reactions can use the same causal receipt.
+func damage_route_solid(id: StringName, damage: Quantity, origin: CombatOrigin, neutral_cause: StringName = &"") -> SolidDamage:
+	var current: Quantity = _durability.get(id)
+	if (current == null or damage == null or damage.sign_value <= 0
+			or (origin == null and neutral_cause.is_empty())
+			or (origin != null and (not neutral_cause.is_empty() or not origin.valid_for(origin.committed_at)))):
+		return null
+	var receipt := SolidDamage.new()
+	receipt.solid = id
+	receipt.origin = origin.copy() if origin != null else null
+	receipt.neutral_cause = neutral_cause
+	receipt.destroyed = damage.compare(current) >= 0
+	if receipt.destroyed:
+		if not remove_route_solid(id):
+			return null
+		receipt.paid = current
+		receipt.remaining = Quantity.from_count(0)
+	else:
+		receipt.remaining = current.subtract(damage)
+		if receipt.remaining == null:
+			return null
+		_durability[id] = receipt.remaining
+		receipt.paid = damage
+	return receipt
 
 
 func move_route_solid(id: StringName, requested: RealmSweep.Point) -> SolidMotion:
@@ -158,10 +199,11 @@ func move_route_solid(id: StringName, requested: RealmSweep.Point) -> SolidMotio
 ## collision path. A positive separation distance defines a new episode.
 func push_route_solid(id: StringName, momentum: WorldMomentum, seconds: float,
 		minimum_approach: float, separation_distance: float,
-		recipients: Dictionary[StringName, WorldMomentum] = {}) -> SolidMotion:
+		recipients: Dictionary[StringName, WorldMomentum] = {}, restitution: float = 0.0) -> SolidMotion:
 	if (not _route_solids.has(id) or momentum == null or not is_finite(seconds) or seconds <= 0.0
 			or not is_finite(minimum_approach) or minimum_approach <= 0.0
-			or not is_finite(separation_distance) or separation_distance <= 0.0):
+			or not is_finite(separation_distance) or separation_distance <= 0.0
+			or not is_finite(restitution) or restitution < 0.0 or restitution > 1.0):
 		return null
 	var start := _geometry.circle_center(id, 0)
 	var velocity := momentum.velocity()
@@ -188,6 +230,9 @@ func push_route_solid(id: StringName, momentum: WorldMomentum, seconds: float,
 			impact.contact = hit
 			impact.impact = impulse
 			settled.impacts.append(impact)
+	if settled.impacts.size() == 1 and settled.motion.stopped_by.size() == 1:
+		var impact := settled.impacts[0]
+		impact.transferred = momentum.transfer(impact.impact, id, 0, restitution)
 	return settled
 
 
@@ -242,7 +287,10 @@ func checkpoint() -> Dictionary:
 			var center := _geometry.circle_center(id, 0)
 			if center == null:
 				return {}
-			solids.append({"id": id, "x": center.x, "y": center.y, "radius": _route_solids[id]})
+			var solid := {"id": id, "x": center.x, "y": center.y, "radius": _route_solids[id]}
+			if _durability.has(id):
+				solid["durability"] = QuantityCodec.encode(_durability[id])
+			solids.append(solid)
 		result["solids"] = solids
 	return result
 
@@ -268,7 +316,14 @@ static func restore(saved: Dictionary, seats: Array[StringName]) -> WorldExplora
 				or not solid.get("y") is float or not solid.get("radius") is float):
 			return null
 		var center := RealmSweep.Point.new(solid["x"], solid["y"])
-		if not reopened.place_route_solid(solid["id"], center, solid["radius"]):
+		var durability: Quantity
+		if solid.has("durability"):
+			if not solid["durability"] is PackedByteArray:
+				return null
+			durability = QuantityCodec.decode(solid["durability"])
+			if durability == null:
+				return null
+		if not reopened.place_route_solid(solid["id"], center, solid["radius"], durability):
 			return null
 	return reopened
 

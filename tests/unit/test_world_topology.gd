@@ -399,3 +399,83 @@ func test_pressure_warning_samples_real_occupants_and_preserves_faction_or_neutr
 	assert_eq(hazard.sample(geometry, CombatInstant.at_tick(6), [occupant]), WorldPressureHazard.SampleResult.WARNED)
 	assert_null(hazard.warning_snapshot().cause)
 	assert_eq(hazard.sample(geometry, CombatInstant.at_tick(6), []), WorldPressureHazard.SampleResult.INVALID)
+
+
+func test_passive_transfer_keeps_actual_contact_and_source_without_added_energy() -> void:
+	var layout := WorldTopology.generate_optional(-4, &"inverted_archive")
+	var world := WorldExploration.create(layout, [&"host"])
+	var center := layout.center(WorldTopology.ENTRY)
+	var start := RealmSweep.Point.new(center.x - 40, center.y - 60)
+	var receiver_start := RealmSweep.Point.new(center.x - 12, center.y - 60)
+	assert_true(world.place_route_solid(&"mover", start, 5.0))
+	assert_true(world.place_route_solid(&"receiver", receiver_start, 5.0))
+	var mover := WorldMomentum.create(2.0, 0.0)
+	var receiver := WorldMomentum.create(2.0, 0.0)
+	var origin := CombatOrigin.new()
+	origin.owner = &"instigator"
+	origin.activation = 1
+	origin.committed_at = CombatInstant.at_tick(1)
+	assert_true(mover.apply_impulse(RealmSweep.Point.new(60, 0), origin))
+	var hit := world.push_route_solid(&"mover", mover, 1.0, 0.1, 0.25, {&"receiver": receiver}, 1.0)
+	assert_not_null(hit)
+	if hit == null:
+		return
+	assert_eq(hit.impacts.size(), 1)
+	if hit.impacts.size() != 1:
+		return
+	assert_true(hit.impacts[0].transferred)
+	assert_eq(hit.impacts[0].impact.primary.owner, &"instigator")
+	assert_eq(hit.impacts[0].impact.strength, 450.0)
+	assert_eq(mover.velocity().x, 0.0)
+	assert_eq(receiver.velocity().x, 30.0)
+	assert_false(mover.transfer(hit.impacts[0].impact, &"mover", 0, 1.0))
+	var moved := world.push_route_solid(&"receiver", receiver, 0.5, 0.1, 0.25)
+	assert_not_null(moved)
+	if moved != null:
+		assert_eq(moved.motion.finish.x, receiver_start.x + 15.0)
+
+
+func test_partial_durability_reopens_and_faction_destruction_releases_its_collider_once() -> void:
+	var layout := WorldTopology.generate_optional(34, &"silent_garden")
+	var world := WorldExploration.create(layout, [&"host"])
+	var entry := layout.center(WorldTopology.ENTRY)
+	var center := RealmSweep.Point.new(entry.x + 50.0, entry.y + 40.0)
+	assert_true(world.place_route_solid(&"crystal", center, 14.0, Quantity.from_count(5)))
+	var start_revision := world.geometry().revision
+	var paid := world.damage_route_solid(&"crystal", Quantity.from_count(2), null, &"quake")
+	assert_not_null(paid)
+	if paid != null:
+		assert_false(paid.destroyed)
+		assert_eq(paid.neutral_cause, &"quake")
+		assert_eq(paid.remaining.native_at_scale(0), 3)
+	assert_eq(world.geometry().revision, start_revision)
+	var saved := world.checkpoint()
+	var reopened := WorldExploration.restore(saved, [&"host"])
+	assert_not_null(reopened)
+	if reopened == null:
+		return
+	var cause := CombatOrigin.new()
+	cause.owner = &"ironhide"
+	cause.activation = 1
+	cause.provenance = CombatOrigin.Provenance.SPAWN
+	cause.committed_at = CombatInstant.at_tick(3)
+	var destroyed := reopened.damage_route_solid(&"crystal", Quantity.from_count(200), cause)
+	assert_not_null(destroyed)
+	if destroyed == null:
+		return
+	assert_true(destroyed.destroyed)
+	assert_eq(destroyed.paid.native_at_scale(0), 3)
+	assert_eq(destroyed.origin.owner, &"ironhide")
+	assert_eq(destroyed.origin.provenance, CombatOrigin.Provenance.SPAWN)
+	assert_null(reopened.geometry().circle_center(&"crystal", 0))
+	assert_null(reopened.damage_route_solid(&"crystal", Quantity.from_count(200), cause))
+
+
+func test_phase_category_rejects_incompatible_shape_until_exposed() -> void:
+	var geometry := RealmGeometry.new(&"realm")
+	var start := RealmSweep.Point.new(0, 0)
+	var finish := RealmSweep.Point.new(10, 0)
+	assert_true(geometry.add_circle(&"burrower", 0, RealmSweep.Point.new(8, 0), 1.0, 4))
+	assert_true(geometry.certify_circle_sweep(&"realm", start, finish, 0.0, 2).contacts.is_empty())
+	assert_true(geometry.change_category(&"burrower", 0, 2))
+	assert_eq(geometry.certify_circle_sweep(&"realm", start, finish, 0.0, 2).contacts.size(), 1)
