@@ -3,6 +3,17 @@ extends GutTest
 const REALM := &"outer"
 const CATEGORY := 1
 
+class DeadlineClock:
+	var elapsed: int
+	var samples_before_expiry := -1
+
+	func sample() -> int:
+		if samples_before_expiry == 0:
+			elapsed = OrdinaryCurrency.MAX_AGE_USEC
+		elif samples_before_expiry > 0:
+			samples_before_expiry -= 1
+		return elapsed
+
 
 func test_simultaneous_lethal_roots_keep_both_commitments_with_reversed_arrival() -> void:
 	for reversed: bool in [false, true]:
@@ -330,6 +341,70 @@ func test_finite_immediate_chain_keeps_every_posting_under_different_slices() ->
 		assert_eq(_count(kernel.actor_snapshot(&"source").resources[&"chain"]), 0)
 		for index: int in result.hits.size():
 			assert_eq(result.hits[index].parent, index)
+
+
+func test_ordinary_deadline_parks_a_causal_cursor_and_a_completed_unpublished_wave() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var key := Crypto.new().generate_rsa(2048)
+	for has_child: bool in [false, true]:
+		var setup := RunSetup.new()
+		setup.run_id = &"storage-cursor"
+		setup.authority_id = &"hero"
+		setup.initial_realms = {&"hero": REALM}
+		setup.rules_revision = &"V42.6/R1"
+		setup.catalog_revision = &"fixture"
+		setup.challenge_id = &"normal"
+		setup.epoch = 1
+		var authority := RunAuthority.new()
+		assert_true(authority.start(setup, setup.authority_id))
+		var scratch := DirAccess.create_temp("agip-ordinary-cursor")
+		var store := ProfileStore.new()
+		assert_eq(store.open("hero", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+		var paired := ProfileGrant.Binding.new()
+		paired.run = String(setup.run_id)
+		paired.rules = String(setup.rules_revision)
+		paired.catalog = String(setup.catalog_revision)
+		paired.recipient = "hero"
+		paired.issuer = key
+		paired.recipient_key = key
+		var clock := DeadlineClock.new()
+		var earnings := OrdinaryCurrency.begin(store, paired, key, "currency/permanent", clock.sample)
+		assert_true(authority.attach_ordinary_currency(earnings))
+		assert_eq(earnings.accrue("older-enemy", Quantity.from_count(7)), OrdinaryCurrency.Eligibility.QUEUED)
+		assert_false(earnings.dispatch(true).is_empty())
+		var kernel := CombatKernel.new()
+		var hero := _actor(&"hero", 10)
+		if has_child:
+			hero.resources[&"charge"] = Quantity.from_count(1)
+			var rule := _reaction(&"paid", CombatFollowUp.Cause.PAID_HIT, 1)
+			rule.resource = &"charge"
+			rule.cost = Quantity.from_count(1)
+			hero.follow_ups.append(rule)
+		assert_true(kernel.add_actor(hero))
+		assert_true(kernel.add_actor(_actor(&"target", 10)))
+		assert_eq(_admit(kernel, kernel.commit(_attack(&"hero", 1, 1, 1)), &"target", 2),
+			CombatRootQueue.Result.ACCEPTED)
+		var through := CombatInstant.at_tick(3)
+		clock.elapsed = OrdinaryCurrency.MAX_AGE_USEC - 1
+		if has_child:
+			assert_eq(kernel.resolve_next(through, 1, authority).result, CombatKernel.Result.YIELDED)
+			clock.elapsed += 1
+		else:
+			# The deadline expires after the root wave and before its publication.
+			clock.samples_before_expiry = 2
+		var parked := kernel.resolve_next(through, 1, authority)
+		assert_eq(parked.result, CombatKernel.Result.STORAGE_WAIT)
+		assert_true(parked.hits.is_empty())
+		assert_eq(_count(kernel.actor_snapshot(&"target").hp.amount), 10)
+		assert_true(authority.flush_ordinary_currency())
+		var resumed := kernel.resolve_next(through, 1, authority)
+		assert_eq(resumed.result, CombatKernel.Result.CLOSED)
+		assert_eq(resumed.waves, 2 if has_child else 1)
+		assert_eq(resumed.hits.size(), 2 if has_child else 1)
+		assert_eq(_count(kernel.actor_snapshot(&"target").hp.amount), 8 if has_child else 9)
+		assert_eq(store.balance("currency/permanent").native_at_scale(0), 7)
+		assert_true(store.close())
 
 
 func test_status_claims_displacement_and_child_preparent_view_follow_the_group_order() -> void:

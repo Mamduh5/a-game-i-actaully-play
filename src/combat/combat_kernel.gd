@@ -2,7 +2,7 @@ class_name CombatKernel
 extends RefCounted
 ## Run-owned combat admission. All waves at one due instant publish together.
 
-enum Result { IDLE, WAITING, CLOSED, INTERRUPTED, YIELDED }
+enum Result { IDLE, WAITING, CLOSED, INTERRUPTED, YIELDED, STORAGE_WAIT }
 enum Terminal { ACTIVE, VICTORY, DEFEAT }
 enum BarrierEnd { EXPIRED, REPLACED, CLAMPED, DECAYED, REMOVED }
 enum BarrierAdjustment { CAP, DECAY, REMOVE }
@@ -461,18 +461,28 @@ func advance_survival(through: CombatInstant) -> WaveResult:
 	return draft.receipt
 
 
-func resolve_next(through: CombatInstant, wave_budget: int = 8) -> WaveResult:
+## A native earning owner can park a draft between waves or before publication.
+func resolve_next(through: CombatInstant, wave_budget: int = 8, authority: RunAuthority = null) -> WaveResult:
 	if not _fault.is_empty():
 		return _result(Result.INTERRUPTED)
 	if _group == null:
+		if authority != null and not authority.can_open_earning_group():
+			return _result(Result.STORAGE_WAIT)
 		var unavailable := _open_group(through)
 		if unavailable != null:
 			return unavailable
 	for step: int in maxi(1, wave_budget):
+		if authority != null and not authority.can_open_earning_group():
+			return _result(Result.STORAGE_WAIT)
+		# The previous slice can finish its last wave and park before publishing.
+		if _group.pending.is_empty() and _group.receipt.waves > 0:
+			return _publish_group()
 		var failure := _resolve_wave(_group)
 		if not failure.is_empty():
 			return _interrupt(failure)
 		if _group.pending.is_empty():
+			if authority != null and not authority.can_open_earning_group():
+				return _result(Result.STORAGE_WAIT)
 			return _publish_group()
 	return _result(Result.YIELDED)
 
