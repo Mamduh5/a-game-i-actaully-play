@@ -36,6 +36,7 @@ var revision: int:
 var _index: RealmSpatialIndex
 var _shapes: Dictionary[StringName, Shape] = {}
 var _revision := 0
+var _category_revisions: Dictionary[int, int] = {}
 
 
 func _init(id: StringName) -> void:
@@ -47,6 +48,7 @@ func fork() -> RealmGeometry:
 	var draft := RealmGeometry.new(realm_id)
 	draft._index = _index.fork()
 	draft._revision = _revision
+	draft._category_revisions = _category_revisions.duplicate()
 	for key: StringName in _shapes:
 		var original := _shapes[key]
 		var shape := Shape.new()
@@ -65,6 +67,20 @@ func adopt(draft: RealmGeometry) -> void:
 	_index = draft._index
 	_shapes = draft._shapes
 	_revision = draft._revision
+	_category_revisions = draft._category_revisions
+
+
+func compatible_revision(mask: int) -> int:
+	var last := 0
+	for category: int in _category_revisions:
+		if category & mask:
+			last = maxi(last, _category_revisions[category])
+	return last
+
+
+func _mark_changed(category: int) -> void:
+	_revision += 1
+	_category_revisions[category] = _revision
 
 
 func add_circle(entity: StringName, slot: int, center: RealmSweep.Point, radius: float,
@@ -79,7 +95,7 @@ func add_circle(entity: StringName, slot: int, center: RealmSweep.Point, radius:
 	shape.radius = radius
 	shape.category = category
 	_shapes[RealmSpatialIndex.shape_key(entity, slot)] = shape
-	_revision += 1
+	_mark_changed(category)
 	return true
 
 
@@ -98,7 +114,7 @@ func add_segment(entity: StringName, slot: int, edge: RealmOutline.Edge, categor
 	shape.category = category
 	shape.fixed = fixed
 	_shapes[RealmSpatialIndex.shape_key(entity, slot)] = shape
-	_revision += 1
+	_mark_changed(category)
 	return true
 
 
@@ -112,7 +128,7 @@ func commit_circle_pose(entity: StringName, slot: int, center: RealmSweep.Point)
 		return false
 	shape.center = RealmSweep.Point.new(center.x, center.y)
 	shape.motion_end = null
-	_revision += 1
+	_mark_changed(shape.category)
 	return true
 
 
@@ -126,7 +142,7 @@ func stage_circle_motion(entity: StringName, slot: int, finish: RealmSweep.Point
 	if not _index.move(entity, slot, bounds):
 		return false
 	shape.motion_end = RealmSweep.Point.new(finish.x, finish.y)
-	_revision += 1
+	_mark_changed(shape.category)
 	return true
 
 
@@ -141,7 +157,7 @@ func remove_mutable(entity: StringName, slot: int) -> bool:
 	if shape == null or shape.fixed or not _index.remove(entity, slot):
 		return false
 	_shapes.erase(key)
-	_revision += 1
+	_mark_changed(shape.category)
 	return true
 
 
@@ -150,6 +166,11 @@ func circle_center(entity: StringName, slot: int) -> RealmSweep.Point:
 	if shape == null or shape.center == null:
 		return null
 	return RealmSweep.Point.new(shape.center.x, shape.center.y)
+
+
+func circle_radius(entity: StringName, slot: int) -> float:
+	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
+	return shape.radius if shape != null and shape.center != null else -1.0
 
 
 ## Vector from the given mover center toward the blocker at contact. The
@@ -183,6 +204,17 @@ func certify_circle_sweep(realm: StringName, start: RealmSweep.Point, finish: Re
 	return _sweep(realm, start, finish, radius, compatible, except_entity, RealmCircleTime.new(), false)
 
 
+## A stationary area pulse samples settled positions at its due instant.
+func certify_circle_snapshot(realm: StringName, center: RealmSweep.Point, radius: float,
+		compatible: int, except_entity: StringName = &"") -> SweepCandidates:
+	return certify_frozen_path(realm, center, center, radius, compatible, except_entity)
+
+
+func certify_frozen_path(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
+		compatible: int, except_entity: StringName = &"") -> SweepCandidates:
+	return _sweep(realm, start, finish, radius, compatible, except_entity, RealmCircleTime.new(), true)
+
+
 ## Commit forced motion against the current geometry revision. A null draft
 ## leaves every pose unchanged. Positive-time blockers retain their proofs.
 func displace_circle(entity: StringName, slot: int, requested: RealmSweep.Point, blockers: int) -> Displacement:
@@ -191,7 +223,7 @@ func displace_circle(entity: StringName, slot: int, requested: RealmSweep.Point,
 		return null
 	var start := mover.center
 	var certifier := RealmCircleTime.new()
-	var path := _sweep(realm_id, start, requested, mover.radius, blockers, entity, certifier, true)
+	var path := _sweep(realm_id, start, requested, mover.radius, blockers, entity, certifier, true, true)
 	if path == null or not path.unresolved.is_empty():
 		return null
 	var result := Displacement.new()
@@ -253,7 +285,7 @@ func _verify_clipped_pose(start: RealmSweep.Point, requested: RealmSweep.Point, 
 		var point := RealmSweep.Point.new(lerpf(start.x, requested.x, limit), lerpf(start.y, requested.y, limit))
 		if point.x == start.x and point.y == start.y:
 			return point
-		var prefix := _sweep(realm_id, start, point, radius, blockers, entity, certifier, true)
+		var prefix := _sweep(realm_id, start, point, radius, blockers, entity, certifier, true, true)
 		if prefix != null and prefix.contacts.is_empty() and prefix.unresolved.is_empty():
 			return point
 		retreat *= 2.0
@@ -261,7 +293,8 @@ func _verify_clipped_pose(start: RealmSweep.Point, requested: RealmSweep.Point, 
 
 
 func _sweep(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
-		compatible: int, except_entity: StringName, certifier: RealmCircleTime, frozen_blockers: bool) -> SweepCandidates:
+		compatible: int, except_entity: StringName, certifier: RealmCircleTime, frozen_blockers: bool,
+		allow_departure: bool = false) -> SweepCandidates:
 	if realm != realm_id or start == null or finish == null or compatible <= 0:
 		return null
 	var broad := _index.query(RealmBounds.from_sweep(start.x, start.y, finish.x, finish.y, radius))
@@ -287,7 +320,7 @@ func _sweep(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point
 			time = RealmSweep.circle_segment(start, finish, radius, shape.edge.first, shape.edge.last)
 		if proof != null:
 			time = RealmSweep.MISS if proof.outcome == RealmCircleTime.Result.MISS else proof.earliest
-			if frozen_blockers and proof.outcome == RealmCircleTime.Result.HIT and proof.latest == 0.0:
+			if allow_departure and proof.outcome == RealmCircleTime.Result.HIT and proof.latest == 0.0:
 				var departs := certifier.departs_circle(start, finish, shape.center) if shape.edge == null else (
 					certifier.departs_segment(start, finish, shape.edge.first, shape.edge.last))
 				if departs:

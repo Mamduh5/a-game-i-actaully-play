@@ -143,7 +143,11 @@ func test_route_geometry_recertifies_the_shortcut_after_opening() -> void:
 	var ends: Array[StringName] = layout.manifest()["shortcut"]
 	var before := world.physical_route(ends[0], ends[1])
 	assert_gt(before.size(), 1)
+	var blocker_revision := world.geometry().compatible_revision(WorldExploration.BLOCKER)
+	assert_true(world.geometry().add_circle(&"host", 0, layout.center(ends[0]), 14.0, 2))
+	assert_eq(world.geometry().compatible_revision(WorldExploration.BLOCKER), blocker_revision)
 	assert_true(world.open_shortcut())
+	assert_gt(world.geometry().compatible_revision(WorldExploration.BLOCKER), blocker_revision)
 	var after := world.physical_route(ends[0], ends[1])
 	assert_gt(after.size(), 1)
 	assert_lt(after.size(), before.size())
@@ -325,3 +329,73 @@ func test_world_push_reports_one_impact_until_the_solid_leaves_the_wall() -> voi
 		if struck_again.impacts.size() == 1:
 			assert_null(struck_again.impacts[0].impact.primary)
 			assert_eq(struck_again.impacts[0].impact.neutral_cause, &"fall")
+
+
+func test_shortcut_interaction_uses_committed_pose_reach_and_clear_sight() -> void:
+	var layout := WorldTopology.generate(193)
+	var world := WorldExploration.create(layout, [&"host"])
+	var ends: Array[StringName] = layout.manifest()["shortcut"]
+	var first := layout.center(ends[0])
+	var last := layout.center(ends[1])
+	var actor := &"host"
+	var realm := layout.realm
+	assert_true(world.geometry().add_circle(actor, 0, first, 14.0, 2))
+	var press := PlayerCommand.new(PlayerCommand.INTERACT)
+	assert_false(world.interact_shortcut(press, realm, actor, 0, 30.0))
+	var near := RealmSweep.Point.new(lerpf(first.x, last.x, 0.40625), lerpf(first.y, last.y, 0.40625))
+	var shield := RealmSweep.Point.new(lerpf(first.x, last.x, 0.453125), lerpf(first.y, last.y, 0.453125))
+	assert_true(world.geometry().commit_circle_pose(actor, 0, near))
+	assert_false(world.interact_shortcut(PlayerCommand.new(PlayerCommand.MANUAL), realm, actor, 0, 30.0))
+	assert_true(world.place_route_solid(&"shield", shield, 4.0))
+	assert_false(world.interact_shortcut(press, realm, actor, 0, 30.0))
+	assert_true(world.remove_route_solid(&"shield"))
+	assert_false(world.interact_shortcut(press, &"unrelated", actor, 0, 30.0))
+	assert_true(world.interact_shortcut(press, realm, actor, 0, 30.0))
+	assert_false(world.interact_shortcut(press, realm, actor, 0, 30.0))
+	assert_eq(_contacts(world, first, last), 0)
+
+
+func test_pressure_warning_samples_real_occupants_and_preserves_faction_or_neutral_cause() -> void:
+	var layout := WorldTopology.generate_optional(7, &"silent_garden")
+	var world := WorldExploration.create(layout, [&"host"])
+	var geometry := world.geometry()
+	var center := layout.center(WorldTopology.ENTRY)
+	var plate := RealmSweep.Point.new(center.x - 60.0, center.y)
+	var hazard := WorldPressureHazard.create(layout.realm, &"pressure", plate, 10.0, center, 20.0, 3, 2.0, 2)
+	assert_not_null(hazard)
+	assert_true(geometry.add_circle(&"stone", 0, plate, 5.0, 4))
+	assert_true(geometry.add_circle(&"creature", 0, center, 14.0, 2))
+	assert_true(geometry.add_circle(&"protected", 0, center, 14.0, 4))
+	assert_true(geometry.add_circle(&"incoming", 0, plate, 5.0, 2))
+	assert_true(geometry.stage_circle_motion(&"incoming", 0, center))
+	var occupant := WorldPressureHazard.Occupant.new()
+	occupant.actor = &"stone"
+	occupant.weight = 3.0
+	occupant.cause = CombatOrigin.new()
+	occupant.cause.provenance = CombatOrigin.Provenance.SPAWN
+	occupant.cause.owner = &"ironhide"
+	occupant.cause.activation = 1
+	occupant.cause.committed_at = CombatInstant.at_tick(1)
+	assert_eq(hazard.sample(geometry, CombatInstant.at_tick(1), [occupant]), WorldPressureHazard.SampleResult.WARNED)
+	var warning := hazard.warning_snapshot()
+	assert_eq(warning.due.tick, 4)
+	assert_false(world.can_escape_warning(warning, &"creature", 0, 10.0))
+	assert_true(world.can_escape_warning(warning, &"creature", 0, 60.0))
+	assert_null(hazard.take_strike(geometry, CombatInstant.at_tick(3)))
+	assert_false(hazard.warning_snapshot().cause.owner.is_empty())
+	var strike := hazard.take_strike(geometry, CombatInstant.at_tick(4))
+	assert_not_null(strike)
+	if strike == null:
+		return
+	assert_eq(strike.warning.cause.owner, &"ironhide")
+	assert_eq(strike.warning.cause.provenance, CombatOrigin.Provenance.SPAWN)
+	assert_eq(strike.contacts.size(), 1)
+	if strike.contacts.size() == 1:
+		assert_eq(strike.contacts[0].entity, &"creature")
+	assert_null(hazard.take_strike(geometry, CombatInstant.at_tick(4)))
+	assert_eq(hazard.sample(geometry, CombatInstant.at_tick(4), [occupant]), WorldPressureHazard.SampleResult.UNCHANGED)
+	assert_eq(hazard.sample(geometry, CombatInstant.at_tick(5), []), WorldPressureHazard.SampleResult.UNCHANGED)
+	occupant.cause = null
+	assert_eq(hazard.sample(geometry, CombatInstant.at_tick(6), [occupant]), WorldPressureHazard.SampleResult.WARNED)
+	assert_null(hazard.warning_snapshot().cause)
+	assert_eq(hazard.sample(geometry, CombatInstant.at_tick(6), []), WorldPressureHazard.SampleResult.INVALID)

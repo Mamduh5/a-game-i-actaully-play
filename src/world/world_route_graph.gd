@@ -62,7 +62,7 @@ static func create(layout: WorldTopology, geometry: RealmGeometry, mask: int, ra
 func route(geometry: RealmGeometry, origin: StringName, destination: StringName) -> Array[RealmSweep.Point]:
 	if geometry == null or geometry.realm_id != _realm or not _centers.has(origin) or not _centers.has(destination):
 		return []
-	if _revision != geometry.revision:
+	if _revision != geometry.compatible_revision(_mask):
 		_refresh(geometry)
 	var start := _centers[origin]
 	var finish := _centers[destination]
@@ -85,13 +85,56 @@ func reserve_approach(geometry: RealmGeometry, id: StringName, point: RealmSweep
 	if (geometry == null or geometry.realm_id != _realm or id.is_empty() or point == null
 			or not is_finite(point.x) or not is_finite(point.y) or absf(point.x) > 1000000 or absf(point.y) > 1000000):
 		return false
-	if _revision != geometry.revision:
+	if _revision != geometry.compatible_revision(_mask):
 		_refresh(geometry)
 	var reached := _flood(_centers[_critical[0]], _clear)
 	if not _approachable(geometry, reached, point):
 		return false
 	_approaches[id] = RealmSweep.Point.new(point.x, point.y)
 	return true
+
+
+## Check an escape using a distance budget from the run's voluntary speed
+## and warning duration. The actor's entire footprint must clear the hazard.
+func can_escape(geometry: RealmGeometry, origin: RealmSweep.Point, center: RealmSweep.Point,
+		radius: float, travel_budget: float) -> bool:
+	if (geometry == null or geometry.realm_id != _realm or not _local_point(origin) or not _local_point(center)
+			or not is_finite(radius) or radius <= 0.0 or not is_finite(travel_budget) or travel_budget < 0.0):
+		return false
+	if _distance(origin, center) > radius + _radius:
+		return true
+	if _revision != geometry.compatible_revision(_mask):
+		_refresh(geometry)
+	var distances: Dictionary[Vector2i, float] = {}
+	var queue: Array[Vector2i] = []
+	var base := _module_base(origin)
+	for y: int in range(1, CELLS_PER_MODULE):
+		for x: int in range(1, CELLS_PER_MODULE):
+			var cell := base + Vector2i(x, y)
+			var point: RealmSweep.Point = _points.get(cell)
+			if point == null:
+				continue
+			var distance := _distance(origin, point)
+			if distance <= travel_budget and _sweep_clear(geometry, origin, point):
+				distances[cell] = distance
+				queue.append(cell)
+	var cursor := 0
+	while cursor < queue.size():
+		var cell := queue[cursor]
+		cursor += 1
+		var point := _points[cell]
+		if _distance(point, center) > radius + _radius:
+			return true
+		for index: int in _outgoing[cell]:
+			if not _clear[index]:
+				continue
+			var link := _links[index]
+			var other := link.finish if link.start == cell else link.start
+			var distance := distances[cell] + _distance(point, _points[other])
+			if distance <= travel_budget and distance < float(distances.get(other, INF)):
+				distances[other] = distance
+				queue.append(other)
+	return false
 
 
 func release_approach(id: StringName) -> bool:
@@ -101,7 +144,7 @@ func release_approach(id: StringName) -> bool:
 ## Keep a certified route throughout the swept motion. The swept footprint
 ## grows monotonically with the prefix, so refinement can only shorten it.
 func limit_motion(geometry: RealmGeometry, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float) -> RealmSweep.Point:
-	if _revision != geometry.revision:
+	if _revision != geometry.compatible_revision(_mask):
 		_refresh(geometry)
 	var full := RealmBounds.from_sweep(start.x, start.y, finish.x, finish.y, radius)
 	if full == null:
@@ -150,7 +193,7 @@ func settle(geometry: RealmGeometry, draft: RealmGeometry, footprint: RealmBound
 	if (geometry == null or draft == null or footprint == null or geometry.realm_id != _realm
 			or draft.realm_id != _realm or draft.revision <= geometry.revision):
 		return false
-	if _revision != geometry.revision:
+	if _revision != geometry.compatible_revision(_mask):
 		_refresh(geometry)
 	var clear := _clear.duplicate()
 	for index: int in _links.size():
@@ -161,7 +204,7 @@ func settle(geometry: RealmGeometry, draft: RealmGeometry, footprint: RealmBound
 		return false
 	geometry.adopt(draft)
 	_clear = clear
-	_revision = geometry.revision
+	_revision = geometry.compatible_revision(_mask)
 	return true
 
 
@@ -204,11 +247,11 @@ func _refresh(geometry: RealmGeometry) -> void:
 	for index: int in _links.size():
 		var link := _links[index]
 		_clear[index] = _sweep_clear(geometry, _points[link.start], _points[link.finish])
-	_revision = geometry.revision
+	_revision = geometry.compatible_revision(_mask)
 
 
 func _sweep_clear(geometry: RealmGeometry, start: RealmSweep.Point, finish: RealmSweep.Point) -> bool:
-	var proof := geometry.certify_circle_sweep(_realm, start, finish, _radius, _mask)
+	var proof := geometry.certify_frozen_path(_realm, start, finish, _radius, _mask)
 	return proof != null and proof.unresolved.is_empty() and proof.contacts.is_empty()
 
 
@@ -225,8 +268,7 @@ func _connected(geometry: RealmGeometry, clear: Dictionary[int, bool], motion: M
 
 func _approachable(geometry: RealmGeometry, reached: Dictionary[Vector2i, Vector2i],
 		point: RealmSweep.Point, motion: Motion = null) -> bool:
-	var tile := Vector2i(floori(point.x / WorldTopology.MODULE_SIZE), floori(point.y / WorldTopology.MODULE_SIZE))
-	var base := tile * CELLS_PER_MODULE
+	var base := _module_base(point)
 	for y: int in range(1, CELLS_PER_MODULE):
 		for x: int in range(1, CELLS_PER_MODULE):
 			var cell := base + Vector2i(x, y)
@@ -257,3 +299,19 @@ func _flood(start: Vector2i, clear: Dictionary[int, bool], finish: Vector2i = Ve
 func _point_copy(cell: Vector2i) -> RealmSweep.Point:
 	var point := _points[cell]
 	return RealmSweep.Point.new(point.x, point.y)
+
+
+static func _module_base(point: RealmSweep.Point) -> Vector2i:
+	return Vector2i(floori(point.x / WorldTopology.MODULE_SIZE),
+		floori(point.y / WorldTopology.MODULE_SIZE)) * CELLS_PER_MODULE
+
+
+static func _local_point(point: RealmSweep.Point) -> bool:
+	return (point != null and is_finite(point.x) and is_finite(point.y)
+		and absf(point.x) <= 1000000.0 and absf(point.y) <= 1000000.0)
+
+
+static func _distance(first: RealmSweep.Point, last: RealmSweep.Point) -> float:
+	var dx := last.x - first.x
+	var dy := last.y - first.y
+	return sqrt(dx * dx + dy * dy)

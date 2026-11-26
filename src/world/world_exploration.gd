@@ -86,6 +86,12 @@ func release_route_approach(id: StringName) -> bool:
 	return _routes != null and _routes.release_approach(id)
 
 
+func can_escape_warning(warning: WorldPressureHazard.Warning, actor: StringName, slot: int,
+		travel_budget: float) -> bool:
+	return (warning != null and _ensure_routes() and _routes.can_escape(_geometry,
+		_geometry.circle_center(actor, slot), warning.center, warning.radius, travel_budget))
+
+
 ## A gameplay placement owns its footprint; ordinary actor shapes do not
 ## participate unless included in the realm's navigation blocker mask.
 func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float) -> bool:
@@ -96,7 +102,7 @@ func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float) 
 	var cell := Vector2i(floori(center.x / WorldTopology.MODULE_SIZE), floori(center.y / WorldTopology.MODULE_SIZE))
 	if not _layout.contains_cell(cell):
 		return false
-	var placement := _geometry.certify_circle_sweep(_layout.realm, center, center, radius, BLOCKER)
+	var placement := _geometry.certify_circle_snapshot(_layout.realm, center, radius, BLOCKER)
 	if placement == null or not placement.contacts.is_empty() or not placement.unresolved.is_empty():
 		return false
 	var footprint := RealmBounds.from_sweep(center.x, center.y, center.x, center.y, radius)
@@ -161,7 +167,7 @@ func push_route_solid(id: StringName, momentum: WorldMomentum, seconds: float,
 	var velocity := momentum.velocity()
 	if start == null or velocity == null:
 		return null
-	var probe := _geometry.certify_circle_sweep(_layout.realm, start, start,
+	var probe := _geometry.certify_circle_snapshot(_layout.realm, start,
 		_route_solids[id] + separation_distance, BLOCKER, id)
 	if probe == null:
 		return null
@@ -198,6 +204,32 @@ func open_shortcut() -> bool:
 		return false
 	_shortcut_open = true
 	return true
+
+
+## Gameplay uses the admitted interact command and the actor's settled pose.
+## The caller owns liveness and input authorization.
+func interact_shortcut(command: PlayerCommand, realm: StringName, actor: StringName, slot: int, reach: float) -> bool:
+	if (_shortcut_open or command == null or not command.valid() or command.action != PlayerCommand.INTERACT
+			or realm != _layout.realm or not is_finite(reach) or reach <= 0.0):
+		return false
+	var ends: Array[StringName] = _layout.manifest()["shortcut"]
+	var start := _geometry.circle_center(actor, slot)
+	if start == null or ends.size() != 2:
+		return false
+	var first := _layout.center(ends[0])
+	var last := _layout.center(ends[1])
+	var handle := RealmSweep.Point.new((first.x + last.x) * 0.5, (first.y + last.y) * 0.5)
+	var dx := handle.x - start.x
+	var dy := handle.y - start.y
+	if dx * dx + dy * dy > reach * reach:
+		return false
+	var sight := _geometry.certify_frozen_path(realm, start, handle, 0.0, BLOCKER, actor)
+	if sight == null or not sight.unresolved.is_empty():
+		return false
+	for contact: RealmGeometry.Contact in sight.contacts:
+		if contact.entity != WorldTopology.SHORTCUT_DOOR:
+			return false
+	return open_shortcut()
 
 
 func checkpoint() -> Dictionary:
