@@ -5,9 +5,24 @@ extends Node
 const Currency := "currency/permanent"
 const Commit := ProfileStore.CommitResult
 
+class FixtureClock:
+	var elapsed: int
+
+	func sample() -> int:
+		return elapsed
+
 class FaultStore extends ProfileStore:
 	var point: String
 	var marker: String
+
+	func page_limit() -> int:
+		return int(_value(_db, "PRAGMA max_page_count", "max_page_count"))
+
+	func writable_pages() -> int:
+		return int(_value(_db, "PRAGMA page_count", "page_count"))
+
+	func set_page_limit(pages: int) -> bool:
+		return pages > 0 and _value(_db, "PRAGMA max_page_count=%d" % pages, "max_page_count") == pages
 
 	func _commit_io() -> bool:
 		if point == "before":
@@ -50,22 +65,29 @@ func _ready() -> void:
 	binding.recipient = "bob"
 	binding.issuer = issuer_public
 	binding.recipient_key = recipient_public
-	var solo := role in ["solo-issue", "inspect-solo"]
-	if solo:
-		binding.recipient = "solo"
+	var local := ""
+	if role in ["solo-issue", "inspect-solo"]:
+		local = "solo"
+	elif role in ["ordinary-write", "inspect-ordinary"]:
+		local = "ordinary"
+	elif role == "ordinary-full":
+		local = "capacity"
+	if not local.is_empty():
+		binding.recipient = local
 		binding.recipient_key = issuer_public
 	var issuer_role := role in ["issue", "inspect-issuer", "courier", "ack"]
 	var store := FaultStore.new()
 	store.point = args[2] if args.size() == 3 else ""
 	store.marker = root.path_join("boundary")
-	var profile := "solo" if solo else ("alice" if issuer_role else "bob")
+	var profile := local if not local.is_empty() else ("alice" if issuer_role else "bob")
 	if store.open(profile, root.path_join("profiles")) != ProfileStore.OpenResult.OPENED:
 		_finish(false, {})
 		return
 	var result: Dictionary
 	match role:
 		"issue", "solo-issue": result = _issue(store, root, binding)
-		"inspect-issuer", "inspect-recipient", "inspect-solo":
+		"ordinary-write", "ordinary-full": result = _ordinary(store, root, binding, role == "ordinary-full")
+		"inspect-issuer", "inspect-recipient", "inspect-solo", "inspect-ordinary":
 			var frontier := store.frontier(binding.run)
 			result = {"pending": store.pending_grants().size(),
 				"generation": store.checkpoint()["generation"], "tick": frontier.get("tick", -1),
@@ -87,6 +109,42 @@ func _ready() -> void:
 			if acked.status in [Commit.COMMITTED, Commit.DUPLICATE]:
 				result = {"status": acked.status, "pending": store.pending_grants().size()}
 	_finish(store.close() and not result.is_empty(), result)
+
+
+static func _ordinary(store: FaultStore, root: String, binding: ProfileGrant.Binding, pressure: bool) -> Dictionary:
+	var key := CryptoKey.new()
+	if key.load(root.path_join("issuer.key")) != OK:
+		return {}
+	var clock := FixtureClock.new()
+	var earnings := OrdinaryCurrency.begin(store, binding, key, Currency, clock.sample)
+	if earnings == null:
+		return {}
+	var limit := store.page_limit()
+	if pressure and not store.set_page_limit(store.writable_pages()):
+		return {}
+	for index: int in range(OrdinaryCurrency.MAX_BATCH if pressure else 2):
+		if earnings.accrue("enemy/%d" % index, Quantity.from_count(index + 1)) != OrdinaryCurrency.Eligibility.QUEUED:
+			return {}
+	var operation := earnings.dispatch(true)
+	if operation.is_empty():
+		var replayed := earnings.flush()
+		return {"balance": store.balance(Currency).native_at_scale(0), "already_issued": replayed}
+	var posted := earnings.write_batch(operation)
+	if pressure:
+		clock.elapsed = OrdinaryCurrency.MAX_AGE_USEC
+		if (posted.status != Commit.UNAVAILABLE or earnings.confirm_batch(operation).status != Commit.MISSING
+				or earnings.can_earn() or earnings.oldest_eligible_usec() != 0
+				or store.balance(Currency).native_at_scale(0) != 0):
+			return {}
+		if not store.set_page_limit(limit):
+			return {}
+		clock.elapsed += 250_000
+	elif posted.status != Commit.COMMITTED:
+		return {}
+	var settled := earnings.flush()
+	return {"balance": store.balance(Currency).native_at_scale(0), "settled": settled,
+		"generation": store.checkpoint()["generation"], "fault_usec": earnings.fault_elapsed_usec(),
+		"fenced": not earnings.can_earn(), "same_operation": store.lookup(operation).status == Commit.COMMITTED}
 
 
 static func _issue(store: ProfileStore, root: String, binding: ProfileGrant.Binding) -> Dictionary:

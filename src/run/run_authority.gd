@@ -20,6 +20,7 @@ var _overflowed: Dictionary[StringName, bool] = {}
 var _random: RunRandom
 var _closed_tick: int
 var _observation: Dictionary = {}
+var _ordinary_currency: Array[OrdinaryCurrency] = []
 
 
 func start(setup: RunSetup, local_authority_id: StringName) -> bool:
@@ -31,6 +32,41 @@ func start(setup: RunSetup, local_authority_id: StringName) -> bool:
 
 func next_tick() -> int:
 	return _closed_tick + 1
+
+
+func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
+	if (_identity.is_empty() or earnings == null
+			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])):
+		return false
+	for existing: OrdinaryCurrency in _ordinary_currency:
+		if existing.recipient() == earnings.recipient() and existing.account() == earnings.account():
+			return false
+	_ordinary_currency.append(earnings)
+	return true
+
+
+## Also used by the group owner before opening an earning boundary within a tick.
+func can_open_earning_group() -> bool:
+	var permitted := true
+	for earnings: OrdinaryCurrency in _ordinary_currency:
+		if not earnings.can_earn():
+			permitted = false
+	return permitted
+
+
+## An empty recipient flushes the run. A purchase or personal settlement
+## can require the recipient's own pending earnings before it commits.
+func flush_ordinary_currency(recipient: String = "") -> bool:
+	var settled := true
+	for earnings: OrdinaryCurrency in _ordinary_currency:
+		if (recipient.is_empty() or earnings.recipient() == recipient) and not earnings.flush():
+			settled = false
+	return settled
+
+
+func service_ordinary_currency() -> void:
+	for earnings: OrdinaryCurrency in _ordinary_currency:
+		earnings.service()
 
 
 ## The binding is supplied by the adapter. The intent alone cannot nominate its sender.
@@ -73,7 +109,7 @@ func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
 
 ## Called by the authoritative fixed-step driver. No signals or view callbacks run here.
 func close_tick() -> bool:
-	if _identity.is_empty() or _closed_tick >= MAX_TICK:
+	if _identity.is_empty() or _closed_tick >= MAX_TICK or not can_open_earning_group():
 		return false
 	var accepted: Array[RunIntent] = []
 	var conflicts: Array[Dictionary] = []

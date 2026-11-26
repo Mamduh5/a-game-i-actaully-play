@@ -207,6 +207,17 @@ func lookup(operation: String) -> Receipt:
 	return result
 
 
+func lookup_claim(claim: String) -> Receipt:
+	if not ProfileMutation.valid_id(claim):
+		return _receipt(CommitResult.INVALID, "")
+	if not _available():
+		return _receipt(CommitResult.UNAVAILABLE, "")
+	var row: Variant = _select_one(_db, "SELECT operation FROM claims WHERE claim=?", [claim])
+	if row == null:
+		return _receipt(CommitResult.UNAVAILABLE, "")
+	return _receipt(CommitResult.MISSING, "") if row.is_empty() else _lookup(_db, row.operation)
+
+
 func commit(mutation: ProfileMutation) -> Receipt:
 	var id := mutation.id if mutation != null else ""
 	if not _available():
@@ -255,7 +266,7 @@ func _commit_io() -> bool:
 
 
 func _rollback(result: Receipt) -> Receipt:
-	if _query(_db, "ROLLBACK"):
+	if bool(_db.call(&"get_autocommit")) or _query(_db, "ROLLBACK"):
 		return result
 	_pending_operation = result.id
 	return _receipt(CommitResult.UNKNOWN, result.id)

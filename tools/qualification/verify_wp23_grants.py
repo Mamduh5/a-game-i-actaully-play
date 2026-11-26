@@ -1,4 +1,4 @@
-"""Kill separate native development processes around important grant commits."""
+"""Exercise grant commit deaths and bounded ordinary-currency capacity failure."""
 
 import argparse
 import json
@@ -19,7 +19,7 @@ def exercise(exe, evidence, root):
         args = [exe, "--headless", "--log-file", log, "--", role, str(root), *extras]
         return subprocess.Popen(args, env=env, creationflags=subprocess.CREATE_NO_WINDOW), log
 
-    def run(label, role):
+    def run(label, role, full=False):
         child, log = start(label, role)
         try:
             assert child.wait(timeout=12) == 0, label
@@ -28,7 +28,11 @@ def exercise(exe, evidence, root):
                 child.kill()
                 child.wait(timeout=4)
         output = log.read_text(encoding="utf-8")
-        assert "ERROR:" not in output, label
+        errors = [line for line in output.splitlines() if "ERROR:" in line]
+        if full:
+            assert len(errors) == 1 and "database or disk is full" in errors[0], (label, errors)
+        else:
+            assert not errors, (label, errors)
         line = next(text for text in output.splitlines() if text.startswith("WP23_GRANT "))
         result = json.loads(line.removeprefix("WP23_GRANT "))
         assert result.pop("passed"), label
@@ -68,6 +72,12 @@ def exercise(exe, evidence, root):
         label = f"solo-{boundary}"
         results[label] = run(label, "inspect-solo")
     results["solo_replay"] = run("solo-replay", "solo-issue")
+    for boundary in ("before", "after"):
+        interrupt("ordinary-write", boundary)
+        label = f"ordinary-{boundary}"
+        results[label] = run(label, "inspect-ordinary")
+    results["ordinary_replay"] = run("ordinary-replay", "ordinary-write")
+    results["ordinary_full"] = run("ordinary-full", "ordinary-full", full=True)
     assert results["issue-before"] == {"pending": 0, "generation": 0, "tick": -1, "balance": 0}
     assert results["issue-after"] == {"pending": 1, "generation": 1, "tick": 4, "balance": 0}
     assert results["courier"] == {"pending": 1}
@@ -80,6 +90,11 @@ def exercise(exe, evidence, root):
     assert results["solo-before"] == {"pending": 0, "generation": 0, "tick": -1, "balance": 0}
     assert results["solo-after"] == {"pending": 0, "generation": 1, "tick": 4, "balance": 17}
     assert results["solo_replay"] == {"status": 1}
+    assert results["ordinary-before"] == {"pending": 0, "generation": 0, "tick": -1, "balance": 0}
+    assert results["ordinary-after"] == {"pending": 0, "generation": 1, "tick": -1, "balance": 3}
+    assert results["ordinary_replay"] == {"already_issued": True, "balance": 3}
+    assert results["ordinary_full"] == {"balance": 528, "settled": True, "generation": 1,
+                                       "fault_usec": 250000, "fenced": False, "same_operation": True}
     return results
 
 
