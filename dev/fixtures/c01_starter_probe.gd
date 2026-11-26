@@ -33,7 +33,9 @@ class Rules extends RunAuthority:
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
 		var hero := StarterCombatRules.CONDUCTOR if which.begins_with("conductor") else StarterCombatRules.UNDYING
-		var runes: Array[StringName] = [&"R02", &"R03"] if which == "storm-relay" else [&"", &""]
+		var runes: Array[StringName] = [&"", &""]
+		if which == "storm-relay":
+			runes.assign([&"R02", &"R03"])
 		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, {})
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
@@ -216,6 +218,7 @@ var _reduced: bool
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.is_empty() or not _rules.initialize(args[0]):
+		set_physics_process(false)
 		get_tree().quit(1)
 		return
 	_case = args[0]
