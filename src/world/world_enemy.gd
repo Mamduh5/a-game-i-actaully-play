@@ -118,9 +118,13 @@ func decide(kernel: CombatKernel, room: WorldExploration, settled: Dictionary[St
 	return geometry.displace_circle(_id, 0, end, blockers) != null
 
 
+func release_due(tick: int) -> bool:
+	return _attack != null and _attack.due <= tick
+
+
 func release(geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
 		tick: int, blockers: int, targets: int) -> bool:
-	if _attack == null or _attack.due > tick:
+	if not release_due(tick):
 		return true
 	var held := _attack
 	var clear := _unobstructed(geometry, held.origin, held.center, blockers)

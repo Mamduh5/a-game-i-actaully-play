@@ -128,13 +128,17 @@ func advance(tick: int, authority: RunAuthority = null) -> Frame:
 		_spawn_due(tick)
 		var likeness := _subjects()
 		var ids := _sorted(_enemies.keys())
+		var due: Array[StringName] = []
 		for id: StringName in ids:
 			var place: WorldEnemy.Subject = likeness.get(id)
 			if place == null or not _enemies[id].decide(_kernel, _realms[place.realm], likeness, tick):
 				_fault = &"world_decision"
 				return null
-		likeness = _subjects()
-		for id: StringName in ids:
+			if _enemies[id].release_due(tick):
+				due.append(id)
+		if not due.is_empty():
+			likeness = _subjects()
+		for id: StringName in due:
 			var place: WorldEnemy.Subject = likeness.get(id)
 			if place == null or not _enemies[id].release(_realms[place.realm].geometry(),
 					likeness, tick, WorldExploration.BLOCKER, ACTORS):
