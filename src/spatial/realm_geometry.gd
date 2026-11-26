@@ -152,6 +152,25 @@ func circle_center(entity: StringName, slot: int) -> RealmSweep.Point:
 	return RealmSweep.Point.new(shape.center.x, shape.center.y)
 
 
+## Vector from the given mover center toward the blocker at contact. The
+## receiver normalizes it after ruling out a degenerate overlap.
+func blocker_direction(entity: StringName, slot: int, mover: RealmSweep.Point) -> RealmSweep.Point:
+	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
+	if shape == null or mover == null:
+		return null
+	if shape.edge == null:
+		return RealmSweep.Point.new(shape.center.x - mover.x, shape.center.y - mover.y)
+	var first := shape.edge.first
+	var last := shape.edge.last
+	var dx := last.x - first.x
+	var dy := last.y - first.y
+	var norm := dx * dx + dy * dy
+	var nearest := 0.0
+	if norm > 0.0:
+		nearest = clampf(((mover.x - first.x) * dx + (mover.y - first.y) * dy) / norm, 0.0, 1.0)
+	return RealmSweep.Point.new(first.x + dx * nearest - mover.x, first.y + dy * nearest - mover.y)
+
+
 func sweep_circle(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
 		compatible: int, except_entity: StringName = &"") -> SweepCandidates:
 	return _sweep(realm, start, finish, radius, compatible, except_entity, null, false)

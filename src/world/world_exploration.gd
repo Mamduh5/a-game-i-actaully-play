@@ -9,6 +9,11 @@ const STARTER_RADIUS := 14.0
 class SolidMotion:
 	var motion: RealmGeometry.Displacement
 	var route_limited: bool
+	var impacts: Array[SolidImpact] = []
+
+class SolidImpact:
+	var contact: RealmGeometry.Contact
+	var impact: WorldMomentum.Impact
 
 var _layout: WorldTopology
 var _geometry: RealmGeometry
@@ -141,6 +146,43 @@ func move_route_solid(id: StringName, requested: RealmSweep.Point) -> SolidMotio
 			return null
 	displaced.revision = _geometry.revision
 	return result
+
+
+## Advance authored momentum through the normal clearance and physical
+## collision path. A positive separation distance defines a new episode.
+func push_route_solid(id: StringName, momentum: WorldMomentum, seconds: float,
+		minimum_approach: float, separation_distance: float,
+		recipients: Dictionary[StringName, WorldMomentum] = {}) -> SolidMotion:
+	if (not _route_solids.has(id) or momentum == null or not is_finite(seconds) or seconds <= 0.0
+			or not is_finite(minimum_approach) or minimum_approach <= 0.0
+			or not is_finite(separation_distance) or separation_distance <= 0.0):
+		return null
+	var start := _geometry.circle_center(id, 0)
+	var velocity := momentum.velocity()
+	if start == null or velocity == null:
+		return null
+	var probe := _geometry.certify_circle_sweep(_layout.realm, start, start,
+		_route_solids[id] + separation_distance, BLOCKER, id)
+	if probe == null:
+		return null
+	var requested := RealmSweep.Point.new(start.x + velocity.x * seconds, start.y + velocity.y * seconds)
+	var settled := move_route_solid(id, requested)
+	if settled == null:
+		return null
+	momentum.refresh_contacts(probe)
+	for hit: RealmGeometry.Contact in settled.motion.stopped_by:
+		if hit.proof.latest == 0.0:
+			continue
+		var at := hit.proof.earliest
+		var center := RealmSweep.Point.new(lerpf(start.x, requested.x, at), lerpf(start.y, requested.y, at))
+		var normal := _geometry.blocker_direction(hit.entity, hit.shape, center)
+		var impulse := momentum.contact(hit.entity, hit.shape, normal, minimum_approach, recipients.get(hit.entity))
+		if impulse != null:
+			var impact := SolidImpact.new()
+			impact.contact = hit
+			impact.impact = impulse
+			settled.impacts.append(impact)
+	return settled
 
 
 func _ensure_routes() -> bool:

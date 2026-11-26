@@ -246,3 +246,82 @@ static func _alternate_seam(layout: WorldTopology, main_neighbor: StringName) ->
 				var next := layout.center(neighbor)
 				return RealmSweep.Point.new((entry.x + next.x) * 0.5, (entry.y + next.y) * 0.5)
 	return null
+
+
+func test_opposing_impulses_use_directional_attenuated_ownership_and_relative_speed() -> void:
+	var mover := WorldMomentum.create(2.0, 0.5)
+	var receiver := WorldMomentum.create(2.0, 0.0)
+	var cause := CombatOrigin.new()
+	cause.owner = &"first"
+	cause.activation = 1
+	cause.committed_at = CombatInstant.at_tick(1)
+	var opposing := cause.copy()
+	opposing.owner = &"opposing"
+	assert_true(mover.apply_impulse(RealmSweep.Point.new(20, 0), cause))
+	assert_true(mover.apply_impulse(RealmSweep.Point.new(-8, 0), opposing))
+	assert_true(mover.apply_impulse(RealmSweep.Point.new(16, 0), null, &"landslide"))
+	assert_false(mover.apply_impulse(RealmSweep.Point.new(20, 0), cause))
+	assert_true(mover.attenuate(0.5))
+	assert_eq(mover.velocity().x, 3.5)
+	assert_true(receiver.apply_impulse(RealmSweep.Point.new(-2, 0), null, &"counter_motion"))
+	var toward := RealmSweep.Point.new(1, 0)
+	var first := mover.contact(&"receiver", 0, toward, 0.1, receiver)
+	assert_not_null(first)
+	if first == null:
+		return
+	assert_eq(first.approach_speed, 4.5)
+	assert_eq(first.strength, 10.125)
+	assert_eq(first.primary.owner, cause.owner)
+	assert_eq(first.participants.size(), 1)
+	assert_null(mover.contact(&"receiver", 0, toward, 0.1, receiver))
+	assert_true(mover.separate(&"receiver", 0))
+	assert_true(receiver.apply_impulse(RealmSweep.Point.new(-7, 0), null, &"crystal_burst"))
+	var next := mover.contact(&"receiver", 0, toward, 0.1, receiver)
+	assert_not_null(next)
+	if next != null:
+		assert_null(next.primary)
+		assert_eq(next.neutral_cause, &"crystal_burst")
+		assert_eq(next.participants[0].owner, cause.owner)
+
+
+func test_world_push_reports_one_impact_until_the_solid_leaves_the_wall() -> void:
+	var layout := WorldTopology.generate_optional(7, &"silent_garden")
+	var world := WorldExploration.create(layout, [&"host"])
+	var entry := layout.center(WorldTopology.ENTRY)
+	var direction := -1.0 if entry.y < WorldTopology.MODULE_SIZE else 1.0
+	var start := RealmSweep.Point.new(entry.x, entry.y + direction * 86.0)
+	assert_true(world.place_route_solid(&"stone", start, 10.0))
+	var momentum := WorldMomentum.create(2.0, 0.0)
+	var cause := CombatOrigin.new()
+	cause.owner = &"host"
+	cause.activation = 1
+	cause.committed_at = CombatInstant.at_tick(1)
+	assert_true(momentum.apply_impulse(RealmSweep.Point.new(0, direction * 120), cause))
+	var into_wall := world.push_route_solid(&"stone", momentum, 1.0, 0.1, 0.25)
+	assert_not_null(into_wall)
+	if into_wall == null:
+		return
+	assert_false(into_wall.route_limited)
+	assert_eq(into_wall.impacts.size(), 1)
+	if into_wall.impacts.size() == 1:
+		assert_eq(into_wall.impacts[0].impact.primary.owner, &"host")
+		assert_eq(into_wall.impacts[0].impact.strength, 3600.0)
+	var still_touching := world.push_route_solid(&"stone", momentum, 1.0, 0.1, 0.25)
+	assert_not_null(still_touching)
+	if still_touching != null:
+		assert_true(still_touching.impacts.is_empty())
+	assert_true(momentum.attenuate(0.0))
+	assert_true(momentum.apply_impulse(RealmSweep.Point.new(0, -direction * 40), null, &"drift"))
+	var away := world.push_route_solid(&"stone", momentum, 1.0, 0.1, 0.25)
+	assert_not_null(away)
+	if away != null:
+		assert_true(away.impacts.is_empty())
+	assert_true(momentum.attenuate(0.0))
+	assert_true(momentum.apply_impulse(RealmSweep.Point.new(0, direction * 120), null, &"fall"))
+	var struck_again := world.push_route_solid(&"stone", momentum, 1.0, 0.1, 0.25)
+	assert_not_null(struck_again)
+	if struck_again != null:
+		assert_eq(struck_again.impacts.size(), 1)
+		if struck_again.impacts.size() == 1:
+			assert_null(struck_again.impacts[0].impact.primary)
+			assert_eq(struck_again.impacts[0].impact.neutral_cause, &"fall")
