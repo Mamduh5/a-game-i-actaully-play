@@ -29,6 +29,31 @@ func before_all() -> void:
 	_guest = crypto.generate_rsa(2048)
 
 
+func test_fault_duration_samples_live_elapsed_time_without_a_service_step() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-ordinary-fault-clock")
+	var store := ProfileStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var clock := FixtureClock.new()
+	var earnings := OrdinaryCurrency.begin(store, _binding("alice", _issuer), _issuer, Currency, clock.sample)
+	assert_eq(earnings.accrue("enemy-fault-clock", Quantity.from_count(7)), Add.QUEUED)
+	clock.elapsed = 5 * Second - 1
+	assert_eq(earnings.fault_elapsed_usec(), 0)
+	clock.elapsed = 5 * Second + 123
+	assert_eq(earnings.fault_elapsed_usec(), 123)
+	clock.elapsed += 77
+	assert_eq(earnings.fault_elapsed_usec(), 200)
+	clock.elapsed -= 1
+	assert_eq(earnings.fault_elapsed_usec(), 200)
+	clock.elapsed = 7 * Second
+	assert_true(earnings.flush())
+	assert_eq(earnings.fault_elapsed_usec(), 2 * Second)
+	clock.elapsed = 10 * Second
+	assert_eq(earnings.fault_elapsed_usec(), 2 * Second)
+	assert_true(store.close())
+
+
 func test_newer_completion_preserves_original_in_flight_deadline_and_blocks_authority() -> void:
 	if not OS.has_feature("windows"):
 		return

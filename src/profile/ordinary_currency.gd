@@ -111,6 +111,7 @@ func oldest_eligible_usec() -> int:
 
 
 func fault_elapsed_usec() -> int:
+	_poll()
 	return _elapsed_fault if _fault_since < 0 else _elapsed_fault + (_now - _fault_since)
 
 
