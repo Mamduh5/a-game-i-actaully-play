@@ -435,6 +435,55 @@ func test_passive_transfer_keeps_actual_contact_and_source_without_added_energy(
 		assert_eq(moved.motion.finish.x, receiver_start.x + 15.0)
 
 
+func test_passive_transfer_respects_displacement_resistance_on_both_sides() -> void:
+	for resistance: float in [0.0, 0.9, 1.0]:
+		for other_moves: bool in [false, true]:
+			var mover := WorldMomentum.create(1.0, resistance if other_moves else 0.0)
+			var receiver := WorldMomentum.create(1.0, 0.0 if other_moves else resistance)
+			var incoming := receiver if other_moves else mover
+			var restrained := mover if other_moves else receiver
+			var sign_x := -1.0 if other_moves else 1.0
+			assert_true(incoming.apply_impulse(RealmSweep.Point.new(10.0 * sign_x, 0.0), null, &"rolling"))
+			var impact := mover.contact(&"receiver", 0, RealmSweep.Point.new(1.0, 0.0), 0.1, receiver)
+			assert_not_null(impact)
+			assert_true(mover.transfer(impact, &"mover", 0, 0.5))
+			assert_almost_eq(restrained.velocity().x, sign_x * 7.5 * (1.0 - resistance), 1e-12)
+			assert_almost_eq(incoming.velocity().x, sign_x * 2.5, 1e-12)
+			assert_false(mover.transfer(impact, &"mover", 0, 0.5))
+
+
+func test_asymmetric_passive_transfer_cannot_add_energy_to_moving_bodies() -> void:
+	for mover_resistance: float in [0.0, 0.9, 1.0]:
+		for receiver_resistance: float in [0.0, 0.9, 1.0]:
+			for incoming: Array in [[10.0, 0.9], [10.0, 9.0], [10.0, -9.0], [-2.0, -9.0]]:
+				for restitution: float in [0.0, 0.5, 1.0]:
+					var mover := WorldMomentum.create(5.0, mover_resistance)
+					var receiver := WorldMomentum.create(2.0, receiver_resistance)
+					var mover_scale := 5.0 / maxf(0.1, 1.0 - mover_resistance)
+					var receiver_scale := 2.0 / maxf(0.1, 1.0 - receiver_resistance)
+					assert_true(mover.apply_impulse(RealmSweep.Point.new(mover_scale * incoming[0],
+						3.0 * mover_scale), null, &"first"))
+					assert_true(receiver.apply_impulse(RealmSweep.Point.new(receiver_scale * incoming[1],
+						-7.0 * receiver_scale), null, &"second"))
+					var before_mover := mover.velocity()
+					var before_receiver := receiver.velocity()
+					var impact := mover.contact(&"receiver", 0, RealmSweep.Point.new(1.0, 0.0), 0.1, receiver)
+					if before_mover.x <= before_receiver.x:
+						assert_null(impact)
+						continue
+					assert_not_null(impact)
+					assert_true(mover.transfer(impact, &"mover", 0, restitution))
+					var after_mover := mover.velocity()
+					var after_receiver := receiver.velocity()
+					var before := 5.0 * before_mover.x ** 2 + 2.0 * before_receiver.x ** 2
+					var after := 5.0 * after_mover.x ** 2 + 2.0 * after_receiver.x ** 2
+					assert_true(after <= before + maxf(1.0, before) * 1e-12,
+						"Energy %s -> %s for resistances %s, %s and restitution %s" % [
+							before, after, mover_resistance, receiver_resistance, restitution])
+					assert_eq(after_mover.y, before_mover.y)
+					assert_eq(after_receiver.y, before_receiver.y)
+
+
 func test_partial_durability_reopens_and_faction_destruction_releases_its_collider_once() -> void:
 	var layout := WorldTopology.generate_optional(34, &"silent_garden")
 	var world := WorldExploration.create(layout, [&"host"])

@@ -173,8 +173,8 @@ func contact(entity: StringName, slot: int, normal: RealmSweep.Point, minimum_sp
 	return result
 
 
-## Apply a passive normal impulse for an isolated pair. Restitution is
-## bounded, so the contact cannot add energy. Attribution follows the impact.
+## Apply a passive normal impulse for an isolated pair. Each body uses its
+## own displacement resistance. Attribution follows the impact.
 func transfer(impact: Impact, mover_id: StringName, mover_shape: int, restitution: float) -> bool:
 	if (impact == null or impact._mover != self or impact._receiver == null or impact._transferred
 			or impact._mover_revision != _revision or impact._receiver_revision != impact._receiver._revision
@@ -182,17 +182,30 @@ func transfer(impact: Impact, mover_id: StringName, mover_shape: int, restitutio
 			or restitution < 0.0 or restitution > 1.0):
 		return false
 	var receiver := impact._receiver
-	var mover_share: float
-	if _mass <= receiver._mass:
-		mover_share = 1.0 / (1.0 + _mass / receiver._mass)
-	else:
-		var ratio := receiver._mass / _mass
-		mover_share = ratio / (1.0 + ratio)
+	var mass_ratio := minf(_mass, receiver._mass) / maxf(_mass, receiver._mass)
+	var light_share := 1.0 / (1.0 + mass_ratio)
+	var heavy_share := mass_ratio * light_share
+	var mover_share := light_share if _mass <= receiver._mass else heavy_share
+	var receiver_share := heavy_share if _mass <= receiver._mass else light_share
+	var mover_mobility := 1.0 - _resistance
+	var receiver_mobility := 1.0 - receiver._resistance
+	var mover_velocity := velocity()
+	var receiver_velocity := receiver.velocity()
+	var mover_normal := mover_velocity.x * impact._normal_x + mover_velocity.y * impact._normal_y
+	var receiver_normal := receiver_velocity.x * impact._normal_x + receiver_velocity.y * impact._normal_y
+	var weighted_approach := mover_mobility * mover_normal - receiver_mobility * receiver_normal
 	var normal_change := impact.approach_speed * (1.0 + restitution)
-	var mover_change := -normal_change * mover_share
-	var receiver_change := normal_change * (1.0 - mover_share)
-	if not is_finite(mover_change) or not is_finite(receiver_change):
+	if not is_finite(weighted_approach) or not is_finite(normal_change):
 		return false
+	# Asymmetric resistance can accelerate both bodies' center of mass. Limit
+	# the impulse where its quadratic kinetic cost overtakes its linear loss.
+	var kinetic_cost := mover_share * mover_mobility ** 2 + receiver_share * receiver_mobility ** 2
+	if weighted_approach <= 0.0:
+		normal_change = 0.0
+	elif (normal_change * 0.5) * kinetic_cost > weighted_approach:
+		normal_change = 2.0 * (weighted_approach / kinetic_cost)
+	var mover_change := -normal_change * mover_share * mover_mobility
+	var receiver_change := normal_change * receiver_share * receiver_mobility
 	var key := "cause/%s" % impact.primary.occurrence_key() if impact.primary != null else "neutral/%s" % impact.neutral_cause
 	var mover_post := _adjusted_influence(key, impact, mover_change)
 	var receiver_post := receiver._adjusted_influence(key, impact, receiver_change)
