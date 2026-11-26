@@ -27,7 +27,7 @@ class Sigil:
 
 var _rules: StarterCombatRules
 var _weapon: StarterWeapon
-var _undying: bool
+var _hero: StringName
 var _kernel: CombatKernel
 var _geometry: RealmGeometry
 var _actor: StringName
@@ -54,7 +54,7 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	var result := StarterCombat.new()
 	result._rules = rules.duplicate() as StarterCombatRules
 	result._weapon = weapon.duplicate() as StarterWeapon
-	result._undying = preparation.hero == StarterCombatRules.UNDYING
+	result._hero = preparation.hero
 	result._kernel = kernel
 	result._geometry = geometry
 	result._actor = actor
@@ -116,11 +116,15 @@ func _settled_candidates(candidates: Array[PlayerTargeting.Candidate]) -> Array[
 ## A deliberate manual activation can validly miss. Barrier conversion uses
 ## only the actual damage from this pulse, summed across its simultaneous hits.
 func try_manual(tick: int) -> Attempt:
-	if not _undying or not _open_tick(tick) or tick > RunAuthority.MAX_TICK - _rules.siphon_lifetime:
+	if not _open_tick(tick):
 		return Attempt.REJECTED
 	var source := _kernel.actor_snapshot(_actor)
 	var center := _geometry.circle_center(_actor, 0)
-	if (source == null or not source.is_alive() or not source.accepts_new_actions or center == null
+	if source == null or not source.is_alive() or not source.accepts_new_actions or center == null:
+		return Attempt.REJECTED
+	if _hero == StarterCombatRules.CONDUCTOR:
+		return _harmonic_burst(tick, source, center)
+	if (_hero != StarterCombatRules.UNDYING or tick > RunAuthority.MAX_TICK - _rules.siphon_lifetime
 			or not source.cooldown_ready(StarterCombatRules.SIPHON, CombatInstant.at_tick(tick))):
 		return Attempt.REJECTED
 	var contacts := _geometry.certify_circle_snapshot(_geometry.realm_id, center, _rules.siphon_radius, _hostiles, _actor)
@@ -133,6 +137,32 @@ func try_manual(tick: int) -> Attempt:
 	if result == Attempt.COMMITTED:
 		_effects.append(_ring(StarterCombatRules.SIPHON, center, _rules.siphon_radius, tick, tick + 10))
 	return result
+
+
+func _harmonic_burst(tick: int, source: CombatantState, center: RealmSweep.Point) -> Attempt:
+	if not source.cooldown_ready(StarterCombatRules.HARMONIC_BURST, CombatInstant.at_tick(tick)):
+		return Attempt.REJECTED
+	var nearby := _geometry.certify_circle_snapshot(_geometry.realm_id, center, _rules.harmonic_reach, _hostiles, _actor)
+	if not _certified(nearby):
+		return Attempt.FAULT
+	var nearest := INF
+	var links: Array[RealmGeometry.Contact] = []
+	for contact: RealmGeometry.Contact in nearby.contacts:
+		var at := _geometry.circle_center(contact.entity, contact.shape)
+		if at == null or _living_target(contact.entity) == null:
+			continue
+		var distance := (at.x - center.x) ** 2 + (at.y - center.y) ** 2
+		if distance >= nearest:
+			continue
+		var path := _blockers_between(center, at)
+		if not _certified(path):
+			return Attempt.FAULT
+		if path.contacts.is_empty():
+			nearest = distance
+			links.assign([contact])
+	var action := _action(source, tick, 1, StarterCombatRules.HARMONIC_BURST, _rules.harmonic_damage,
+		_rules.harmonic_cooldown, CombatAction.Damage.MAGICAL)
+	return _instant_delivery(action, tick, links)
 
 
 ## A run supplies the settled poses and planned obstacle motion at this
@@ -292,7 +322,7 @@ func _living_target(id: StringName) -> CombatantState:
 
 
 func _decay(tick: int) -> bool:
-	if not _undying:
+	if _hero != StarterCombatRules.UNDYING:
 		return true
 	var actor := _kernel.actor_snapshot(_actor)
 	if actor == null:

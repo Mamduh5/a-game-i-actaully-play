@@ -130,6 +130,31 @@ class Arena:
 		return null
 
 
+func test_zero_charge_harmonic_burst_links_one_reached_hostile_and_commits_an_empty_cast() -> void:
+	var arena := Arena.new(&"W02", &"H03")
+	assert_true(arena.add(&"blocked", 16, 0, 100))
+	assert_true(arena.wall(8, -5, 5))
+	assert_true(arena.add(&"ally", -7, 0, 100, FRIEND))
+	assert_true(arena.add(&"near", -30, 0, 100))
+	assert_true(arena.add(&"far", -50, 0, 100))
+	assert_eq(arena.combat.try_manual(1), Committed)
+	var hits := arena.settle(1)
+	assert_eq(hits.size(), 1)
+	if hits.size() == 1:
+		assert_eq(hits[0].target, &"near")
+		assert_eq(hits[0].family, StarterCombatRules.HARMONIC_BURST)
+		assert_eq(hits[0].origin.owner, HERO)
+		assert_eq(hits[0].components[0].kind, CombatAction.Damage.MAGICAL)
+	assert_true(arena.move(&"near", -200, 0))
+	assert_true(arena.move(&"far", -220, 0))
+	var ready := 1 + arena.rules.harmonic_cooldown
+	assert_eq(arena.combat.try_manual(ready - 1), StarterCombat.Attempt.REJECTED)
+	assert_eq(arena.combat.try_manual(ready), Committed)
+	assert_true(arena.settle(ready).is_empty())
+	assert_eq(arena.combat.try_manual(ready + 1), StarterCombat.Attempt.REJECTED)
+	assert_eq(arena.hp(&"blocked").native_at_scale(0), 100)
+
+
 func test_authored_weapons_are_distinct_and_usable_with_a_different_starter_hero() -> void:
 	for weapon: StringName in [&"W01", &"W02", &"W03"]:
 		var arena := Arena.new(weapon, &"H02")
