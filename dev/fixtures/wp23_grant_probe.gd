@@ -50,17 +50,22 @@ func _ready() -> void:
 	binding.recipient = "bob"
 	binding.issuer = issuer_public
 	binding.recipient_key = recipient_public
+	var solo := role in ["solo-issue", "inspect-solo"]
+	if solo:
+		binding.recipient = "solo"
+		binding.recipient_key = issuer_public
 	var issuer_role := role in ["issue", "inspect-issuer", "courier", "ack"]
 	var store := FaultStore.new()
 	store.point = args[2] if args.size() == 3 else ""
 	store.marker = root.path_join("boundary")
-	if store.open("alice" if issuer_role else "bob", root.path_join("profiles")) != ProfileStore.OpenResult.OPENED:
+	var profile := "solo" if solo else ("alice" if issuer_role else "bob")
+	if store.open(profile, root.path_join("profiles")) != ProfileStore.OpenResult.OPENED:
 		_finish(false, {})
 		return
 	var result: Dictionary
 	match role:
-		"issue": result = _issue(store, root, binding)
-		"inspect-issuer", "inspect-recipient":
+		"issue", "solo-issue": result = _issue(store, root, binding)
+		"inspect-issuer", "inspect-recipient", "inspect-solo":
 			var frontier := store.frontier(binding.run)
 			result = {"pending": store.pending_grants().size(),
 				"generation": store.checkpoint()["generation"], "tick": frontier.get("tick", -1),

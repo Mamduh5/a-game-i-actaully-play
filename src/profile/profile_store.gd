@@ -237,6 +237,19 @@ func commit(mutation: ProfileMutation) -> Receipt:
 	return result
 
 
+## Resolve a lost commit result against the exact submitted operation.
+func commit_confirmed(mutation: ProfileMutation) -> Receipt:
+	var verdict := commit(mutation)
+	if verdict.status != CommitResult.UNKNOWN or mutation == null:
+		return verdict
+	var found := lookup(mutation.id)
+	if found.status == CommitResult.COMMITTED:
+		if found.digest != mutation.record().sha256_text():
+			found.status = CommitResult.CONFLICT
+		return found
+	return found if found.status == CommitResult.MISSING else verdict
+
+
 func _commit_io() -> bool:
 	return _query(_db, "COMMIT")
 

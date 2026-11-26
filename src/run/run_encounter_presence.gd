@@ -71,3 +71,7 @@ func settle(now: CombatInstant) -> bool:
 
 func recipients() -> Array[StringName]:
 	return _nearby.duplicate() if _settled else []
+
+
+func settlement_tick(run: StringName, epoch: int) -> int:
+	return _latest.tick if _settled and _party.belongs_to(run, epoch) else -1

@@ -8,6 +8,15 @@ const FIRST := &"overworld"
 const SECOND := &"observatory"
 const ENEMY := &"enemy"
 const BLOCKERS := 2
+const Commit := ProfileStore.CommitResult
+
+class BlessingStore extends ProfileStore:
+	var persist := false
+
+	func _commit_io() -> bool:
+		if persist:
+			super._commit_io()
+		return false
 
 class Scenario:
 	var setup := RunSetup.new()
@@ -341,6 +350,67 @@ func test_local_encounter_presence_is_inclusive_realm_scoped_and_frozen_once() -
 	assert_false(encounter.settle(CombatInstant.at_tick(4)))
 	assert_true(control.settle(CombatInstant.at_tick(3)))
 	assert_eq(control.recipients(), [HOST])
+
+
+func test_blessing_award_recovers_in_its_original_run_and_stays_out_of_profile_balances() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var run := Scenario.new([HOST, GUEST, ALLY, REMOTE])
+	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
+	var catalog := bundle.compile()
+	run.setup.catalog_revision = catalog.revision
+	var slots: Array[StringName] = []
+	slots.resize(RunPreparation.CANDIDATE_SLOTS)
+	slots.fill(&"")
+	var prep := RunPreparation.select(catalog, &"H01", &"W01", [&"", &""], slots, {})
+	var preparations: Dictionary[StringName, RunPreparation] = {HOST: prep, GUEST: prep, ALLY: prep, REMOTE: prep}
+	var progression := PartyProgression.begin(run.setup, preparations)
+	assert_true(run.move(GUEST, 400))
+	assert_eq(run.party.step_movement(GUEST, 1000, 1.0).x, 400.0)
+	assert_true(run.move(ALLY, 220.125))
+	assert_eq(run.party.step_movement(ALLY, 1000, 1.0).x, 220.125)
+	var presence := RunEncounterPresence.start(run.party, &"boss/first", FIRST, RealmSweep.Point.new(0, 0), 20.0,
+		CombatInstant.at_tick(0))
+	var scratch := DirAccess.create_temp("agip-run-blessing")
+	var store := BlessingStore.new()
+	assert_eq(store.open("host", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var blessing := &"primal_instinct"
+	assert_eq(progression.settle_blessing(store, presence, blessing, 1).status, Commit.INVALID)
+	assert_true(run.move(GUEST, 220))
+	assert_eq(run.party.step_movement(GUEST, 1000, 1.0).x, 220.0)
+	assert_true(run.party.close_tick(1))
+	assert_true(presence.settle(CombatInstant.at_tick(1)))
+	assert_eq(presence.recipients(), [GUEST, HOST])
+	assert_eq(progression.settle_blessing(store, presence, blessing, 1).status, Commit.MISSING)
+	assert_false(progression.has_blessing(GUEST, blessing))
+	assert_true(store.frontier(String(run.setup.run_id)).is_empty())
+	store.persist = true
+	var saved := progression.settle_blessing(store, presence, blessing, 1)
+	assert_eq(saved.status, Commit.COMMITTED)
+	assert_true(saved.balances.is_empty())
+	assert_true(store.pending_grants().is_empty())
+	assert_true(progression.has_blessing(HOST, blessing))
+	assert_true(progression.has_blessing(GUEST, blessing))
+	assert_false(progression.has_blessing(ALLY, blessing))
+	assert_false(progression.has_blessing(REMOTE, blessing))
+	assert_eq(progression.settle_blessing(store, presence, &"substitution", 1).status, Commit.CONFLICT)
+	assert_true(store.close())
+	assert_eq(store.open("host", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var frontier := store.frontier(String(run.setup.run_id))
+	assert_eq(frontier.operation, saved.id)
+	var resumed := PartyProgression.reopen(run.setup, catalog, frontier)
+	assert_eq(resumed.frontier(1).image, frontier.image)
+	assert_true(resumed.has_blessing(GUEST, blessing))
+	assert_false(resumed.has_blessing(REMOTE, blessing))
+	var repeated := resumed.settle_blessing(store, presence, blessing, 2)
+	assert_eq(repeated.status, Commit.DUPLICATE)
+	assert_eq(repeated.generation, saved.generation)
+	run.setup.run_id = &"next-run"
+	var next := PartyProgression.begin(run.setup, preparations)
+	assert_false(next.has_blessing(HOST, blessing))
+	assert_eq(next.settle_blessing(store, presence, blessing, 1).status, Commit.INVALID)
+	assert_null(PartyProgression.reopen(run.setup, catalog, frontier))
+	assert_true(store.close())
 
 
 func test_connected_spectator_retains_personal_reward_and_can_follow_a_living_teammate() -> void:

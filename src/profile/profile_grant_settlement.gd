@@ -1,7 +1,7 @@
 class_name ProfileGrantSettlement
 extends RefCounted
-## Durable operations for important permanent grants. Transport binds the
-## original run's keys before calling these methods.
+## Durable operations for important permanent grants. Remote applications
+## use the original run's paired keys. Local awards post with issuance.
 
 class Entitlement:
 	var binding: ProfileGrant.Binding
@@ -24,7 +24,7 @@ static func retain_original_binding(store: ProfileStore, binding: ProfileGrant.B
 	var expected := binding.recipient_key if store.identity() == binding.recipient else binding.issuer
 	if ProfileGrant.fingerprint(local_key) != ProfileGrant.fingerprint(expected):
 		return _invalid()
-	return _commit(store, ProfileMutation.retain_binding(binding))
+	return store.commit_confirmed(ProfileMutation.retain_binding(binding))
 
 
 ## One transaction records the shared occurrence, each personal envelope
@@ -36,6 +36,7 @@ static func issue(store: ProfileStore, issuer: CryptoKey, entitlements: Array[En
 		return _invalid()
 	var mutation := ProfileMutation.new()
 	mutation.frontier = frontier
+	var local: ProfileGrant
 	for entitlement: Entitlement in entitlements:
 		if entitlement == null or entitlement.binding == null or entitlement.binding.run != frontier.run:
 			return _invalid()
@@ -52,12 +53,46 @@ static func issue(store: ProfileStore, issuer: CryptoKey, entitlements: Array[En
 			mutation.claims.append(mutation.id)
 		elif mutation.id != grant.issue_id() or mutation.rules != bound.rules or mutation.catalog != bound.catalog:
 			return _invalid()
+		if bound.recipient == store.identity():
+			if local != null or ProfileGrant.fingerprint(bound.recipient_key) != ProfileGrant.fingerprint(issuer):
+				return _invalid()
+			local = grant
+			continue
 		var saved := ProfileMutation.Grant.new()
 		saved.key = grant.key
 		saved.recipient = bound.recipient
 		saved.envelope = bytes
 		mutation.grants.append(saved)
-	return _commit(store, mutation)
+	return _issue_with_local(store, mutation, local) if local != null else store.commit_confirmed(mutation)
+
+
+static func _issue_with_local(store: ProfileStore, mutation: ProfileMutation, local: ProfileGrant) -> ProfileStore.Receipt:
+	var application := local.application()
+	mutation.deltas = application.deltas
+	mutation.claims.append_array(application.claims)
+	if local.kind != ProfileGrant.Kind.DISCOVERY:
+		return store.commit_confirmed(mutation)
+	var previous := store.lookup(mutation.id)
+	if previous.status == ProfileStore.CommitResult.COMMITTED:
+		if previous.digest == mutation.record().sha256_text():
+			previous.status = ProfileStore.CommitResult.DUPLICATE
+			return previous
+		# The original transaction may have recorded an already known discovery.
+	elif previous.status == ProfileStore.CommitResult.MISSING:
+		var known := store.balance("discovery/" + local.award)
+		if known == null:
+			previous.status = ProfileStore.CommitResult.UNAVAILABLE
+			return previous
+		if known.sign_value == 0:
+			return store.commit_confirmed(mutation)
+		if known.compare(Quantity.from_count(1)) != 0:
+			previous.status = ProfileStore.CommitResult.CORRUPT
+			return previous
+	else:
+		return previous
+	mutation.claims.erase("discovery/" + local.award)
+	mutation.deltas.clear()
+	return store.commit_confirmed(mutation)
 
 
 static func apply(store: ProfileStore, binding: ProfileGrant.Binding, recipient: CryptoKey,
@@ -89,7 +124,7 @@ static func apply(store: ProfileStore, binding: ProfileGrant.Binding, recipient:
 						applied.receipt.status = ProfileStore.CommitResult.CORRUPT
 						return applied
 					request = grant.application(true)
-			applied.receipt = _commit(store, request)
+			applied.receipt = store.commit_confirmed(request)
 		_:
 			applied.receipt = previous
 	applied.acknowledgement = grant.sign_acknowledgement(applied.receipt, recipient)
@@ -122,21 +157,7 @@ static func acknowledge(store: ProfileStore, binding: ProfileGrant.Binding,
 	var grant := ProfileGrant.open_authorization(prior.body, binding)
 	if grant == null or not grant.matches_application(facts[2]):
 		return _invalid()
-	return _commit(store, mutation)
-
-
-## A positive receipt must identify exactly this operation. If the current
-## write is still uncertain, its caller retains the original request.
-static func _commit(store: ProfileStore, mutation: ProfileMutation) -> ProfileStore.Receipt:
-	var verdict := store.commit(mutation)
-	if verdict.status != ProfileStore.CommitResult.UNKNOWN:
-		return verdict
-	var found := store.lookup(mutation.id)
-	if found.status == ProfileStore.CommitResult.COMMITTED:
-		if found.digest != mutation.record().sha256_text():
-			found.status = ProfileStore.CommitResult.CONFLICT
-		return found
-	return found if found.status == ProfileStore.CommitResult.MISSING else verdict
+	return store.commit_confirmed(mutation)
 
 
 static func _invalid() -> ProfileStore.Receipt:

@@ -46,6 +46,8 @@ class View:
 	var rescue_interruption: RescueInterruption
 
 var _host: StringName
+var _run: StringName
+var _epoch: int
 var _members: Dictionary[StringName, Member] = {}
 var _actors: Dictionary[StringName, Member] = {}
 var _kernel: CombatKernel
@@ -71,6 +73,8 @@ static func begin(setup: RunSetup, host: StringName, kernel: CombatKernel,
 		return null
 	var party := RunParty.new()
 	party._host = host
+	party._run = setup.run_id
+	party._epoch = setup.epoch
 	party._kernel = kernel
 	party._realms = realms.duplicate()
 	party._blockers = blockers
@@ -96,6 +100,10 @@ static func begin(setup: RunSetup, host: StringName, kernel: CombatKernel,
 
 func initialized_seats() -> Array[StringName]:
 	return _members.keys()
+
+
+func belongs_to(run: StringName, epoch: int) -> bool:
+	return run == _run and epoch > 0 and epoch == _epoch
 
 
 func hp_scale() -> Quantity:

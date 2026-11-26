@@ -309,6 +309,70 @@ func test_native_exchange_requires_retained_pairing_and_identical_durable_payloa
 	assert_true(guest.close())
 
 
+func test_local_and_remote_issue_share_the_same_atomic_frontier_receipt() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-grant-local")
+	var store := UnconfirmedStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var local_binding := _binding()
+	local_binding.recipient = "alice"
+	local_binding.recipient_key = _public(_issuer)
+	var local := _entitlement(local_binding, "local-quest", 9)
+	var remote := _entitlement(_binding(), local.occurrence, 17)
+	var frontier := _frontier(local_binding.run, 3)
+	assert_eq(ProfileGrantSettlement.issue(store, _issuer, [local, remote], frontier).status, Commit.MISSING)
+	assert_eq(store.balance(Currency).native_at_scale(0), 0)
+	assert_true(store.pending_grants().is_empty())
+	assert_true(store.frontier(local_binding.run).is_empty())
+	store.persist = true
+	var committed := ProfileGrantSettlement.issue(store, _issuer, [local, remote], frontier)
+	assert_eq(committed.status, Commit.COMMITTED)
+	assert_eq(committed.balances[Currency].native_at_scale(0), 9)
+	assert_eq(committed.generation, 1)
+	assert_eq(store.pending_grants().size(), 1)
+	assert_eq(store.pending_grants()[0].recipient, "bob")
+	assert_eq(store.frontier(local_binding.run)["operation"], committed.id)
+	assert_true(store.close())
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(ProfileGrantSettlement.issue(store, _issuer, [remote, local], frontier).status, Commit.DUPLICATE)
+	local.amount = Quantity.from_count(19)
+	assert_eq(ProfileGrantSettlement.issue(store, _issuer, [local, remote], frontier).status, Commit.CONFLICT)
+	local.occurrence = "stale"
+	assert_eq(ProfileGrantSettlement.issue(store, _issuer, [local], _frontier(local_binding.run, 2)).status,
+		Commit.STALE_FRONTIER)
+	assert_eq(store.balance(Currency).native_at_scale(0), 9)
+	assert_eq(store.pending_grants().size(), 1)
+	assert_true(store.close())
+
+
+func test_solo_discovery_posts_once_with_its_source_and_recoverable_receipt() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-grant-solo")
+	var store := ProfileStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var binding := _binding()
+	binding.recipient = "alice"
+	binding.recipient_key = _public(_issuer)
+	var local := _entitlement(binding, "forge-1", 1)
+	local.kind = ProfileGrant.Kind.DISCOVERY
+	local.award = "rune-R04"
+	var first := ProfileGrantSettlement.issue(store, _issuer, [local], _frontier(binding.run, 1))
+	assert_eq(first.status, Commit.COMMITTED)
+	assert_eq(first.balances["discovery/rune-R04"].native_at_scale(0), 1)
+	assert_eq(ProfileGrantSettlement.issue(store, _issuer, [local], _frontier(binding.run, 1)).status, Commit.DUPLICATE)
+	local.occurrence = "forge-2"
+	var repeated := ProfileGrantSettlement.issue(store, _issuer, [local], _frontier(binding.run, 2))
+	assert_eq(repeated.status, Commit.COMMITTED)
+	assert_true(repeated.balances.is_empty())
+	assert_eq(store.frontier(binding.run)["operation"], repeated.id)
+	assert_eq(ProfileGrantSettlement.issue(store, _issuer, [local], _frontier(binding.run, 2)).status, Commit.DUPLICATE)
+	assert_eq(store.balance("discovery/rune-R04").native_at_scale(0), 1)
+	assert_true(store.pending_grants().is_empty())
+	assert_true(store.close())
+
+
 static func _grant_frame(payload: PackedByteArray,
 		kind: NativeSessionFrame.Kind = NativeSessionFrame.Kind.RELIABLE) -> NativeSessionFrame:
 	var packet := NativeSessionFrame.pack(kind, 3, 1, payload)

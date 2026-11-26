@@ -19,6 +19,7 @@ var _level := 1
 var _xp := Quantity.from_count(0)
 var _queues: Dictionary[StringName, RunRewardQueue] = {}
 var _awarded: Dictionary[StringName, Quantity] = {}
+var _blessings: Dictionary[StringName, Array] = {}
 var _preparation: Dictionary[StringName, Array] = {}
 var _identity: Dictionary = {}
 var _random: RunRandom
@@ -115,11 +116,67 @@ func overflow_bonus_basis_points(bound_seat: StringName, stat: StringName) -> in
 	return queue.overflow_bonus_basis_points(stat) if queue != null else 0
 
 
+## The encounter owns the closed PR05 membership. Publish the benefit only
+## after its one-time source claim and the progression frontier commit.
+func settle_blessing(store: ProfileStore, presence: RunEncounterPresence, blessing: StringName,
+		closed_tick: int) -> ProfileStore.Receipt:
+	var invalid := ProfileStore.Receipt.new()
+	invalid.status = ProfileStore.CommitResult.INVALID
+	if (store == null or presence == null or _identity.is_empty()
+			or not ProfileMutation.valid_id(String(blessing)) or not ProfileMutation.valid_id(String(presence.id))):
+		return invalid
+	var settled_at := presence.settlement_tick(_identity["run"], _identity["epoch"])
+	if settled_at < 0 or closed_tick < settled_at or closed_tick > RunAuthority.MAX_TICK:
+		return invalid
+	var seats := presence.recipients()
+	for seat: StringName in seats:
+		if not _queues.has(seat):
+			return invalid
+	var record: Array = [blessing, seats, settled_at]
+	var operation := "blessing/" + JSON.stringify([_identity["run"], presence.id]).sha256_text()
+	if _blessings.has(presence.id):
+		if _blessings[presence.id] != record:
+			invalid.status = ProfileStore.CommitResult.CONFLICT
+			return invalid
+		var prior := store.lookup(operation)
+		if prior.status == ProfileStore.CommitResult.COMMITTED:
+			prior.status = ProfileStore.CommitResult.DUPLICATE
+		return prior
+	var staged := _blessings.duplicate()
+	staged[presence.id] = record
+	var mutation := ProfileMutation.new()
+	mutation.id = operation
+	mutation.rules = String(_identity["rules"])
+	mutation.catalog = String(_identity["catalog"])
+	mutation.claims.append(operation)
+	mutation.frontier = _make_frontier(closed_tick, staged)
+	if mutation.frontier == null:
+		return invalid
+	var receipt := store.commit_confirmed(mutation)
+	if receipt.status in [ProfileStore.CommitResult.COMMITTED, ProfileStore.CommitResult.DUPLICATE]:
+		_blessings = staged
+	return receipt
+
+
+func has_blessing(bound_seat: StringName, blessing: StringName) -> bool:
+	for record: Array in _blessings.values():
+		if record[0] == blessing and bound_seat in record[1]:
+			return true
+	return false
+
+
 ## Attach to the original host's closed native profile mutation. The store
 ## supplies the atomic durable receipt and compare-and-swap frontier boundary.
 func frontier(closed_tick: int) -> ProfileMutation.Frontier:
+	return _make_frontier(closed_tick, _blessings)
+
+
+func _make_frontier(closed_tick: int, blessings: Dictionary[StringName, Array]) -> ProfileMutation.Frontier:
 	if _identity.is_empty() or closed_tick < _last_award_tick or closed_tick > RunAuthority.MAX_TICK:
 		return null
+	for record: Array in blessings.values():
+		if record[2] > closed_tick:
+			return null
 	var awards: Dictionary[StringName, PackedByteArray] = {}
 	for id: StringName in _awarded:
 		awards[id] = QuantityCodec.encode(_awarded[id])
@@ -127,9 +184,12 @@ func frontier(closed_tick: int) -> ProfileMutation.Frontier:
 	for seat: StringName in _queues:
 		queues[seat] = _queues[seat].checkpoint()
 	# The value-only image is stored locally. No received peer bytes enter this decoder.
-	var image := var_to_bytes({"version": CHECKPOINT_VERSION, "identity": _identity,
+	var snapshot := {"version": CHECKPOINT_VERSION, "identity": _identity,
 		"tick": closed_tick, "awarded_at": _last_award_tick, "preparation": _preparation, "level": _level,
-		"xp": QuantityCodec.encode(_xp), "awarded": awards, "random": _random.checkpoint(), "queues": queues})
+		"xp": QuantityCodec.encode(_xp), "awarded": awards, "random": _random.checkpoint(), "queues": queues}
+	if not blessings.is_empty():
+		snapshot["blessings"] = blessings
+	var image := var_to_bytes(snapshot)
 	if image.is_empty() or image.size() > ProfileMutation.MAX_BYTES:
 		return null
 	var result := ProfileMutation.Frontier.new()
@@ -190,9 +250,30 @@ func _restore(image: Dictionary, closed_tick: int) -> bool:
 			return false
 	if not _random.restore(random):
 		return false
+	if not _restore_blessings(image.get("blessings", {}), closed_tick):
+		return false
 	_level = level
 	_xp = carry
 	_last_award_tick = image["awarded_at"]
+	return true
+
+
+func _restore_blessings(saved: Variant, closed_tick: int) -> bool:
+	if not saved is Dictionary:
+		return false
+	for occurrence: Variant in saved:
+		var record: Variant = saved[occurrence]
+		if (not occurrence is StringName or not ProfileMutation.valid_id(String(occurrence))
+				or not record is Array or record.size() != 3
+				or not record[0] is StringName or not ProfileMutation.valid_id(String(record[0]))
+				or not record[1] is Array or not record[2] is int or record[2] < 0 or record[2] > closed_tick):
+			return false
+		var previous := ""
+		for seat: Variant in record[1]:
+			if not seat is StringName or not _queues.has(seat) or String(seat) <= previous:
+				return false
+			previous = String(seat)
+		_blessings[occurrence] = record
 	return true
 
 

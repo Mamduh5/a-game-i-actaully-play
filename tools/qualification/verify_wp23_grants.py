@@ -63,6 +63,11 @@ def exercise(exe, evidence, root):
         if role == "apply":
             results["replay"] = run("redelivered", "apply")
     results["duplicate_ack"] = run("duplicate-ack", "ack")
+    for boundary in ("before", "after"):
+        interrupt("solo-issue", boundary)
+        label = f"solo-{boundary}"
+        results[label] = run(label, "inspect-solo")
+    results["solo_replay"] = run("solo-replay", "solo-issue")
     assert results["issue-before"] == {"pending": 0, "generation": 0, "tick": -1, "balance": 0}
     assert results["issue-after"] == {"pending": 1, "generation": 1, "tick": 4, "balance": 0}
     assert results["courier"] == {"pending": 1}
@@ -72,6 +77,9 @@ def exercise(exe, evidence, root):
     assert results["ack-before"] == {"pending": 1, "generation": 1, "tick": 4, "balance": 0}
     assert results["ack-after"] == {"pending": 0, "generation": 2, "tick": 4, "balance": 0}
     assert results["duplicate_ack"] == {"status": 1, "pending": 0}
+    assert results["solo-before"] == {"pending": 0, "generation": 0, "tick": -1, "balance": 0}
+    assert results["solo-after"] == {"pending": 0, "generation": 1, "tick": 4, "balance": 17}
+    assert results["solo_replay"] == {"status": 1}
     return results
 
 
