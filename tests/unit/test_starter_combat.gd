@@ -329,6 +329,32 @@ func test_lethal_lightning_rechecks_bleed_before_recording_death_statuses() -> v
 	assert_eq(lethal, 1)
 
 
+func test_lightning_cannot_rupture_a_teammates_only_bleed() -> void:
+	var arena := Arena.new(&"W01", &"H01", false, &"R01", &"R02")
+	assert_true(arena.add(&"primary", 30, 0, 200))
+	assert_true(arena.add(&"secondary", 85, 0, 200))
+	assert_true(arena.add(&"partner", 120, 0, 100, FRIEND))
+	var slots: Array[StringName] = []
+	slots.resize(RunPreparation.CANDIDATE_SLOTS)
+	slots.fill(&"")
+	var prep := RunPreparation.select(arena.catalog, &"H01", &"W01", [&"R01", &""], slots, {})
+	var partner := StarterCombat.create(arena.rules, arena.catalog, prep, arena.kernel, arena.geometry,
+		&"partner", HOSTILE, HOSTILE, BLOCKER)
+	assert_eq(partner.try_weapon(1, PlayerTargeting.new(), arena.candidates), Committed)
+	assert_eq(arena.settle(1).size(), 1)
+	assert_eq(arena.attack(11), Committed)
+	var hits := arena.settle(11)
+	assert_eq(hits.size(), 2)
+	if hits.size() == 2:
+		assert_eq(hits[1].family, &"R02.lightning")
+		assert_eq(hits[1].target, &"secondary")
+	var ticks := arena.settle(61)
+	assert_eq(ticks.size(), 1)
+	if ticks.size() == 1:
+		assert_eq(ticks[0].origin.owner, &"partner")
+		assert_eq(ticks[0].target, &"secondary")
+
+
 func test_blood_wake_samples_real_motion_only_after_owned_bleed_exists() -> void:
 	for resistance: float in [0.0, 1.0]:
 		var arena := Arena.new(&"W01", &"H01", false, &"R01", &"R03")

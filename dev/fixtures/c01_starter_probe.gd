@@ -28,7 +28,7 @@ class Rules extends RunAuthority:
 		var tuning: StarterCombatRules = load("res://src/catalog/starter_combat.tres")
 		var roster: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		var catalog := roster.compile()
-		var weapon := &"W01" if which in ["sword", "bleed", "wake", "conductor-charged"] else (&"W03" if which == "sigil" else &"W02")
+		var weapon := &"W01" if which in ["sword", "bleed", "wake", "rupture", "conductor-charged"] else (&"W03" if which == "sigil" else &"W02")
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
@@ -40,6 +40,8 @@ class Rules extends RunAuthority:
 			runes[0] = &"R01"
 		elif which == "wake":
 			runes.assign([&"R01", &"R03"])
+		elif which == "rupture":
+			runes.assign([&"R01", &"R02"])
 		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, {})
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
@@ -61,6 +63,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"rupture":
+				return _enemy(&"near", 357, 380, 100) and _enemy(&"flank", 365, 401, 100)
 			"wake":
 				return _enemy(&"near", 357, 380, 200) and _enemy(&"visitor", 510, 380, 100, false)
 			"bleed":
@@ -190,6 +194,12 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"rupture":
+				return (launches == 1 and kernel.pending_count() == 0 and trace.size() == 6
+					and trace[4] == [8, "RP01.thunder_rupture", "flank", false]
+					and trace[5] == [8, "RP01.thunder_rupture", "near", false]
+					and kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0) == 64
+					and kernel.actor_snapshot(&"flank").hp.amount.native_at_scale(0) == 64)
 			"wake":
 				var contacts: Array = []
 				for row: Array in trace:
@@ -280,6 +290,10 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "Blood Wake\nTarget HP %d   Visitor HP %d" % [
 			_rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0),
 			_rules.kernel.actor_snapshot(&"visitor").hp.amount.native_at_scale(0)]
+	elif _case == "rupture":
+		_hud.text = "Thunder Rupture\nTarget HP %d   Flank HP %d" % [
+			_rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0),
+			_rules.kernel.actor_snapshot(&"flank").hp.amount.native_at_scale(0)]
 	else:
 		_hud.text = "%s\nLife Harvest %d   •   Siphon Pulse %d" % [
 			{"sword": "Sword", "bow": "Bow", "bow-miss": "Bow", "sigil": "Magic Staff", "undying": "The Undying"}[_case],
@@ -288,7 +302,7 @@ func _physics_process(_delta: float) -> void:
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
-			"bleed": [190], "wake": [80, 85, 100]}[_case]:
+			"bleed": [190], "wake": [80, 85, 100], "rupture": [10]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -332,7 +346,7 @@ func _draw() -> void:
 		var living := _rules.kernel.actor_snapshot(target.id).is_alive()
 		draw_circle(location, 12, Color("#df9290") if living else Color("#4b4c57"), true, -1.0, true)
 		draw_arc(location, 12, 0, TAU, 24, Color("#774d59") if living else Color("#69727e"), 1.5, true)
-		var label_offset := Vector2(-22, -23) if _case == "wake" and target.id == &"near" else Vector2(-22, 34)
+		var label_offset := Vector2(-22, -23) if _case in ["wake", "rupture"] and target.id == &"near" else Vector2(-22, 34)
 		draw_string(ThemeDB.fallback_font, location + label_offset, String(target.id),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#ded7ca"))
 	draw_circle(Vector2(player.x, player.y), 14, Color("#9fe0c5"), true, -1.0, true)
