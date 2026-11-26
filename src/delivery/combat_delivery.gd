@@ -107,15 +107,16 @@ func plan_sweep(geometry: RealmGeometry, start: RealmSweep.Point, finish: RealmS
 	return plan
 
 
-func admit(start_tick: int, contact: RealmGeometry.Contact, target_life: int, hostile: bool) -> Result:
+func admit(start_tick: int, contact: RealmGeometry.Contact, target_life: int, hostile: bool,
+		phase: int = 0) -> Result:
 	if _commitment.is_empty():
 		return Result.CLOSED
-	if contact == null or contact.entity.is_empty() or target_life <= 0 or _next_part == Quantity.INT_MAX:
+	if contact == null or contact.entity.is_empty() or target_life <= 0 or phase < 0 or _next_part == Quantity.INT_MAX:
 		return Result.INVALID
 	var due := CombatInstant.at_contact(start_tick, contact.proof)
 	if due == null:
 		return Result.UNRESOLVED
-	var key := "%d:%s/%d" % [contact.entity.length(), contact.entity, target_life]
+	var key := "%d:%s/%d/%d" % [contact.entity.length(), contact.entity, target_life, phase]
 	var prior: CombatInstant = _last_contact.get(key)
 	if prior != null:
 		var order := prior.order_against(due)

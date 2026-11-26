@@ -45,6 +45,21 @@ func order_against(other: CombatInstant) -> RealmCircleTime.Order:
 	return _time.order_against(other._time)
 
 
+## Instantaneous delivery can reuse the settled time of a scheduled event.
+func proof_snapshot() -> RealmCircleTime.Contact:
+	return _time.copy() if _time != null else null
+
+
+func completed_ticks_since(start: CombatInstant) -> int:
+	if start == null or start.order_against(self) not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]:
+		return -1
+	var elapsed := _tick - start.tick
+	match order_against(start.after_ticks(elapsed)):
+		RealmCircleTime.Order.BEFORE: return elapsed - 1
+		RealmCircleTime.Order.UNRESOLVED: return -1
+		_: return elapsed
+
+
 func after_ticks(duration: int) -> CombatInstant:
 	if _time == null or duration < 0 or duration > RunAuthority.MAX_TICK - _tick:
 		return null

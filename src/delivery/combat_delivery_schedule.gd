@@ -3,7 +3,7 @@ extends RefCounted
 ## One persistent effect's exact due instants, independent of render frames.
 
 enum Kind { TICK, NATURAL_EXPIRY }
-enum End { ACTIVE, NATURAL, DESTROYED, REPLACED, REALM_CLEANUP, PAYMENT_DECLINED }
+enum End { ACTIVE, NATURAL, DESTROYED, REPLACED, REALM_CLEANUP, PAYMENT_DECLINED, CONSUMED }
 
 class Due:
 	var kind: Kind
@@ -13,6 +13,7 @@ class Due:
 
 var _period: int
 var _next_tick: CombatInstant
+var _start: CombatInstant
 var _expiry: CombatInstant
 var _latest: CombatInstant
 var _ordinal := 1
@@ -30,15 +31,30 @@ static func create(start: CombatInstant, duration: int, period: int, immediate_t
 		return null
 	var result := CombatDeliverySchedule.new()
 	result._latest = start
+	result._start = start
 	result._period = period
 	result._expiry = expiry
 	result._next_tick = start if immediate_tick else start.after_ticks(period)
 	return result
 
 
+func active_at(now: CombatInstant) -> bool:
+	return (_end == End.ACTIVE and now != null
+		and _start.order_against(now) in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]
+		and now.order_against(_expiry) in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME])
+
+
 ## A normal refresh extends the current lifetime and preserves tick phase.
 ## The effect remains refreshable through its last tick until expiry settles.
 func refresh(now: CombatInstant, duration: int) -> bool:
+	return _change_lifetime(now, duration, false)
+
+
+func replace_remaining(now: CombatInstant, duration: int) -> bool:
+	return _change_lifetime(now, duration, true)
+
+
+func _change_lifetime(now: CombatInstant, duration: int, replace: bool) -> bool:
 	if (_end != End.ACTIVE or now == null or duration <= 0
 			or _latest.order_against(now) not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]
 			or now.order_against(_expiry) not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]):
@@ -48,11 +64,11 @@ func refresh(now: CombatInstant, duration: int) -> bool:
 	var proposed := now.after_ticks(duration)
 	if proposed == null:
 		return false
-	match _expiry.order_against(proposed):
-		RealmCircleTime.Order.BEFORE:
-			_expiry = proposed
-		RealmCircleTime.Order.UNRESOLVED:
-			return false
+	var order := _expiry.order_against(proposed)
+	if order == RealmCircleTime.Order.UNRESOLVED:
+		return false
+	if replace or order == RealmCircleTime.Order.BEFORE:
+		_expiry = proposed
 	_latest = now
 	return true
 
@@ -102,7 +118,8 @@ func awaits(event: Due) -> bool:
 
 
 func end_early(reason: End) -> bool:
-	if _end != End.ACTIVE or reason not in [End.DESTROYED, End.REPLACED, End.REALM_CLEANUP, End.PAYMENT_DECLINED]:
+	if (_end != End.ACTIVE or reason not in [End.DESTROYED, End.REPLACED, End.REALM_CLEANUP,
+			End.PAYMENT_DECLINED, End.CONSUMED]):
 		return false
 	_end = reason
 	return true

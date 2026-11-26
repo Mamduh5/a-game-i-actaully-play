@@ -252,21 +252,11 @@ func configure_terminal(creator: StringName, eligible: Array[StringName]) -> boo
 ## Ordinary costs settle now. An HP-priced activation returns a provisional
 ## key and settles at its own instant, before the group's contacts.
 func commit(action: CombatAction) -> String:
-	if not _accepting() or action == null or not action.is_valid():
+	var source := _activation_source(action)
+	if source == null:
 		return ""
-	var source: CombatantState = _actors.get(action.source)
 	var origin := action.origin
-	if (source == null or source.life != action.source_life or not _live_controller(_actors, source)
-			or source.owner != origin.owner or source.provenance != origin.provenance):
-		return ""
-	if _closed != null and _closed.order_against(origin.committed_at) != RealmCircleTime.Order.BEFORE:
-		return ""
-	var stream := origin.activation_stream_key()
-	if origin.activation <= int(_latest_activation.get(stream, 0)):
-		return ""
-	var held := Commitment.new()
-	held.action = action.copy()
-	held.realm = source.realm
+	var held := _hold(action, source.realm)
 	var key := origin.occurrence_key()
 	if action.hp_cost != null:
 		if _queue.admit(origin, origin.committed_at) != CombatRootQueue.Result.ACCEPTED:
@@ -276,8 +266,52 @@ func commit(action: CombatAction) -> String:
 	elif not source.pay_activation(action):
 		return ""
 	_actions[key] = held
-	_latest_activation[stream] = origin.activation
+	_latest_activation[origin.activation_stream_key()] = origin.activation
 	return key
+
+
+## Some authored deliveries pay only for a particular eligible target. Stage
+## the payment, then publish it only when that one contact is admitted.
+func commit_for_target(action: CombatAction, realm: StringName, start_tick: int, contact: RealmGeometry.Contact,
+		target_life: int, hostile: bool) -> CombatRootQueue.Result:
+	var source := _activation_source(action)
+	if source == null or action.hp_cost != null or source.realm != realm or contact == null:
+		return CombatRootQueue.Result.INVALID
+	var target: CombatantState = _actors.get(contact.entity)
+	if target == null or not target.is_alive() or target.life != target_life or target.realm != realm:
+		return CombatRootQueue.Result.INVALID
+	var draft := source.copy()
+	if not draft.pay_activation(action):
+		return CombatRootQueue.Result.INVALID
+	var origin := action.origin
+	var key := origin.occurrence_key()
+	_actions[key] = _hold(action, realm)
+	var admitted := admit_contact(key, 1, realm, start_tick, contact, target_life, hostile)
+	_actions.erase(key)
+	if admitted == CombatRootQueue.Result.ACCEPTED:
+		_actors[draft.id] = draft
+		_latest_activation[origin.activation_stream_key()] = origin.activation
+	return admitted
+
+
+func _activation_source(action: CombatAction) -> CombatantState:
+	if not _accepting() or action == null or not action.is_valid():
+		return null
+	var source: CombatantState = _actors.get(action.source)
+	var origin := action.origin
+	if (source == null or source.life != action.source_life or not _live_controller(_actors, source)
+			or source.owner != origin.owner or source.provenance != origin.provenance
+			or (_closed != null and _closed.order_against(origin.committed_at) != RealmCircleTime.Order.BEFORE)
+			or origin.activation <= int(_latest_activation.get(origin.activation_stream_key(), 0))):
+		return null
+	return source
+
+
+static func _hold(action: CombatAction, realm: StringName) -> Commitment:
+	var held := Commitment.new()
+	held.action = action.copy()
+	held.realm = realm
+	return held
 
 
 ## The delivery owner retires its commitment when it can produce no further
