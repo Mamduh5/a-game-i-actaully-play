@@ -947,6 +947,10 @@ func _queue_descendants(group: Group, postings: Array[Posting]) -> StringName:
 		if source != null and (source.life != posting.hit.source_life or source.realm != target.realm):
 			source = null
 		if source != null:
+			if posting.hit.hostile and posting.impact.action.lightning_damage != null:
+				var arc_failure := _queue_lightning(group, claims, posting, source)
+				if not arc_failure.is_empty():
+					return arc_failure
 			var attacker_failure := _gather_claims(group, claims, source, target, posting, false)
 			if not attacker_failure.is_empty():
 				return attacker_failure
@@ -958,6 +962,60 @@ func _queue_descendants(group: Group, postings: Array[Posting]) -> StringName:
 		if not failure.is_empty():
 			return failure
 	return &"causal_cycle" if _has_repeated_continuation(group) else &""
+
+
+func _queue_lightning(group: Group, claims: Array[ReactionClaim], posting: Posting, source: CombatantState) -> StringName:
+	var action := posting.impact.action
+	var hit := posting.hit
+	var geometry: RealmGeometry = group.geometry.get(source.realm, _geometry.get(source.realm))
+	if geometry == null or _geometry[source.realm].revision != group.revisions[source.realm]:
+		return &"reaction_geometry"
+	var motion := hit.displacement
+	var center := motion.start if motion != null else geometry.circle_center(hit.target, hit.shape)
+	if center == null:
+		return &"reaction_geometry"
+	var starts: Array[RealmSweep.Point] = [center]
+	if action.storm_relay and motion != null and (motion.finish.x != center.x or motion.finish.y != center.y):
+		starts.append(motion.finish)
+	for i: int in starts.size():
+		var at := starts[i]
+		var contacts := geometry.certify_circle_snapshot(source.realm, at, action.lightning_reach, action.lightning_targets, hit.target)
+		if contacts == null or not contacts.unresolved.is_empty():
+			return &"reaction_geometry"
+		var selected: RealmGeometry.Contact
+		var best := INF
+		for contact: RealmGeometry.Contact in contacts.contacts:
+			var other: CombatantState = group.actors.get(contact.entity)
+			if other == null or not other.is_alive() or other.realm != source.realm or other.id == source.id:
+				continue
+			var pose := geometry.circle_center(other.id, contact.shape)
+			if pose == null:
+				continue
+			var distance := (pose.x - at.x) ** 2 + (pose.y - at.y) ** 2
+			if distance >= best:
+				continue
+			var sight := geometry.certify_frozen_path(source.realm, at, pose, 0.0, _blocker_masks[source.realm], hit.target)
+			if sight == null or not sight.unresolved.is_empty():
+				return &"reaction_geometry"
+			if sight.contacts.is_empty():
+				selected = contact
+				best = distance
+		if selected == null:
+			continue
+		var rule := CombatFollowUp.new()
+		rule.id = &"R02.lightning" if i == 0 else &"RP03.storm_relay"
+		rule.family = rule.id
+		rule.component = CombatAction.Component.new()
+		rule.component.kind = CombatAction.Damage.MAGICAL
+		rule.component.base = action.lightning_damage
+		var claim := ReactionClaim.new()
+		claim.rule = rule
+		claim.posting = posting
+		claim.actor = source
+		claim.target = group.actors[selected.entity]
+		claim.shape = selected.shape
+		claims.append(claim)
+	return &""
 
 
 func _gather_claims(group: Group, claims: Array[ReactionClaim], actor: CombatantState, counterpart: CombatantState,

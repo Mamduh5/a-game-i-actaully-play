@@ -19,7 +19,7 @@ class Arena:
 	var targeting := PlayerTargeting.new()
 
 	func _init(weapon: StringName, hero: StringName = &"H01", short_cooldown: bool = false,
-			rune: StringName = &"") -> void:
+			rune: StringName = &"", second_rune: StringName = &"") -> void:
 		var source: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		catalog = source.compile()
 		if short_cooldown:
@@ -28,7 +28,7 @@ class Arena:
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
-		var prep := RunPreparation.select(catalog, hero, weapon, [rune, &""], slots, {})
+		var prep := RunPreparation.select(catalog, hero, weapon, [rune, second_rune], slots, {})
 		var actor := make_actor(HERO, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
@@ -265,6 +265,48 @@ func test_force_arrow_keeps_its_heading_and_staff_pushes_from_its_committed_cent
 		assert_eq(pose.x, 52.0 if weapon == &"W02" else 50.0)
 		assert_eq(pose.y, 2.0 if weapon == &"W02" else -38.0)
 		assert_eq(arena.hp(&"interceptor").native_at_scale(0), 76)
+
+
+func test_lightning_and_storm_relay_choose_from_the_struck_and_displaced_positions() -> void:
+	for force: StringName in [&"", &"R03"]:
+		for resistance: float in [0.0, 1.0]:
+			var arena := Arena.new(&"W02", &"H01", false, &"R02", force)
+			assert_true(arena.add(&"primary", 50, 0, 100, HOSTILE, true, &"", resistance))
+			assert_true(arena.add(&"first", 30, 32, 100, HOSTILE, false))
+			assert_true(arena.add(&"second", 90, 30, 100, HOSTILE, false))
+			assert_eq(arena.attack(1), Committed)
+			var hits: Array[CombatKernel.Hit] = []
+			for tick: int in range(1, 8):
+				assert_true(arena.combat.advance(tick))
+				hits.append_array(arena.settle(tick))
+			var relay := force == &"R03" and resistance == 0.0
+			assert_eq(hits.size(), 3 if relay else 2)
+			assert_eq(arena.hp(&"primary").native_at_scale(0), 76)
+			assert_eq(arena.hp(&"first").native_at_scale(0), 90)
+			assert_eq(arena.hp(&"second").native_at_scale(0), 90 if relay else 100)
+			for hit: CombatKernel.Hit in hits:
+				if hit.target == &"primary":
+					continue
+				assert_eq(hit.origin.owner, HERO)
+				assert_eq(hit.parent, hits[0].event)
+				assert_eq(hit.wave, hits[0].wave + 1)
+				assert_eq(hit.family, &"R02.lightning" if hit.target == &"first" else &"RP03.storm_relay")
+
+
+func test_lightning_refuses_a_secondary_behind_cover_or_outside_reach() -> void:
+	var arena := Arena.new(&"W02", &"H01", false, &"R02")
+	assert_true(arena.add(&"primary", 50, 0, 100))
+	assert_true(arena.add(&"covered", 78, 12, 100, HOSTILE, false))
+	assert_true(arena.add(&"distant", 50, 75, 100, HOSTILE, false))
+	assert_true(arena.wall(62, -15, 20))
+	assert_eq(arena.attack(1), Committed)
+	var hits: Array[CombatKernel.Hit] = []
+	for tick: int in range(1, 8):
+		assert_true(arena.combat.advance(tick))
+		hits.append_array(arena.settle(tick))
+	assert_eq(hits.size(), 1)
+	assert_eq(arena.hp(&"covered").native_at_scale(0), 100)
+	assert_eq(arena.hp(&"distant").native_at_scale(0), 100)
 
 
 func test_bow_keeps_its_launch_heading_through_a_paid_miss_and_interception() -> void:

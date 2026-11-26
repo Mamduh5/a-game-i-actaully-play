@@ -29,6 +29,7 @@ var _rules: StarterCombatRules
 var _weapon: StarterWeapon
 var _hero: StringName
 var _force_equipped: bool
+var _lightning_equipped: bool
 var _kernel: CombatKernel
 var _geometry: RealmGeometry
 var _actor: StringName
@@ -63,6 +64,7 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	result._weapon = weapon.duplicate() as StarterWeapon
 	result._hero = preparation.hero
 	result._force_equipped = &"R03" in preparation.runes()
+	result._lightning_equipped = &"R02" in preparation.runes()
 	result._kernel = kernel
 	result._geometry = geometry
 	result._actor = actor
@@ -91,6 +93,11 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		else CombatAction.Damage.PHYSICAL)
 	action.components[0].categories = bonuses
 	action.activation_costs = costs
+	if _lightning_equipped:
+		action.lightning_reach = _rules.lightning_reach
+		action.lightning_targets = _hostiles
+		action.lightning_damage = Quantity.from_count(_rules.lightning_damage)
+		action.storm_relay = _force_equipped
 	var heading := PlayerControlState.direction(start, aim, RealmSweep.Point.new(1.0, 0.0))
 	if _force_equipped:
 		if _weapon.delivery == StarterWeapon.Delivery.ARROW:
