@@ -336,6 +336,8 @@ Independent review approved **WP09 (`19a8131`, closing `WP09-D1` and `WP09-F2`)*
 
 WP10 (`89edef1`), WP11 (`0d5e8bf`) and WP17 (`357a2fe`) are assigned to Antigravity for independent review. No unclaimed package has cleared all prerequisites. WP22 becomes eligible on WP11 approval. C01 and WP20 become eligible on WP10 and WP11 approval. WP18 requires all three approvals. WP32 also waits on C02 and C03. Resume with the first applicable package or a recorded review correction when its disposition arrives.
 
+WP19-O1 and WP19-O2 have a separate targeted review assignment for `88a6ec6` after 202/202 GUT tests, a clean import, and a Windows Player pack check and boot. The WP19 prerequisite is satisfied by `d31a31b`. [WP19 follow-up](records/WP19.md#follow-up-review-handoff)
+
 <a id="plan-promotion"></a>
 
 ### Local promotion for owner access
