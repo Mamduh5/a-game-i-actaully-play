@@ -492,6 +492,8 @@ Primal Instinct and Close Call may both activate when their separate evasion con
 
 Resonance is hero-owned, separate from Architect Structural Resonance, Arcane Tether Resonant Current, and any similarly named effect. Legitimate rune, summon and Fusion interactions may participate when explicitly compatible, without creating artificial attack-source identities.
 
+**C02 provisional tuning under OWNER-T04/O20 and PR09.** A starter weapon hit on a life linked by the Conductor's most recent Burst earns one charge for that life. This requires a later resolved group and the Conductor's own weapon. A committed Burst spends the stored charges (maximum five), including on a miss. It links up to one plus the spent charges in distinct reachable hostiles, in nearest-first order. Each link uses 96 units of reach, 18 base magical damage and the cast's shared four-second cooldown. This gives a starter-accessible weapon and manual combination. Adjust the rule and coefficients in the starter combat delivery and rules resources after owner playtesting. [C02 evidence](records/C02.md)
+
 ### H04. The Chronomancer - unlockable
 <a id="catalog-h04"></a>
 
@@ -666,6 +668,8 @@ Ownership follows the triggering player. Compatible powers may change jumps, tar
 ### R03. Force - starter
 
 Eligible hits add directional knockback according to actual attack geometry. Sword pushes by impact direction, Bow along projectile travel, Staff outward from its sigil center. Enemy-specific displacement resistance applies; bosses are not automatically immune. Preserve original attack damage. Compatible secondary attacks/physical objects may carry force when explicitly eligible. No movement means no displacement-dependent Blood Wake, Storm Relay or Collision Burst, even if the hit itself is valid.
+
+**C02 provisional starter tuning under OWNER-T04 (§8).** Sword and Staff push radially from the committed swing or sigil center. Bow uses its launch heading. Unresisted travel is 20 units. A target exactly at a radial center receives no directional motion. Each eligible primary weapon hit can send one 10-damage magical arc to a distinct nearby hostile, with 64 units of reach and a clear path. Storm Relay uses the same targeting rule from the actual displaced position. The two arcs may reach the same secondary. These settings keep ordinary weapon damage intact and make clipping and resistance observable. Adjust reach, distance and potency in the starter combat rules after owner playtesting. [C02 evidence](records/C02.md)
 
 ### R04. Flame - unlockable
 
