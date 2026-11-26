@@ -56,6 +56,7 @@ static func open(store: ProfileStore, catalog: DefinitionCatalog, rules: String,
 			continue
 		var previous: Offer = result._offers.get(_key(offer.id, offer.rank - 1))
 		if (previous == null or previous.basis_points != offer.basis_points
+				or (previous.account == RARE and offer.account == COMMON)
 				or (previous.account == offer.account and offer.price.compare(previous.price) <= 0)):
 			return null
 	return result

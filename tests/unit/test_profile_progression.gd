@@ -135,6 +135,16 @@ func test_shop_rejects_invalid_rank_schedules() -> void:
 		return
 	assert_null(ProfileShop.open(_alice, _catalog, "rules-v1", [_offer(&"movement", 2, ProfileShop.COMMON, 10, 400)]))
 	assert_null(ProfileShop.open(_alice, _catalog, "rules-v1", [
+		_offer(&"movement", 1, ProfileShop.COMMON, 6, 400),
+		_offer(&"movement", 2, ProfileShop.RARE, 2, 400),
+		_offer(&"movement", 3, ProfileShop.COMMON, 1, 400),
+	]))
+	assert_not_null(ProfileShop.open(_alice, _catalog, "rules-v1", [
+		_offer(&"movement", 1, ProfileShop.COMMON, 6, 400),
+		_offer(&"movement", 2, ProfileShop.RARE, 2, 400),
+		_offer(&"movement", 3, ProfileShop.RARE, 3, 400),
+	]))
+	assert_null(ProfileShop.open(_alice, _catalog, "rules-v1", [
 		_offer(&"movement", 1, ProfileShop.COMMON, 9, 400),
 		_offer(&"movement", 2, ProfileShop.COMMON, 9, 400),
 	]))
