@@ -38,6 +38,12 @@ var _last_tick := -1
 var _arrows: Array[Arrow] = []
 var _sigils: Array[Sigil] = []
 var _effects: Array[Cue] = []
+var _resonance: int
+var _linked_lives: Dictionary[StringName, int] = {}
+var _last_resonance_group: CombatInstant
+
+var resonance: int:
+	get: return _resonance
 
 
 static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, preparation: RunPreparation,
@@ -145,30 +151,64 @@ func _harmonic_burst(tick: int, source: CombatantState, center: RealmSweep.Point
 	var nearby := _geometry.certify_circle_snapshot(_geometry.realm_id, center, _rules.harmonic_reach, _hostiles, _actor)
 	if not _certified(nearby):
 		return Attempt.FAULT
-	var nearest := INF
 	var links: Array[RealmGeometry.Contact] = []
+	var distances: Dictionary[StringName, float] = {}
+	var reached: Dictionary[StringName, RealmGeometry.Contact] = {}
 	for contact: RealmGeometry.Contact in nearby.contacts:
 		var at := _geometry.circle_center(contact.entity, contact.shape)
 		if at == null or _living_target(contact.entity) == null:
 			continue
 		var distance := (at.x - center.x) ** 2 + (at.y - center.y) ** 2
-		if distance >= nearest:
+		if distance >= float(distances.get(contact.entity, INF)):
 			continue
 		var path := _blockers_between(center, at)
 		if not _certified(path):
 			return Attempt.FAULT
 		if path.contacts.is_empty():
-			nearest = distance
-			links.assign([contact])
+			distances[contact.entity] = distance
+			reached[contact.entity] = contact
+	var candidates := reached.keys()
+	candidates.sort_custom(func(a: StringName, b: StringName) -> bool:
+		return distances[a] < distances[b] if distances[a] != distances[b] else String(a) < String(b))
+	for i: int in mini(candidates.size(), _resonance + 1):
+		links.append(reached[candidates[i]])
 	var action := _action(source, tick, 1, StarterCombatRules.HARMONIC_BURST, _rules.harmonic_damage,
 		_rules.harmonic_cooldown, CombatAction.Damage.MAGICAL)
 	var result := _instant_delivery(action, tick, links)
-	if result == Attempt.COMMITTED and not links.is_empty():
-		var at := _geometry.circle_center(links[0].entity, links[0].shape)
-		var cue := _ring(StarterCombatRules.HARMONIC_BURST, center, sqrt(nearest), tick, tick + 10)
+	if result != Attempt.COMMITTED:
+		return result
+	_resonance = 0
+	_linked_lives.clear()
+	for contact: RealmGeometry.Contact in links:
+		var at := _geometry.circle_center(contact.entity, contact.shape)
+		var cue := _ring(StarterCombatRules.HARMONIC_BURST, center, sqrt(distances[contact.entity]), tick, tick + 10)
 		cue.heading = PlayerControlState.direction(center, at, RealmSweep.Point.new(1.0, 0.0))
 		_effects.append(cue)
 	return result
+
+
+## An owned weapon following a landed Burst link on the same life earns one
+## charge. Snapshot earlier links so contacts in one group cannot self-prime.
+func observe_closed_group(group: CombatKernel.WaveResult) -> void:
+	if (_hero != StarterCombatRules.CONDUCTOR or group == null or group.result != CombatKernel.Result.CLOSED
+			or group.due == null or (_last_resonance_group != null
+			and _last_resonance_group.order_against(group.due) != RealmCircleTime.Order.BEFORE)):
+		return
+	_last_resonance_group = group.due
+	var actor := _kernel.actor_snapshot(_actor)
+	if actor == null or not actor.is_alive():
+		return
+	var fresh: Dictionary[StringName, int] = {}
+	for hit: CombatKernel.Hit in group.hits:
+		if (hit.source != _actor or hit.source_life != actor.life or not hit.accepted or not hit.hostile
+				or hit.origin == null or hit.origin.owner != actor.owner or hit.parent != 0):
+			continue
+		if hit.family == StarterCombatRules.HARMONIC_BURST and not hit.eliminated:
+			fresh[hit.target] = hit.target_life
+		elif hit.family == _weapon.id and _linked_lives.get(hit.target, 0) == hit.target_life:
+			_linked_lives.erase(hit.target)
+			_resonance = mini(_rules.resonance_cap, _resonance + 1)
+	_linked_lives.merge(fresh, true)
 
 
 ## A run supplies the settled poses and planned obstacle motion at this

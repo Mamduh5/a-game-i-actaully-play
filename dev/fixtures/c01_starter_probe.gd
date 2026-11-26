@@ -138,6 +138,7 @@ class Rules extends RunAuthority:
 				continue
 			if closed.result != CombatKernel.Result.CLOSED:
 				return false
+			combat.observe_closed_group(closed)
 			for hit: CombatKernel.Hit in closed.hits:
 				trace.append([closed.due.tick, String(hit.family), String(hit.target), hit.eliminated])
 		return true

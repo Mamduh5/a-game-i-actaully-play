@@ -89,6 +89,7 @@ class Arena:
 			var wave := kernel.resolve_next(now)
 			if wave.result == CombatKernel.Result.INTERRUPTED:
 				return []
+			combat.observe_closed_group(wave)
 			results.append_array(wave.hits)
 			next = kernel.next_due()
 		kernel.advance_survival(now)
@@ -153,6 +154,32 @@ func test_zero_charge_harmonic_burst_links_one_reached_hostile_and_commits_an_em
 	assert_true(arena.settle(ready).is_empty())
 	assert_eq(arena.combat.try_manual(ready + 1), StarterCombat.Attempt.REJECTED)
 	assert_eq(arena.hp(&"blocked").native_at_scale(0), 100)
+
+
+func test_conductor_earns_once_per_linked_life_and_spends_only_on_committed_casts() -> void:
+	var arena := Arena.new(&"W01", StarterCombatRules.CONDUCTOR)
+	for i: int in 7:
+		assert_true(arena.add(StringName("foe%d" % i), 30 + i * 3, 0, 10000))
+	var tick := 1
+	for charges: int in 6:
+		assert_eq(arena.combat.resonance, charges)
+		assert_eq(arena.combat.try_manual(tick), Committed)
+		assert_eq(arena.settle(tick).size(), charges + 1)
+		assert_eq(arena.combat.resonance, 0)
+		assert_eq(arena.attack(tick + 1), Committed)
+		assert_eq(arena.settle(tick + 1).size(), 7)
+		var earned := mini(charges + 1, 5)
+		assert_eq(arena.combat.resonance, earned)
+		assert_eq(arena.combat.try_manual(tick + 2), StarterCombat.Attempt.REJECTED)
+		assert_eq(arena.attack(tick + 61), Committed)
+		arena.settle(tick + 61)
+		assert_eq(arena.combat.resonance, earned)
+		tick += arena.rules.harmonic_cooldown
+	for i: int in 7:
+		assert_true(arena.move(StringName("foe%d" % i), 400 + i * 10, 0))
+	assert_eq(arena.combat.try_manual(tick), Committed)
+	assert_true(arena.settle(tick).is_empty())
+	assert_eq(arena.combat.resonance, 0)
 
 
 func test_authored_weapons_are_distinct_and_usable_with_a_different_starter_hero() -> void:
