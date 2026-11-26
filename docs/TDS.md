@@ -163,6 +163,8 @@ A catalog entry declares the catalyst capability a form offers to other recipes,
 - **Sanguine Aegis.** Vital Exchange 5 needs Reprisal Pulse ownership for Crimson Reservoir. Reprisal Pulse 5 needs Vital Exchange ownership for Mirror Guard. Both base powers are obtainable first. Each evolved form explicitly retains the base catalyst capability needed for the other, so either selection order works. An occupied base slot without that declared capability fails validation. A later selection combines the two slots. Fortify only a valid barrier with real reserve, and charge/release from its own absorbed hostile damage. [GDS F06](GDS.md#catalog-f06)
 - **Delivery exceptions.** An authored precision mechanism may redirect the next eligible automatic attack to a discovered object. Submit it through ordinary targeting, payment, range, obstruction and timing. Dangerous objects take genuine incidental hits, and undiscovered secrets stay hidden. Declare per-activation, channel-interval, pulse, explicitly per-target and child costs separately. Validate resources before each newly priced interval. An unaffordable interval supplies neither free delivery nor a refund of earlier commitments. [GDS §§2.2, 3.6](GDS.md#gds-controls)
 
+WP20's writer candidate retains the base slots on transformation, resolves equipped runes and authored retained capabilities, and freezes separate Evolution and Fusion rotations in the same one-pick offer. A native witness verifies the transformed selection path and a paid interval retaining its pre-selection delivery snapshot. Independent review and the later authored recipe behavior witnesses remain scheduled. [WP20 implementation and evidence](records/WP20.md)
+
 <a id="tds-world"></a>
 
 ## 4. World and encounters
