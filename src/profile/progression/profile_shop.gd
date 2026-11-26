@@ -110,7 +110,7 @@ func upgrade_basis_points(id: StringName) -> int:
 func _eligible(offer: Offer) -> bool:
 	if offer.rank > 0:
 		return offer.rank == 1 or _facts.has_claim(_key(offer.id, offer.rank - 1))
-	if not _facts.has_claim(_facts.discovery_claim(offer.id)):
+	if not _facts.has_discovery(offer.id):
 		return false
 	var unlocks := _facts.preparation_unlocks()
 	unlocks[offer.id] = true

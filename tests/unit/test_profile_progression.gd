@@ -95,6 +95,41 @@ func test_rank_prerequisite_and_private_balances_hold_under_contending_requests(
 	assert_true(bob.close())
 
 
+func test_signed_discoveries_survive_reopen_and_unlock_only_the_original_recipient() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var issuer := Crypto.new().generate_rsa(2048)
+	var recipient := Crypto.new().generate_rsa(2048)
+	var binding := ProfileGrant.Binding.new()
+	binding.issuer = issuer
+	binding.recipient_key = recipient
+	binding.recipient = "alice"
+	binding.run = "discovery-run"
+	binding.rules = "rules-v1"
+	binding.catalog = String(_catalog.revision)
+	assert_eq(ProfileGrantSettlement.retain_original_binding(_alice, binding, recipient).status, STATUS.COMMITTED)
+	for id: String in ["H99", "R99"]:
+		var envelope := ProfileGrant.sign_authorization(binding, issuer, "found-" + id,
+			ProfileGrant.Kind.DISCOVERY, id, Quantity.from_count(1))
+		assert_eq(ProfileGrantSettlement.apply(_alice, binding, recipient, envelope).receipt.status, STATUS.COMMITTED)
+		assert_eq(ProfileGrantSettlement.apply(_alice, binding, recipient, envelope).receipt.status, STATUS.DUPLICATE)
+	assert_true(_alice.close())
+	assert_eq(_alice.open("alice", _scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var facts := ProfileProgression.open(_alice, _catalog)
+	assert_true(facts.preparation_unlocks().has(&"R99"))
+	assert_eq(facts.access_to(&"H99"), ProfileProgression.Access.DISCOVERED)
+	assert_false(facts.preparation_unlocks().has(&"H99"))
+	assert_eq(_fund(_alice, "earnings", ProfileShop.COMMON, 9), STATUS.COMMITTED)
+	var shop := ProfileShop.open(_alice, _catalog, binding.rules, _offers())
+	assert_eq(shop.buy("hero", &"H99").status, STATUS.COMMITTED)
+	assert_eq(shop.buy("hero", &"H99").status, STATUS.DUPLICATE)
+	assert_not_null(facts.prepare(&"H99", &"W01", [&"R99", &""], _empty_candidates()))
+	assert_true(_alice.close())
+	assert_eq(_alice.open("bob", _scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_false(facts.has_discovery(&"R99"))
+	assert_eq(ProfileProgression.open(_alice, _catalog).access_to(&"H99"), ProfileProgression.Access.LOCKED)
+
+
 func test_shop_rejects_invalid_rank_schedules() -> void:
 	if not OS.has_feature("windows"):
 		return

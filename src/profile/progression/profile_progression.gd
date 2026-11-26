@@ -45,6 +45,11 @@ func discovery_claim(id: StringName) -> String:
 	return "progression/discovery/%s" % id
 
 
+func has_discovery(id: StringName) -> bool:
+	var local_claim := discovery_claim(id)
+	return not local_claim.is_empty() and (has_claim(local_claim) or has_claim("discovery/%s" % id))
+
+
 func ownership_claim(id: StringName) -> String:
 	var content := definition(id)
 	if content == null or content.kind not in PREPARATION_KINDS or content.eligibility != CatalogEntry.Eligibility.OWNERSHIP:
@@ -69,7 +74,7 @@ func access_to(id: StringName) -> Access:
 		return Access.STARTER
 	if has_claim(ownership_claim(id)):
 		return Access.OWNED
-	if has_claim(discovery_claim(id)):
+	if has_discovery(id):
 		return Access.DISCOVERED
 	return Access.LOCKED
 
