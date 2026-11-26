@@ -273,7 +273,8 @@ static func _strip_bonus(id: Variant, shown: Dictionary, ordinal: int, choices: 
 		return false
 	if id.is_empty():
 		return true
-	return choices.get(id) == 1 and int(shown.get(id, 0)) >= ordinal and choices.erase(id)
+	var value: Variant = choices.get(id)
+	return value is int and value == 1 and int(shown.get(id, 0)) >= ordinal and choices.erase(id)
 
 
 static func _valid_frozen_options(kind: Kind, rows: Variant, eligible: Array[StringName], shown: Dictionary, ordinal: int) -> bool:

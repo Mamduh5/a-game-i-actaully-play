@@ -98,6 +98,12 @@ func test_two_legal_fusions_can_conflict_over_a_third_rune() -> void:
 	entries[10].catalyst.target_id = &"rune.one"
 	catalog = DefinitionCatalog.compile(&"test", entries)
 	assert_true(catalog.can_build([&"fusion.a", &"fusion.b"]))
+	entries[11].fusion_runes = [_ref(&"rune.three")]
+	catalog = DefinitionCatalog.compile(&"test", entries)
+	assert_true(catalog.is_valid(), str(catalog.issues()))
+	assert_true(catalog.can_build([&"fusion.a"]))
+	assert_true(catalog.can_build([&"fusion.b"]))
+	assert_false(catalog.can_build([&"fusion.a", &"fusion.b"]))
 
 
 func test_build_cannot_select_two_forms_of_one_power_or_reuse_a_fused_slot() -> void:

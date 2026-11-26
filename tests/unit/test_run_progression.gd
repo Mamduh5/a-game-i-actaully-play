@@ -470,6 +470,83 @@ func test_fusion_rune_requirements_and_retained_capability_control_the_separate_
 		assert_eq(resumed.select(frozen.ordinal, &"E03A"), Selection.APPLIED if retains else Selection.STALE_OPTION)
 
 
+func test_fusion_keeps_issued_pulse_and_cooldown_while_new_commitments_use_its_family() -> void:
+	var prep := _recipe_preparation([&"", &""])
+	var queue := RunRewardQueue.begin(prep, RunRandom.new(6), &"host")
+	_rank_recipe_bases(queue)
+	for tick: int in [11, 12]:
+		var offer := queue.read_offer(queue.earn(tick))
+		assert_eq(queue.select(offer.ordinal, offer.evolution), Selection.APPLIED)
+	var fusion_offer := queue.earn(13)
+	var kernel := CombatKernel.new()
+	var hero := _delivery_actor(&"hero")
+	hero.resources[&"mana"] = Quantity.from_count(10)
+	assert_true(kernel.add_actor(hero))
+	assert_true(kernel.add_actor(_delivery_actor(&"target")))
+	var geometry := RealmGeometry.new(&"core")
+	var center := RealmSweep.Point.new(0.0, 0.0)
+	assert_true(geometry.add_circle(&"target", 0, center, 1.0, 1))
+	var contact := geometry.certify_circle_sweep(&"core", center, center, 0.0, 1).contacts[0]
+	var old_form := prep.catalog.lookup(queue.active_form(&"P07"))
+	var start := CombatInstant.at_tick(1)
+	var schedule := CombatDeliverySchedule.create(start, 7, 2, true)
+	var paid := CombatDelivery.activate_pulse(schedule, schedule.due_through(start), kernel,
+		_priced_pulse(old_form, 1, 1, 2, 2), &"core")
+	assert_eq(paid.result, CombatDelivery.PulseResult.PAID)
+	assert_eq(queue.select(fusion_offer, &"F06"), Selection.APPLIED)
+	var combined := prep.catalog.lookup(queue.active_form(&"P07"))
+	assert_eq(schedule.next_tick.tick, 3)
+	assert_eq(schedule.due_through(CombatInstant.at_tick(3)).ordinal, 2)
+	assert_null(CombatDelivery.activate(kernel, _priced_pulse(combined, 2, 2, 7, 3), &"core"))
+	assert_eq(kernel.actor_snapshot(&"hero").resources[&"mana"].native_at_scale(0), 8)
+	assert_eq(paid.delivery.admit(3, contact, 1, true), CombatDelivery.Result.ADMITTED)
+	assert_true(paid.delivery.finish())
+	var current_action := _priced_pulse(combined, 5, 2, 7, 3)
+	var current := CombatDelivery.activate(kernel, current_action, &"core")
+	assert_not_null(current)
+	assert_null(CombatDelivery.activate(kernel, current_action, &"core"))
+	assert_eq(current.admit(5, contact, 1, true), CombatDelivery.Result.ADMITTED)
+	assert_true(current.finish())
+	var through := CombatInstant.at_tick(6)
+	var old_hit := kernel.resolve_next(through).hits[0]
+	var new_hit := kernel.resolve_next(through).hits[0]
+	assert_eq(old_hit.family, old_form.source_family)
+	assert_eq(new_hit.family, combined.source_family)
+	assert_eq(old_hit.origin.committed_at.tick, 1)
+	assert_eq(new_hit.origin.committed_at.tick, 5)
+	assert_eq(kernel.actor_snapshot(&"target").hp.amount.native_at_scale(0), 11)
+	assert_eq(kernel.actor_snapshot(&"hero").resources[&"mana"].native_at_scale(0), 5)
+
+
+static func _delivery_actor(id: StringName) -> CombatantState:
+	var actor := CombatantState.new()
+	actor.id = id
+	actor.realm = &"core"
+	actor.owner = id
+	actor.life = 1
+	actor.max_hp = Quantity.from_count(20)
+	actor.hp = QuantityLayerLedger.Pool.new(actor.max_hp, QuantityErrorBounds.new())
+	return actor
+
+
+static func _priced_pulse(form: CatalogDefinition, tick: int, ordinal: int, damage: int, cost: int) -> CombatAction:
+	var action := CombatAction.new()
+	action.source = &"hero"
+	action.source_life = 1
+	action.family = form.source_family
+	action.origin = CombatOrigin.new()
+	action.origin.owner = &"hero"
+	action.origin.activation = ordinal
+	action.origin.committed_at = CombatInstant.at_tick(tick)
+	action.cooldown = &"component-slot"
+	action.cooldown_ticks = 4
+	action.activation_costs[&"mana"] = Quantity.from_count(cost)
+	var component := CombatAction.Component.new()
+	component.base = Quantity.from_count(damage)
+	action.components = [component]
+	return action
+
+
 func _rank_recipe_bases(queue: RunRewardQueue) -> void:
 	var tick := 0
 	for base: StringName in [&"P07", &"P12"]:

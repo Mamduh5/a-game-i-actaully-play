@@ -149,11 +149,15 @@ func _request_preparation() -> void:
 
 
 func _option_text(offer: RunRewardQueue.Offer, id: StringName) -> String:
+	if id == offer.evolution:
+		return "%s · Evolution" % _display(id)
+	if id == offer.fusion:
+		return "%s · Fusion" % _display(id)
 	match offer.kind:
 		RunRewardQueue.Kind.POWER: return "%s · Rank %d" % [_display(id), offer.options[id]]
 		RunRewardQueue.Kind.OVERFLOW:
 			var step: int = RunRewardQueue.OVERFLOW_STEPS[offer.options[id] - 1]
-			return "%s +%g%%" % [_display(id), step / 100.0]
+			return "%s +%s%%" % [_display(id), String.num(step / 100.0, 2)]
 		RunRewardQueue.Kind.UTILITY: return "1 Trade Shard"
 	return _display(id)
 
