@@ -181,6 +181,11 @@ class Echo:
 	var due: CombatInstant
 	var last_advanced: int
 
+class EchoCue:
+	var center: RealmSweep.Point
+	var radius: float
+	var due: int
+
 class Wake:
 	var realm: StringName
 	var start: RealmSweep.Point
@@ -754,7 +759,10 @@ func _advance_wakes(group: Group) -> bool:
 ## One extra logical step per tick of overlap. A retry cannot move the same
 ## pending repetition twice, and reaching the current boundary fires it there.
 func compress_echoes(owner: StringName, realm: StringName, tick: int, center: RealmSweep.Point, radius: float) -> bool:
-	if not _accepting() or center == null or not is_finite(radius) or radius <= 0.0:
+	var now := CombatInstant.at_tick(tick)
+	if (not _accepting() or owner.is_empty() or not _geometry.has(realm) or center == null or now == null
+			or not is_finite(center.x) or not is_finite(center.y) or not is_finite(radius) or radius <= 0.0
+			or (_closed != null and _closed.order_against(now) != RealmCircleTime.Order.BEFORE)):
 		return false
 	for echo: Echo in _echoes:
 		if echo.origin.owner != owner or echo.realm != realm or echo.last_advanced >= tick or echo.due.tick <= tick:
@@ -763,6 +771,18 @@ func compress_echoes(owner: StringName, realm: StringName, tick: int, center: Re
 			echo.due = CombatInstant.at_tick(echo.due.tick - 1)
 			echo.last_advanced = tick
 	return true
+
+
+func echo_cues(owner: StringName, realm: StringName) -> Array[EchoCue]:
+	var result: Array[EchoCue] = []
+	for echo: Echo in _echoes:
+		if echo.origin.owner == owner and echo.realm == realm:
+			var cue := EchoCue.new()
+			cue.center = PlayerControlState.copy_point(echo.center)
+			cue.radius = echo.radius
+			cue.due = echo.due.tick
+			result.append(cue)
+	return result
 
 
 func _schedule_echo(group: Group, posting: Posting) -> bool:
@@ -776,7 +796,10 @@ func _schedule_echo(group: Group, posting: Posting) -> bool:
 	if center == null and geometry != null:
 		center = geometry.circle_center(hit.target, hit.shape)
 	var at := group.receipt.due
-	var start := at.tick + int(at.order_against(CombatInstant.at_tick(at.tick)) == RealmCircleTime.Order.AFTER)
+	var boundary := at.order_against(CombatInstant.at_tick(at.tick))
+	if boundary not in [RealmCircleTime.Order.SAME, RealmCircleTime.Order.AFTER]:
+		return false
+	var start := at.tick + int(boundary == RealmCircleTime.Order.AFTER)
 	if center == null or start > RunAuthority.MAX_TICK - parent.echo_delay:
 		return false
 	var echo := Echo.new()

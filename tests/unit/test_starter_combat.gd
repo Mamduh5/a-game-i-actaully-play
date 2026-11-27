@@ -191,6 +191,33 @@ func test_temporal_echo_rechecks_the_impact_area_after_owner_death_and_mitigates
 		assert_null(arena.kernel.next_due())
 
 
+func test_temporal_echo_from_arrow_preserves_contact_point_and_one_typed_damage_snapshot() -> void:
+	var arena := Arena.new(&"W02", &"H04", false, &"", &"", {&"H04": true})
+	assert_true(arena.add(&"aim", 34, 0, 100))
+	assert_true(arena.add(&"arrival", 150, 0, 100, HOSTILE, false))
+	assert_eq(arena.attack(1), Committed)
+	var due := -1
+	for tick: int in range(1, 41):
+		assert_true(arena.combat.advance(tick))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			if hit.family == &"W02":
+				var cues := arena.kernel.echo_cues(HERO, REALM)
+				assert_eq(cues.size(), 1)
+				if cues.size() == 1:
+					assert_almost_eq(cues[0].center.x, 31.0, 0.000001)
+					due = cues[0].due
+					cues[0].center.x = 999
+				assert_true(arena.move(&"aim", 100, 0))
+				assert_true(arena.move(&"arrival", 20, 0))
+			else:
+				assert_eq(tick, due)
+				assert_eq(hit.family, StarterCombatRules.TEMPORAL_ECHO)
+				assert_eq(hit.target, &"arrival")
+	assert_eq(arena.hp(&"aim").native_at_scale(0), 76)
+	assert_eq(arena.hp(&"arrival").native_at_scale(0), 94)
+	assert_null(arena.kernel.next_due())
+
+
 func test_zero_charge_harmonic_burst_links_one_reached_hostile_and_commits_an_empty_cast() -> void:
 	var arena := Arena.new(&"W02", &"H03")
 	assert_true(arena.add(&"blocked", 16, 0, 100))

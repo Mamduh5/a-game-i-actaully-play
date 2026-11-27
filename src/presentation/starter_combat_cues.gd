@@ -33,6 +33,7 @@ func _draw() -> void:
 					center - axis * 5.0 - axis.orthogonal() * 4.0]), ARROW)
 			&"W03": _circle(center, cue.reach, SIGIL, _tick >= cue.impact)
 			StarterCombatRules.TIME_FRACTURE: _circle(center, cue.reach, Color("#8bd9ed"), true)
+			StarterCombatRules.TEMPORAL_ECHO: _circle(center, cue.reach, Color("#f2d5ff"), false)
 			&"RP02.blood_wake":
 				var end := center + Vector2(cue.heading.x, cue.heading.y) * cue.reach
 				var ink := Color("#e78491")

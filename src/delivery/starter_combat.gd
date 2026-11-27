@@ -343,6 +343,9 @@ func advance(tick: int) -> bool:
 
 func cues() -> Array[Cue]:
 	var visible: Array[Cue] = []
+	if _hero == StarterCombatRules.CHRONOMANCER:
+		for echo: CombatKernel.EchoCue in _kernel.echo_cues(_actor, _geometry.realm_id):
+			visible.append(_ring(StarterCombatRules.TEMPORAL_ECHO, echo.center, echo.radius, echo.due, echo.due))
 	for effect: Cue in _effects:
 		visible.append(_copy_cue(effect))
 	for sigil: Sigil in _sigils:
