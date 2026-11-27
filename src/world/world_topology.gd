@@ -6,6 +6,8 @@ const REVISION := 1
 const OVERWORLD := &"overworld"
 const OPTIONAL_REALMS := [&"inverted_archive", &"silent_garden", &"fractured_beyond", &"hall_of_echoes"]
 const GATEWAY := &"final_gateway"
+const OBSERVATORY := &"silent_observatory"
+const EARLY_GATEWAY_WEIGHT := 8
 const ENTRY := &"entry"
 const RETURN_EXIT := &"return_exit"
 const SHORTCUT_DOOR := &"central_shortcut_door"
@@ -15,7 +17,7 @@ const REGIONS := [&"primeval_wilds", &"runic_expanse", &"forgotten_lands"]
 const ANCHORS := [&"ancient_worldtree", &"ancient_foundry", &"fallen_citadel"]
 const OPTIONAL := [
 	[&"beasts_den", &"overgrown_sanctuary", &"whispering_falls"],
-	[&"runic_archive", &"silent_observatory", &"sealed_vault"],
+	[&"runic_archive", OBSERVATORY, &"sealed_vault"],
 	[&"endless_catacombs", &"abandoned_village", &"veiled_shrine"],
 ]
 const RING := [Vector2i(0, 0), Vector2i(1, 0), Vector2i(2, 0),
@@ -198,6 +200,12 @@ func center(id: StringName) -> RealmSweep.Point:
 	if item == null:
 		return null
 	return RealmSweep.Point.new((item.cell.x + 0.5) * MODULE_SIZE, (item.cell.y + 0.5) * MODULE_SIZE)
+
+
+## PR04 uses an independent draw after the layout actually contains the site.
+func has_early_observatory() -> bool:
+	return (_realm == OVERWORLD and _modules.has(OBSERVATORY)
+		and RunRandom.new(_seed).draw(&"pr04_observatory_gateway") % EARLY_GATEWAY_WEIGHT == 0)
 
 
 func realize(blocker_mask: int, shortcut_open: bool = false) -> RealmGeometry:

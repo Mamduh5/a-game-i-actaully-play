@@ -134,8 +134,10 @@ func _connections(geometry: RealmGeometry, point: RealmSweep.Point) -> Array[Vec
 	return connected
 
 
-func reserve_approach(geometry: RealmGeometry, id: StringName, point: RealmSweep.Point) -> bool:
+func reserve_approach(geometry: RealmGeometry, id: StringName, point: RealmSweep.Point,
+		exclusive: bool = false) -> bool:
 	if (geometry == null or geometry.realm_id != _realm or id.is_empty() or point == null
+			or (exclusive and _approaches.has(id))
 			or not is_finite(point.x) or not is_finite(point.y) or absf(point.x) > 1000000 or absf(point.y) > 1000000):
 		return false
 	if _revision != geometry.compatible_revision(_mask):

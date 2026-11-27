@@ -30,25 +30,29 @@ class TravelAuthority extends RunAuthority:
 
 class Route:
 	const Seed := 2507
-	var outer := WorldExploration.create(WorldTopology.generate(Seed), [Host, Guest])
+	var outer: WorldExploration
 	var inner: WorldExploration
 	var kernel := CombatKernel.new()
 	var setup := RunSetup.new()
 	var party: RunParty
 	var authority := TravelAuthority.new()
 	var passages: RunRealmPassages
-	var handle := outer.module_center(WorldTopology.ANCHORS[0])
+	var handle: RealmSweep.Point
 	var sequence: int
+	var seed: int
 
-	func _init(realm: StringName) -> void:
-		inner = WorldExploration.create(WorldTopology.generate_optional(Seed, realm), [Host, Guest])
+	func _init(realm: StringName, world_seed: int = Seed) -> void:
+		seed = world_seed
+		outer = WorldExploration.create(WorldTopology.generate(seed), [Host, Guest])
+		inner = WorldExploration.create(WorldTopology.generate_optional(seed, realm), [Host, Guest])
+		handle = outer.module_center(WorldTopology.ANCHORS[0])
 
 	func begin(catalog: StringName = &"starter") -> bool:
 		setup.run_id = &"passage-test"
 		setup.authority_id = Host
 		setup.initial_realms = {Host: Source, Guest: Source}
 		setup.epoch = 1
-		setup.seed = Seed
+		setup.seed = seed
 		setup.role = RunSetup.Role.HOST
 		setup.rules_revision = &"V42.6/R1"
 		setup.catalog_revision = catalog
