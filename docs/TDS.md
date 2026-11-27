@@ -310,6 +310,8 @@ Use a stable key comprising the original issuer's persistent public identity, un
 
 <a id="tds-storage"></a>
 
+The WP23-O2 exit correction at `1ccb32a` awaits Antigravity/Gemini review. The original opening operation now determines whether quit or suspension can complete after a refused start. A durable opening still requires its closing receipt. [WP23-O2 handoff](records/WP23.md#unopened-activity-exit-review-handoff)
+
 ### Transaction storage and fault boundaries (F-03, NF-02)
 
 **Profile-storage boundary.** Progression owns eligibility, amounts, six grant states and stable operation IDs. A thin platform adapter owns exclusive profile opening, versioned reads, atomic conditional commit of mutation + receipt/outbox/frontier, lookup by operation ID, and consistent backup/reopen/migration. Return committed identity/digest, pending/unknown or a typed failure. Reconcile an ambiguous result by ID before retrying or exposing balances. The caller can observe completion and oldest-pending age. Keep SQLite handles, journal pragmas, browser APIs and filesystem paths inside the adapter.
@@ -464,7 +466,7 @@ Use a continuous local controller for supervised normal play. Give it rendered p
 
 **WP14 independently approved on `dev` (`1f0d5dd`).** The dev fixture sends a restricted 6-field visible frame to an isolated deterministic Python policy process (`-I -u`), dispatches ordinary bound keys from `InputMap` and paired viewport pointer events, and writes privileged evidence only to a separate write-only collector. Independent Antigravity verification reproduced the clean rendered alpha/beta/remapped-replay matrix, passed 15/15 adversarial controls (including left-steering, hidden-field rejection, missed-button world click leak, hazard failure, out-of-range manual rejection and privileged-command rejection), verified clean Player export exclusion and retested integrated `dev` (`5a99478`). [Pilot fixture, review and evidence](records/WP14.md)
 
-**WP32 native solo checkpoint awaits independent review (`1071e6b`).** Generated floor movement, encounter combat and telegraphs share the fixed-step authority. The isolated visible pilot drove three rendered Windows Dev builds with the ordinary router and reproduced each closed trace under alternate presentation. The Player pack excludes the fixture and pilot. Native guest composition and peer play remain open. [WP32 handoff](records/WP32.md#native-solo-encounter-review-handoff)
+**WP32 native solo and guest-input checkpoints await independent review (`1071e6b`, `d639bad`).** Generated floor movement, encounter combat and telegraphs share the fixed-step authority. The isolated visible pilot drove three rendered Windows Dev builds with the ordinary router and reproduced each closed trace under alternate presentation. Two controlled native host/guest pairs posted the guest cast on the confirmed baseline, refused a stale cast and preserved separate movement acknowledgement. The Player pack excludes the fixture and pilot. Rendered native guest composition and sustained peer play remain open. [WP32 handoffs](records/WP32.md#native-solo-encounter-review-handoff)
 
 Keep the player-facing Simple Run Summary to outcome, survival duration, final level, defeats, final build, earned rewards and new unlocks. Contextual Mastery Records have their own approved purpose. Local investigation adds neither required remote telemetry nor a player-facing replay/analytics service. [GDS §§22.2, 25.2](GDS.md#gds-onboarding)
 
