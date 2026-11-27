@@ -7,6 +7,7 @@ enum Admission {
 	QUEUED, INACTIVE, WRONG_RUN, WRONG_EPOCH, WRONG_SEAT, WRONG_REALM,
 	WRONG_TICK, STALE_SEQUENCE, UNSUPPORTED_ACTION, DUPLICATE, CONFLICT, QUEUE_FULL,
 }
+enum Exit { ACTIVE, QUIT, SUSPEND }
 
 const CHECKPOINT_VERSION := 1
 const MAX_OPEN_INTENTS_PER_SEAT := 64
@@ -28,8 +29,8 @@ var _random: RunRandom
 var _closed_tick: int
 var _observation: Dictionary = {}
 var _ordinary_currency: Array[OrdinaryCurrency] = []
-var _quitting := false
-var _settled_quit := false
+var _exit := Exit.ACTIVE
+var _exit_settled := false
 var _resolving := false
 
 
@@ -49,7 +50,7 @@ func belongs_to(run: StringName, epoch: int) -> bool:
 
 
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
-	if (_identity.is_empty() or _quitting or earnings == null
+	if (_identity.is_empty() or _exit != Exit.ACTIVE or earnings == null
 			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])):
 		return false
 	for existing: OrdinaryCurrency in _ordinary_currency:
@@ -61,7 +62,7 @@ func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
 
 ## Also used by the group owner before opening an earning boundary within a tick.
 func can_open_earning_group() -> bool:
-	if _quitting:
+	if _exit != Exit.ACTIVE:
 		return false
 	var permitted := true
 	for earnings: OrdinaryCurrency in _ordinary_currency:
@@ -85,25 +86,38 @@ func service_ordinary_currency() -> void:
 		earnings.service()
 
 
+func settle_orderly_quit() -> bool:
+	return _settle_exit(Exit.QUIT)
+
+
+## Supply the closed authority component after all ordinary earnings settle.
+## WP24 owns the full recovery image and the durable suspension acknowledgement.
+func prepare_orderly_suspension() -> Dictionary:
+	if _identity.get("role") != RunSetup.Role.HOST or not _settle_exit(Exit.SUSPEND):
+		return {}
+	return _closed_checkpoint()
+
+
 ## Fence every account before flushing the first, so a partial success
 ## cannot admit new earnings before the remaining accounts settle.
-func settle_orderly_quit() -> bool:
-	if _identity.is_empty() or _resolving:
+func _settle_exit(requested: Exit) -> bool:
+	if _identity.is_empty() or _resolving or (_exit == Exit.QUIT and requested != Exit.QUIT):
 		return false
-	if not _quitting:
-		_quitting = true
+	var starting := _exit == Exit.ACTIVE
+	_exit = requested
+	if starting:
 		for earnings: OrdinaryCurrency in _ordinary_currency:
 			earnings.end_earning()
-	if not _settled_quit:
-		_settled_quit = flush_ordinary_currency()
-	return _settled_quit
+	if not _exit_settled:
+		_exit_settled = flush_ordinary_currency()
+	return _exit_settled
 
 
 ## Apply the accepted interact at its closed boundary. Revoke any input
 ## already queued for this seat's old realm and keep the shared clock.
 func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, destination: RealmGeometry,
 		at: RealmSweep.Point) -> bool:
-	if (_quitting or intent == null or party == null or source == null or destination == null
+	if (_exit != Exit.ACTIVE or intent == null or party == null or source == null or destination == null
 			or intent.action != PlayerCommand.INTERACT or intent.tick != _closed_tick
 			or not belongs_to(intent.run_id, intent.epoch) or not party.belongs_to(intent.run_id, intent.epoch)
 			or source.realm_id != intent.realm_id or _realms.get(intent.seat_id) != source.realm_id
@@ -132,7 +146,7 @@ func retire_reliable_interactions(run: StringName, epoch: int, seat: StringName,
 
 ## The binding is supplied by the adapter. The intent alone cannot nominate its sender.
 func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
-	if _identity.is_empty() or _quitting or intent == null or _closed_tick >= MAX_TICK:
+	if _identity.is_empty() or _exit != Exit.ACTIVE or intent == null or _closed_tick >= MAX_TICK:
 		return Admission.INACTIVE
 	if intent.run_id != _identity["run"]:
 		return Admission.WRONG_RUN
@@ -218,8 +232,12 @@ func closed_result() -> Dictionary:
 
 ## The last closed admission/RNG frontier. Pending intents are never checkpointed.
 func checkpoint() -> Dictionary:
-	if _identity.is_empty() or _quitting:
+	if _identity.is_empty() or _exit != Exit.ACTIVE:
 		return {}
+	return _closed_checkpoint()
+
+
+func _closed_checkpoint() -> Dictionary:
 	var sequences: Dictionary[StringName, int] = {}
 	for seat: StringName in _inputs:
 		sequences[seat] = _inputs[seat].primary.through

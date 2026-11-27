@@ -144,6 +144,45 @@ func test_orderly_quit_retries_the_same_receipt_and_seals_all_earning_before_exi
 	assert_true(store.close())
 
 
+func test_host_suspension_keeps_the_last_closed_frontier_until_earnings_are_durable() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var solo := _authority()
+	assert_true(solo.prepare_orderly_suspension().is_empty())
+	assert_true(solo.close_tick())
+	var scratch := DirAccess.create_temp("agip-ordinary-suspension")
+	var store := LostResultStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var authority := _authority(RunSetup.Role.HOST)
+	var earnings := OrdinaryCurrency.begin(store, _binding("alice", _issuer), _issuer, Currency)
+	assert_true(authority.attach_ordinary_currency(earnings))
+	assert_true(authority.close_tick())
+	var frontier := authority.checkpoint()
+	assert_eq(earnings.accrue("last-before-suspension", Quantity.from_count(17)), Add.QUEUED)
+	var operation := earnings.dispatch(true)
+	assert_true(authority.prepare_orderly_suspension().is_empty())
+	assert_eq(store.lookup(operation).status, Commit.MISSING)
+	assert_eq(earnings.pending_amount().native_at_scale(0), 17)
+	assert_eq(earnings.accrue("after-suspension", Quantity.from_count(1)), Add.FENCED)
+	assert_true(authority.checkpoint().is_empty())
+	assert_false(authority.close_tick())
+	assert_eq(authority.next_tick(), 2)
+	store.keep = true
+	var settled := authority.prepare_orderly_suspension()
+	assert_eq(settled, frontier)
+	settled["tick"] = 9
+	assert_eq(authority.prepare_orderly_suspension(), frontier)
+	assert_eq(store.lookup(operation).status, Commit.COMMITTED)
+	assert_false(authority.can_open_earning_group())
+	assert_true(authority.settle_orderly_quit())
+	assert_true(authority.prepare_orderly_suspension().is_empty())
+	assert_true(store.close())
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(store.balance(Currency).native_at_scale(0), 17)
+	assert_eq(store.checkpoint()["generation"], 1)
+	assert_true(store.close())
+
+
 func test_failed_flush_retains_original_batch_then_reconciles_lost_success() -> void:
 	if not OS.has_feature("windows"):
 		return
@@ -266,8 +305,9 @@ func _binding(profile: String, recipient: CryptoKey) -> ProfileGrant.Binding:
 	return result
 
 
-static func _authority() -> RunAuthority:
+static func _authority(role: RunSetup.Role = RunSetup.Role.SOLO) -> RunAuthority:
 	var setup := RunSetup.new()
+	setup.role = role
 	setup.run_id = &"ordinary-run"
 	setup.epoch = 1
 	setup.rules_revision = &"V42.6/R1"

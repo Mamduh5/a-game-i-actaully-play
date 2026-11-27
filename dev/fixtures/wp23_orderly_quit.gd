@@ -19,7 +19,7 @@ var _store: ProfileStore
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
-	if args.size() != 2 or args[0] not in ["write", "read"]:
+	if args.size() != 2 or args[0] not in ["write", "read", "suspend"]:
 		get_tree().quit(2)
 		return
 	var readback := args[0] == "read"
@@ -34,8 +34,10 @@ func _ready() -> void:
 		var closed := _store.close()
 		get_tree().quit(0 if closed and balance == 17 and generation == 1 else 4)
 		return
+	var suspending := args[0] == "suspend"
 	var setup := RunSetup.new()
-	setup.run_id = &"quit-probe"
+	setup.role = RunSetup.Role.HOST if suspending else RunSetup.Role.SOLO
+	setup.run_id = &"suspend-probe" if suspending else &"quit-probe"
 	setup.epoch = 1
 	setup.rules_revision = &"V42.6/R1"
 	setup.catalog_revision = &"fixture"
@@ -58,7 +60,27 @@ func _ready() -> void:
 			or not shell.bind_run(authority) or earnings.accrue("last-enemy", Quantity.from_count(17)) != OrdinaryCurrency.Eligibility.QUEUED):
 		get_tree().quit(5)
 		return
+	if suspending:
+		_exercise_suspension(authority, earnings)
+		return
 	print("WP23_QUIT awaiting native close")
+
+
+func _exercise_suspension(authority: RunAuthority, earnings: OrdinaryCurrency) -> void:
+	if not authority.close_tick():
+		get_tree().quit(6)
+		return
+	var frontier := authority.checkpoint()
+	var first := authority.prepare_orderly_suspension()
+	var fenced := (not authority.close_tick()
+		and earnings.accrue("after-suspend", Quantity.from_count(1)) == OrdinaryCurrency.Eligibility.FENCED)
+	var pending: Variant = earnings.pending_amount().native_at_scale(0)
+	var settled := authority.prepare_orderly_suspension()
+	var balance: Variant = _store.balance(ACCOUNT).native_at_scale(0)
+	var matches := settled == frontier and settled["tick"] == 1
+	print("WP23_SUSPENSION ", JSON.stringify({"first_refused": first.is_empty(), "fenced": fenced,
+		"pending": pending, "same_frontier": matches, "balance": balance}))
+	get_tree().quit(0 if first.is_empty() and fenced and pending == 17 and matches and balance == 17 else 7)
 
 
 func _exit_tree() -> void:
