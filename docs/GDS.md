@@ -503,6 +503,8 @@ Resonance is hero-owned, separate from Architect Structural Resonance, Arcane Te
 
 **Discovery:** Temporal knowledge in the Inverted Archive, followed by permanent-currency unlock unless a specifically designated direct exception applies.
 
+**C03 provisional tuning under OWNER-T04/O13.** Time Fracture can be placed at a selected point within 180 units along an unobstructed path. The field has radius 48, lasts 90 ticks and has a 240-tick cooldown. Each tick of overlap advances an existing owned Arcane Sigil by one extra tick, up to its single activation. The reduced waiting time leaves the sigil fixed at its committed position. Adjust the Fracture fields in StarterCombatRules after owner playtesting. [C03 evidence](records/C03.md)
+
 ### H05. The Gravity Weaver - unlockable
 <a id="catalog-h05"></a>
 
