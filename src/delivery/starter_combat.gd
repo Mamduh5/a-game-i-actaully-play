@@ -87,13 +87,13 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 		result._weapon_rate = Quantity.from_count(rate, 4)
 		result._close_call_rate = Quantity.from_count(rate + rules.close_call_basis_points, 4)
 	else:
-		result._weapon.cooldown_ticks = _rate_period(weapon.cooldown_ticks, frequency)
+		result._weapon.cooldown_ticks = RunPreparation.rate_period(weapon.cooldown_ticks, frequency)
 	var recovery := preparation.upgrade_basis_points(&"manual_cooldown_recovery")
-	result._rules.siphon_cooldown = _rate_period(rules.siphon_cooldown, recovery)
-	result._rules.vault_cooldown = _rate_period(rules.vault_cooldown, recovery)
-	result._rules.gravity_cooldown = _rate_period(rules.gravity_cooldown, recovery)
-	result._rules.harmonic_cooldown = _rate_period(rules.harmonic_cooldown, recovery)
-	result._rules.fracture_cooldown = _rate_period(rules.fracture_cooldown, recovery)
+	result._rules.siphon_cooldown = RunPreparation.rate_period(rules.siphon_cooldown, recovery)
+	result._rules.vault_cooldown = RunPreparation.rate_period(rules.vault_cooldown, recovery)
+	result._rules.gravity_cooldown = RunPreparation.rate_period(rules.gravity_cooldown, recovery)
+	result._rules.harmonic_cooldown = RunPreparation.rate_period(rules.harmonic_cooldown, recovery)
+	result._rules.fracture_cooldown = RunPreparation.rate_period(rules.fracture_cooldown, recovery)
 	result._hero = preparation.hero
 	result._force_equipped = &"R03" in preparation.runes()
 	result._lightning_equipped = &"R02" in preparation.runes()
@@ -105,15 +105,6 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	result._hostiles = hostiles
 	result._blockers = blockers
 	return result
-
-
-## Round the adjusted period up to the next eligible whole tick. Express the
-## reduction by quotient and remainder to avoid multiplying a full-size period.
-@warning_ignore("integer_division")
-static func _rate_period(period: int, bonus: int) -> int:
-	var rate := RunPreparation.BASIS_POINTS + bonus
-	var reduction := (period / rate) * bonus + ((period % rate) * bonus) / rate
-	return period - reduction
 
 
 func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerTargeting.Candidate],

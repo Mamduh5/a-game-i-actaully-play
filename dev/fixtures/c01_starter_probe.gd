@@ -7,6 +7,7 @@ const Realm := &"arena"
 const Foe := 1
 const Wall := 2
 const Ally := 4
+const POWER_CASES := ["familiar", "mines", "lance", "tether"]
 
 class Rules extends RunAuthority:
 	var geometry := RealmGeometry.new(Realm)
@@ -26,9 +27,13 @@ class Rules extends RunAuthority:
 	var launches: int
 	var uncredited_barrier := -1
 	var passed := true
+	var prepared: bool
 
-	func initialize(which: String) -> bool:
+	func initialize(which: String, prepared_offense: bool) -> bool:
+		if prepared_offense and which not in POWER_CASES:
+			return false
 		scenario = which
+		prepared = prepared_offense
 		var tuning: StarterCombatRules = load("res://src/catalog/starter_combat.tres")
 		var roster: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		var catalog := roster.compile()
@@ -54,7 +59,10 @@ class Rules extends RunAuthority:
 			runes.assign([&"R01", &"R03"])
 		elif which == "rupture":
 			runes.assign([&"R01", &"R02"])
-		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, unlocked)
+		var upgrades: Dictionary[StringName, int] = {}
+		if prepared:
+			upgrades = {&"base_damage": 2500, &"automatic_attack_frequency": 2500}
+		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, unlocked, upgrades)
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
@@ -63,7 +71,7 @@ class Rules extends RunAuthority:
 				or not kernel.attach_geometry(geometry, Wall)):
 			return false
 		combat = StarterCombat.create(tuning, catalog, prep, kernel, geometry, Player, Foe, Foe, Wall)
-		if which in ["familiar", "mines", "lance", "tether"]:
+		if which in POWER_CASES:
 			var rewards := RunRewardQueue.begin(prep, RunRandom.new(17), Player)
 			var family: StringName = {"familiar": &"P02", "mines": &"P03", "lance": &"P04", "tether": &"P14"}[which]
 			for event: int in range(1, 100):
@@ -265,17 +273,18 @@ class Rules extends RunAuthority:
 			"tether":
 				return (trace == [[16, "P14", "first", false], [16, "P14", "last", false],
 					[16, "P14", "visitor", false], [46, "P14", "first", false], [46, "P14", "last", false]]
-					and kernel.actor_snapshot(&"first").hp.amount.native_at_scale(0) == 168)
+					and kernel.actor_snapshot(&"first").hp.amount.native_at_scale(0) == (160 if prepared else 168))
 			"lance":
 				return (trace.size() == 2 and trace[0].slice(1) == ["P04", "edge", false]
 					and trace[1].slice(1) == ["P04", "rear", false] and trace[0][0] < trace[1][0]
 					and kernel.actor_snapshot(&"aim").hp.amount.native_at_scale(0) == 200
-					and kernel.actor_snapshot(&"edge").hp.amount.native_at_scale(0) == 180
-					and kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0) == 175)
+					and kernel.actor_snapshot(&"edge").hp.amount.native_at_scale(0) == (175 if prepared else 180)
+					and kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(2) == (16875 if prepared else 17500)
+					and (lance.position() != null) == prepared)
 			"mines":
 				return (trace == [[13, "P03", "left", false], [35, "P03", "arrival", false], [35, "P03", "left", false]]
-					and kernel.actor_snapshot(&"left").hp.amount.native_at_scale(0) == 130
-					and kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0) == 154
+					and kernel.actor_snapshot(&"left").hp.amount.native_at_scale(0) == (118 if prepared else 130)
+					and kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0) == (148 if prepared else 154)
 					and mines.positions().is_empty())
 			"fracture":
 				return (launches == 1 and manual == 1 and trace == [[22, "W03", "arrival", false],
@@ -283,10 +292,12 @@ class Rules extends RunAuthority:
 					and kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0) == 70
 					and kernel.actor_snapshot(&"aim").hp.amount.native_at_scale(0) == 100)
 			"familiar":
-				var dart_hits := 0
+				var dart_contacts: Array[int] = []
 				for row: Array in trace:
-					dart_hits += int(row[1] == "P02")
-				return (manual == 1 and dart_hits == 4 and familiar.position().y < 350
+					if row[1] == "P02":
+						dart_contacts.append(row[0])
+				return (manual == 1 and dart_contacts == ([4, 4, 6, 6, 54, 54, 57] if prepared else [4, 4, 6, 6])
+					and familiar.position().y < 350
 					and layer_units(StarterCombatRules.SIPHON) > 0)
 			"rupture":
 				return (launches == 1 and kernel.pending_count() == 0 and trace.size() == 6
@@ -345,7 +356,7 @@ var _reduced: bool
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
-	if args.is_empty() or not _rules.initialize(args[0]):
+	if args.is_empty() or not _rules.initialize(args[0], args.size() > 2 and args[2] == "prepared"):
 		set_physics_process(false)
 		get_tree().quit(1)
 		return
@@ -410,18 +421,27 @@ func _physics_process(_delta: float) -> void:
 			_rules.layer_units(StarterCombatRules.HARVEST), _rules.layer_units(StarterCombatRules.SIPHON),
 		]
 	queue_redraw()
-	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
+	var capture_ticks: Array = {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
 			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23],
-			"mines": [6, 18, 38], "lance": [3, 10], "tether": [18, 33, 48]}[_case]:
+			"mines": [6, 18, 38], "lance": [3, 10], "tether": [18, 33, 48]}[_case]
+	var extra_capture := _rules.prepared and ((_case == "familiar" and tick == 50) or (_case == "lance" and tick == 59))
+	if not _capture_dir.is_empty() and (tick in capture_ticks or extra_capture):
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
-	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
+	var finish_tick := 60 if _rules.prepared else int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59))
+	if tick >= finish_tick or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
 		var pose := _rules.geometry.circle_center(Player, 0)
 		var facts := [_case, _rules.trace, snappedf(pose.y, 0.001), _rules.launches, _rules.manual,
 			_rules.layer_units(StarterCombatRules.HARVEST), _rules.layer_units(StarterCombatRules.SIPHON)]
 		var serial := JSON.stringify(facts)
 		print("C01 passed=%s hash=%s facts=%s" % [good, serial.sha256_text(), serial])
+		if _rules.prepared:
+			var hp_hundredths: Dictionary[StringName, int] = {}
+			for target: PlayerTargeting.Candidate in _rules.targets:
+				hp_hundredths[target.id] = _rules.kernel.actor_snapshot(target.id).hp.amount.native_at_scale(2)
+			print("WP21_POWER ", JSON.stringify({"case": _case, "passed": good, "hits": _rules.trace,
+				"hp_hundredths": hp_hundredths}))
 		get_tree().quit(0 if good else 1)
 
 

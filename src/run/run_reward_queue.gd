@@ -61,6 +61,16 @@ static func begin(preparation: RunPreparation, random: RunRandom, bound_seat: St
 	return queue
 
 
+func prepared_base_damage(authored: int) -> Quantity:
+	var base := Quantity.from_count(authored)
+	var bonus := _preparation.upgrade_basis_points(&"base_damage")
+	return base.multiply(Quantity.from_count(RunPreparation.BASIS_POINTS + bonus, 4)) if bonus != 0 else base
+
+
+func prepared_attack_period(authored: int) -> int:
+	return RunPreparation.rate_period(authored, _preparation.upgrade_basis_points(&"automatic_attack_frequency"))
+
+
 func earn(tick: int) -> int:
 	if tick < 0 or tick > RunAuthority.MAX_TICK or not can_earn(1):
 		return 0

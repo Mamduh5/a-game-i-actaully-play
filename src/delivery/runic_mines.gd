@@ -24,6 +24,7 @@ var _targets: int
 var _blockers: int
 var _rewards: RunRewardQueue
 var _combat: StarterCombat
+var _placement_period: int
 var _next_cycle: int
 var _last_tick := -1
 var _mines: Array[Mine] = []
@@ -44,6 +45,7 @@ static func create(owner: StringName, rewards: RunRewardQueue, kernel: CombatKer
 	result._targets = targets
 	result._blockers = blockers
 	result._combat = combat
+	result._placement_period = rewards.prepared_attack_period(PERIOD)
 	return result
 
 
@@ -63,7 +65,7 @@ func advance(tick: int) -> bool:
 			and source.realm == _geometry.realm_id and _rewards.active_form(FAMILY) == FAMILY):
 		if not _place_cycle(source, tick, _rewards.ranks()[FAMILY]):
 			return false
-		_next_cycle = tick + PERIOD
+		_next_cycle = tick + _placement_period
 	var now := CombatInstant.at_tick(tick)
 	for index: int in range(_mines.size() - 1, -1, -1):
 		var mine := _mines[index]
@@ -110,7 +112,7 @@ func _place_cycle(source: CombatantState, tick: int, rank: int) -> bool:
 		action.origin.committed_at = CombatInstant.at_tick(tick)
 		var part := CombatAction.Component.new()
 		part.kind = CombatAction.Damage.MAGICAL
-		part.base = Quantity.from_count(16 + 4 * int(rank >= 2) + 4 * int(rank >= 4))
+		part.base = _rewards.prepared_base_damage(16 + 4 * int(rank >= 2) + 4 * int(rank >= 4))
 		action.components = [part]
 		var mine := Mine.new()
 		mine.center = point

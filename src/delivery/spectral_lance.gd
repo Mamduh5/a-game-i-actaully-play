@@ -9,6 +9,7 @@ const PERIOD := 72
 
 var _owner: StringName
 var _rewards: RunRewardQueue
+var _attack_period: int
 var _kernel: CombatKernel
 var _geometry: RealmGeometry
 var _targets: int
@@ -31,6 +32,7 @@ static func create(owner: StringName, rewards: RunRewardQueue, kernel: CombatKer
 	var result := SpectralLance.new()
 	result._owner = owner
 	result._rewards = rewards
+	result._attack_period = rewards.prepared_attack_period(PERIOD)
 	result._kernel = kernel
 	result._geometry = geometry
 	result._targets = targets
@@ -71,7 +73,7 @@ func _launch(tick: int, source: CombatantState, start: RealmSweep.Point, aim: Re
 	action.source_life = source.life
 	action.family = FAMILY
 	action.cooldown = FAMILY
-	action.cooldown_ticks = PERIOD
+	action.cooldown_ticks = _attack_period
 	action.origin = CombatOrigin.new()
 	action.origin.owner = source.owner
 	action.origin.provenance = source.provenance
@@ -81,7 +83,7 @@ func _launch(tick: int, source: CombatantState, start: RealmSweep.Point, aim: Re
 	action.ascending_pierce = rank == 5
 	var part := CombatAction.Component.new()
 	part.kind = CombatAction.Damage.MAGICAL
-	part.base = Quantity.from_count(12 + 4 * int(rank >= 2) + 4 * int(rank >= 4))
+	part.base = _rewards.prepared_base_damage(12 + 4 * int(rank >= 2) + 4 * int(rank >= 4))
 	action.components = [part]
 	_delivery = CombatDelivery.activate(_kernel, action, _geometry.realm_id, 0, true)
 	if _delivery == null:

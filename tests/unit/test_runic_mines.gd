@@ -26,6 +26,32 @@ func test_twin_mines_freeze_placement_rank_and_charge_independently_at_detonatio
 	assert_true(mines.positions().is_empty())
 
 
+func test_prepared_offense_changes_placement_period_and_base_with_same_arming_and_pressure() -> void:
+	for upgraded: bool in [false, true]:
+		var upgrades: Dictionary[StringName, int] = {&"manual_cooldown_recovery": 2500}
+		if upgraded:
+			upgrades[&"base_damage"] = 2500
+			upgrades[&"automatic_attack_frequency"] = 2500
+		var arena := Arena.new(&"W01")
+		assert_true(arena.add(&"foe", 100, 0, 200))
+		var rewards := FamiliarTest._earn(arena, 5, &"P03", upgrades)
+		var mines := RunicMines.create(HERO, rewards, arena.kernel, arena.geometry, 1, 2)
+		var activations: Array[int] = []
+		var contacts: Array[int] = []
+		var damage: Array[int] = []
+		for tick: int in range(1, 108):
+			if tick == 14:
+				assert_true(arena.move(&"foe", -16, 0))
+			assert_true(mines.advance(tick))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				activations.append(hit.origin.activation)
+				contacts.append(tick)
+				damage.append(hit.components[0].hp_removed.native_at_scale(0))
+		assert_eq(activations, [1, 73 if upgraded else 91])
+		assert_eq(contacts, [14, 85 if upgraded else 103])
+		assert_eq(damage, [31, 30] if upgraded else [25, 24])
+
+
 func test_crossing_triggers_at_exact_subtick_and_blast_samples_every_other_trajectory_there() -> void:
 	var arena := Arena.new(&"W01")
 	assert_true(arena.add(&"entrant", -30, 0, 100))

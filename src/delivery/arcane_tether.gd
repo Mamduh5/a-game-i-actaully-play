@@ -12,6 +12,7 @@ var _kernel: CombatKernel
 var _geometry: RealmGeometry
 var _rewards: RunRewardQueue
 var _owner: StringName
+var _link_period: int
 var _targets: int
 var _blockers: int
 var _last_tick := -1
@@ -31,6 +32,7 @@ static func create(owner: StringName, rewards: RunRewardQueue, kernel: CombatKer
 	var result := ArcaneTether.new()
 	result._owner = owner
 	result._rewards = rewards
+	result._link_period = rewards.prepared_attack_period(COOLDOWN)
 	result._kernel = kernel
 	result._geometry = geometry
 	result._targets = targets
@@ -149,11 +151,11 @@ func _start(source: CombatantState, now: CombatInstant, candidates: Array[Player
 	action.origin.activation = now.tick
 	action.origin.committed_at = now
 	action.cooldown = FAMILY
-	action.cooldown_ticks = COOLDOWN
+	action.cooldown_ticks = _link_period
 	action.resonant_interval = PERIOD if rank == 5 else 0
 	var part := CombatAction.Component.new()
 	part.kind = CombatAction.Damage.MAGICAL
-	part.base = Quantity.from_count(8 + 4 * int(rank >= 2) + 4 * int(rank >= 4))
+	part.base = _rewards.prepared_base_damage(8 + 4 * int(rank >= 2) + 4 * int(rank >= 4))
 	action.components = [part]
 	_link = CombatTether.activate(_kernel, action, _geometry, first, last, LIFETIME, PERIOD, _reach, 1)
 	_reconnected = false

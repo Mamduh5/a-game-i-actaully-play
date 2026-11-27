@@ -24,6 +24,7 @@ var _kernel: CombatKernel
 var _geometry: RealmGeometry
 var _owner: StringName
 var _rewards: RunRewardQueue
+var _attack_period: int
 var _targets: int
 var _blockers: int
 var _position: RealmSweep.Point
@@ -43,6 +44,7 @@ static func create(kernel: CombatKernel, geometry: RealmGeometry, owner: StringN
 	result._geometry = geometry
 	result._owner = owner
 	result._rewards = rewards
+	result._attack_period = rewards.prepared_attack_period(PERIOD)
 	result._targets = targets
 	result._blockers = blockers
 	return result
@@ -111,7 +113,7 @@ func _launch(tick: int, actor: CombatantState, target: RealmSweep.Point, rank: i
 	action.source_life = actor.life
 	action.family = FAMILY
 	action.cooldown = FAMILY
-	action.cooldown_ticks = PERIOD
+	action.cooldown_ticks = _attack_period
 	action.origin = CombatOrigin.new()
 	action.origin.owner = actor.owner
 	action.origin.provenance = actor.provenance
@@ -119,7 +121,7 @@ func _launch(tick: int, actor: CombatantState, target: RealmSweep.Point, rank: i
 	action.origin.activation = tick
 	action.origin.committed_at = CombatInstant.at_tick(tick)
 	var part := CombatAction.Component.new()
-	part.base = Quantity.from_count(8 + 2 * int(rank >= 2) + 2 * int(rank >= 4))
+	part.base = _rewards.prepared_base_damage(8 + 2 * int(rank >= 2) + 2 * int(rank >= 4))
 	action.components = [part]
 	var volley := Volley.new()
 	volley.delivery = CombatDelivery.activate(_kernel, action, _geometry.realm_id, 0, true)

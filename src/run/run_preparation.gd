@@ -90,6 +90,15 @@ func upgrade_basis_points(stat: StringName) -> int:
 	return _upgrades.get(stat, 0)
 
 
+## Round up to the next eligible whole tick. The quotient and remainder keep
+## the reduction exact without multiplying a full-size period.
+@warning_ignore("integer_division")
+static func rate_period(period: int, bonus: int) -> int:
+	var rate := BASIS_POINTS + bonus
+	var reduction := (period / rate) * bonus + ((period % rate) * bonus) / rate
+	return period - reduction
+
+
 func checkpoint() -> Array:
 	var result := [_hero, _weapon, runes(), candidates(), _unlocked.duplicate()]
 	if not _upgrades.is_empty():

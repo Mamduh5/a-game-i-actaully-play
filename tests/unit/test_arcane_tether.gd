@@ -4,6 +4,27 @@ const Arena := preload("res://tests/unit/test_starter_combat.gd").Arena
 const PowerRanks := preload("res://tests/unit/test_sketch_familiar.gd")
 
 
+func test_prepared_offense_changes_link_reactivation_without_changing_pulses_or_lifetime() -> void:
+	for upgraded: bool in [false, true]:
+		var upgrades: Dictionary[StringName, int] = {&"manual_cooldown_recovery": 2500}
+		if upgraded:
+			upgrades[&"base_damage"] = 2500
+			upgrades[&"automatic_attack_frequency"] = 2500
+		var arena := Arena.new(&"W01")
+		assert_true(arena.add(&"foe", 45, 0, 200))
+		var rewards := PowerRanks._earn(arena, 1, &"P14", upgrades)
+		var tether := ArcaneTether.create(&"hero", rewards, arena.kernel, arena.geometry, 1, 2)
+		var contacts: Array[int] = []
+		for tick: int in range(1, 137):
+			assert_true(tether.advance(tick, arena.candidates))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				contacts.append(tick)
+				assert_eq(hit.components[0].hp_removed.native_at_scale(0), 10 if upgraded else 8)
+			if tick == 90 or tick == 91:
+				assert_eq(tether.visible_segment().size(), 2 if tick == 90 else 0)
+		assert_eq(contacts, [16, 31, 46, 61, 76, 91, 112, 127] if upgraded else [16, 31, 46, 61, 76, 91, 136])
+
+
 func test_rank_five_contacts_follow_endpoints_and_losing_one_interval_resets_only_that_enemy() -> void:
 	var arena := Arena.new(&"W01")
 	assert_false(&"P14" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.POWER, {}))
