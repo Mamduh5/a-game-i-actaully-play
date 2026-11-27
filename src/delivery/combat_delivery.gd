@@ -159,8 +159,11 @@ func bind_mine(charge: CombatMineCharge) -> bool:
 	return _kernel.bind_mine(_commitment, charge)
 
 
-func detonate_mine(at: CombatInstant) -> bool:
-	return _kernel.detonate_mine(_commitment, at)
+func offer_mine_entry(at: CombatInstant, entrant: StringName, contacts: Array[RealmGeometry.Contact]) -> bool:
+	if _next_part == Quantity.INT_MAX or not _kernel.offer_mine_entry(_commitment, _next_part, at, entrant, contacts):
+		return false
+	_next_part += 1
+	return true
 
 
 static func _insert_contact(ordered: Array[RealmGeometry.Contact], candidate: RealmGeometry.Contact) -> bool:

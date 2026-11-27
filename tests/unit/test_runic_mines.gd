@@ -63,3 +63,25 @@ func test_compression_advances_arming_without_a_charge_wait() -> void:
 		var hits := arena.settle(tick)
 		assert_eq(hits.size(), 1 if tick == 7 else 0)
 	assert_eq(arena.hp(&"waiter").native_at_scale(0), 84)
+
+
+func test_mine_survives_when_an_earlier_root_kills_the_only_expected_entrant() -> void:
+	var arena := Arena.new(&"W01")
+	assert_true(arena.add(&"entrant", -30, 0, 10))
+	assert_true(arena.add(&"bystander", 26, 0, 100))
+	var mines := RunicMines.create(HERO, FamiliarTest._earn(arena, 1, &"P03"), arena.kernel, arena.geometry, 1, 2)
+	for tick: int in range(1, 13):
+		assert_true(mines.advance(tick))
+		arena.settle(tick)
+	assert_true(arena.geometry.stage_circle_motion(&"entrant", 0, RealmSweep.Point.new(30, 0)))
+	assert_true(mines.advance(13))
+	assert_true(arena.swing_from(HERO, &"entrant", 15, 13))
+	arena.settle(14)
+	assert_eq(mines.positions().size(), 1)
+	assert_eq(arena.hp(&"bystander").native_at_scale(0), 100)
+	assert_true(mines.advance(14))
+	assert_true(arena.move(&"bystander", 5, 0))
+	assert_true(mines.advance(15))
+	arena.settle(15)
+	assert_eq(arena.hp(&"bystander").native_at_scale(0), 84)
+	assert_true(mines.positions().is_empty())

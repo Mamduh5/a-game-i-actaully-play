@@ -49,6 +49,13 @@ static func create(placed: CombatInstant, arm_delay: int, lifetime: int,
 ## The delivery owner submits the certified trigger instant. An armed mine
 ## has no extra minimum wait to reach a given charge.
 func detonate(at: CombatInstant) -> Quantity:
+	var charged := potency_at(at)
+	if charged != null:
+		_end = End.DETONATED
+	return charged
+
+
+func potency_at(at: CombatInstant) -> Quantity:
 	if (_end != End.LIVE or at == null
 			or _armed.order_against(at) not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]
 			or at.order_against(_expiry) not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]):
@@ -62,10 +69,7 @@ func detonate(at: CombatInstant) -> Quantity:
 	var room := _cap.subtract(_base)
 	if room == null:
 		return null
-	var charged := _cap if addition.compare(room) >= 0 else _base.add(addition)
-	if charged != null:
-		_end = End.DETONATED
-	return charged
+	return _cap if addition.compare(room) >= 0 else _base.add(addition)
 
 
 ## Run after delivery through the deadline, including a valid deadline trigger.

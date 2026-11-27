@@ -107,7 +107,6 @@ class WaveResult:
 
 class Commitment:
 	var armed_mine: CombatMineCharge
-	var detonation: CombatInstant
 	var action: CombatAction
 	var realm: StringName
 	var parts: Dictionary[int, bool] = {}
@@ -132,6 +131,14 @@ class Impact:
 	var inherited_statuses: Dictionary[StringName, int] = {}
 	var uses_inherited_statuses: bool
 	var ancestry: Ancestry
+
+class MineEntry:
+	var charge: CombatMineCharge
+	var entrant: StringName
+	var life: int
+	var visit: int
+	var realm: StringName
+	var blast: Array[Impact] = []
 
 class Ancestry:
 	var key: String
@@ -159,6 +166,7 @@ class ReactionClaim:
 	var shape: int
 
 class Group:
+	var detonations: Array[CombatMineCharge] = []
 	var echoes: Array[Echo] = []
 	var wakes: Array[Wake] = []
 	var bleeds: Dictionary[StringName, CombatBleedLedger] = {}
@@ -214,6 +222,7 @@ var _actions: Dictionary[String, Commitment] = {}
 var _hp_activations: Dictionary[String, Commitment] = {}
 var _latest_activation: Dictionary[String, int] = {}
 var _impacts: Dictionary[String, Impact] = {}
+var _mine_entries: Dictionary[String, MineEntry] = {}
 var _queue := CombatRootQueue.new()
 var _closed: CombatInstant
 var _fault: StringName
@@ -496,17 +505,49 @@ func bind_mine(key: String, mine: CombatMineCharge) -> bool:
 	return true
 
 
-## A placed mine retains its owner's paid action. Seal one potency before
-## admitting any simultaneous explosion contacts, even after the owner dies.
-func detonate_mine(key: String, at: CombatInstant) -> bool:
+## Register a prospective entry. A preceding combat group can eliminate the
+## entrant before this instant, leaving the mine for another eligible crossing.
+func offer_mine_entry(key: String, part: int, at: CombatInstant, entrant: StringName,
+		contacts: Array[RealmGeometry.Contact]) -> bool:
 	var held: Commitment = _actions.get(key)
-	if not _accepting() or held == null or held.armed_mine == null or not held.parts.is_empty():
+	var actor: CombatantState = _actors.get(entrant)
+	if (not _accepting() or held == null or held.armed_mine == null or part < 1 or held.parts.has(part)
+			or actor == null or not actor.is_alive() or actor.realm != held.realm or at == null
+			or (_closed != null and _closed.order_against(at) != RealmCircleTime.Order.BEFORE)):
 		return false
-	var potency := held.armed_mine.detonate(at)
+	var potency := held.armed_mine.potency_at(at)
 	if potency == null:
 		return false
-	held.action.components[0].base = potency
-	held.detonation = at
+	var action := held.action.copy()
+	action.components[0].base = potency
+	var origin := action.origin.copy()
+	origin.delivery_part = part
+	var entry := MineEntry.new()
+	entry.charge = held.armed_mine
+	entry.entrant = entrant
+	entry.life = actor.life
+	entry.visit = actor.realm_visit
+	entry.realm = held.realm
+	var seen: Dictionary[StringName, bool] = {}
+	for contact: RealmGeometry.Contact in contacts:
+		var target: CombatantState = _actors.get(contact.entity)
+		if target == null or target.realm != held.realm or not target.is_alive() or seen.has(target.id):
+			continue
+		seen[target.id] = true
+		var impact := Impact.new()
+		impact.action = action
+		impact.origin = origin
+		impact.root_occurrence = origin.occurrence_key()
+		impact.target = target.id
+		impact.target_life = target.life
+		impact.target_visit = target.realm_visit
+		impact.shape = contact.shape
+		impact.hostile = true
+		entry.blast.append(impact)
+	if _queue.admit(origin, at) != CombatRootQueue.Result.ACCEPTED:
+		return false
+	held.parts[part] = true
+	_mine_entries[origin.occurrence_key()] = entry
 	return true
 
 
@@ -526,8 +567,7 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 		if source == null or source.life != held.action.source_life or not _live_controller(_actors, source):
 			return CombatRootQueue.Result.INVALID
 	var due := CombatInstant.at_contact(start_tick, contact.proof)
-	if held.armed_mine != null and (held.detonation == null or due == null
-			or held.detonation.order_against(due) != RealmCircleTime.Order.SAME):
+	if held.armed_mine != null:
 		return CombatRootQueue.Result.INVALID
 	if due != null and _closed != null and _closed.order_against(due) != RealmCircleTime.Order.BEFORE:
 		return CombatRootQueue.Result.CLOSED_INSTANT
@@ -688,6 +728,12 @@ func _open_group(through: CombatInstant) -> WaveResult:
 		_group.receipt.activations.append(paid)
 	for origin: CombatOrigin in wave.origins:
 		var impact: Impact = _impacts.get(origin.occurrence_key())
+		var entry: MineEntry = _mine_entries.get(origin.occurrence_key())
+		if entry != null and entry.charge.end_reason == CombatMineCharge.End.LIVE and entry.charge not in _group.detonations:
+			var entrant := _group.actors[entry.entrant]
+			if entrant.is_alive() and entrant.life == entry.life and entrant.realm_visit == entry.visit and entrant.realm == entry.realm:
+				_group.detonations.append(entry.charge)
+				_group.pending.append_array(entry.blast)
 		if impact == null or (not impact.activation.is_empty()
 				and _group.activation_outcomes[impact.activation] != ActivationOutcome.PAID):
 			continue
@@ -1022,6 +1068,9 @@ func _publish_group() -> WaveResult:
 	_echoes = group.echoes
 	for origin: CombatOrigin in group.root.origins:
 		_impacts.erase(origin.occurrence_key())
+		_mine_entries.erase(origin.occurrence_key())
+	for charge: CombatMineCharge in group.detonations:
+		charge.detonate(group.receipt.due)
 	for key: String in group.activation_outcomes:
 		var held := _hp_activations[key]
 		if group.activation_outcomes[key] == ActivationOutcome.PAID:
@@ -1044,6 +1093,7 @@ func _retire_combat_work() -> void:
 	_echoes.clear()
 	_queue = CombatRootQueue.new()
 	_impacts.clear()
+	_mine_entries.clear()
 	_actions.clear()
 	_hp_activations.clear()
 

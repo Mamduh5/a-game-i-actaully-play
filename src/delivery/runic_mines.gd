@@ -50,7 +50,8 @@ static func create(owner: StringName, rewards: RunRewardQueue, kernel: CombatKer
 func positions() -> Array[RealmSweep.Point]:
 	var result: Array[RealmSweep.Point] = []
 	for mine: Mine in _mines:
-		result.append(PlayerControlState.copy_point(mine.center))
+		if mine.charge.end_reason == CombatMineCharge.End.LIVE:
+			result.append(PlayerControlState.copy_point(mine.center))
 	return result
 
 
@@ -70,7 +71,8 @@ func advance(tick: int) -> bool:
 			mine.charge.compress_arming(tick)
 		if mine.charge.armed_at(now) and not _check_trigger(mine, tick):
 			return false
-		mine.charge.expire(now)
+		if tick > mine.placed + LIFETIME:
+			mine.charge.expire(now)
 		if mine.charge.end_reason != CombatMineCharge.End.LIVE:
 			if not mine.delivery.finish():
 				return false
@@ -124,12 +126,15 @@ func _place_cycle(source: CombatantState, tick: int, rank: int) -> bool:
 
 
 func _check_trigger(mine: Mine, tick: int) -> bool:
+	if tick > mine.placed + LIFETIME:
+		return true
 	var sweep := mine.delivery.plan_sweep(_geometry, mine.center, mine.center, TRIGGER_RADIUS, _targets)
 	if sweep == null:
 		return false
+	var entrants: Dictionary[StringName, bool] = {}
 	for trigger: RealmGeometry.Contact in sweep.contacts:
 		var entrant := _kernel.actor_snapshot(trigger.entity)
-		if entrant == null or not entrant.is_alive() or entrant.realm != _geometry.realm_id:
+		if entrant == null or not entrant.is_alive() or entrant.realm != _geometry.realm_id or entrants.has(entrant.id):
 			continue
 		var at := CombatInstant.at_contact(tick, trigger.proof)
 		if at == null:
@@ -137,14 +142,7 @@ func _check_trigger(mine: Mine, tick: int) -> bool:
 		if at.order_against(CombatInstant.at_tick(mine.placed + LIFETIME)) == RealmCircleTime.Order.AFTER:
 			return true
 		var blast := _geometry.certify_disk_at(_geometry.realm_id, mine.center, BLAST_RADIUS, trigger.proof, _targets, _owner)
-		if blast == null or not blast.unresolved.is_empty() or not mine.delivery.detonate_mine(at):
+		if blast == null or not blast.unresolved.is_empty() or not mine.delivery.offer_mine_entry(at, entrant.id, blast.contacts):
 			return false
-		for contact: RealmGeometry.Contact in blast.contacts:
-			var target := _kernel.actor_snapshot(contact.entity)
-			if target == null or not target.is_alive() or target.realm != _geometry.realm_id:
-				continue
-			if mine.delivery.admit(tick, contact, target.life, true) not in [
-					CombatDelivery.Result.ADMITTED, CombatDelivery.Result.CADENCE]:
-				return false
-		break
+		entrants[entrant.id] = true
 	return true
