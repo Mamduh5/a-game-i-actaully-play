@@ -22,6 +22,13 @@ class SeatInputs:
 	var primary := InputStream.new()
 	var reliable := InputStream.new()
 	var overflowed := false
+	var published_movement: int
+
+class ClosingTick:
+	var accepted: Array[Dictionary] = []
+	var conflicts: Array[Dictionary] = []
+	var overflowed: Array[StringName] = []
+	var outcomes: Array[Dictionary] = []
 
 class PendingGateway:
 	var party: RunParty
@@ -39,8 +46,10 @@ var _observation: Dictionary = {}
 var _ordinary_currency: Array[OrdinaryCurrency] = []
 var _ordinary_session: ProfileOrdinarySession
 var _exit := Exit.ACTIVE
-var _exit_settled := false
+var _ordinary_ending := false
+var _ordinary_settled := false
 var _resolving := false
+var _closing: ClosingTick
 var _gateway: PendingGateway
 
 
@@ -57,7 +66,7 @@ func next_tick() -> int:
 
 func movement_acknowledgement(seat: StringName) -> int:
 	var inputs: SeatInputs = _inputs.get(seat)
-	return inputs.primary.through if inputs != null else -1
+	return inputs.published_movement if inputs != null else -1
 
 
 func belongs_to(run: StringName, epoch: int) -> bool:
@@ -65,7 +74,7 @@ func belongs_to(run: StringName, epoch: int) -> bool:
 
 
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
-	if (_identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null or earnings == null
+	if (_identity.is_empty() or _exit != Exit.ACTIVE or _ordinary_ending or _closing != null or _gateway != null or earnings == null
 			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])
 			or (_ordinary_session != null and not _ordinary_session.tracks(earnings))):
 		return false
@@ -78,7 +87,7 @@ func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
 
 ## The live shell confirms the issuer's activity before opening earning groups.
 func begin_ordinary_session(profile: ProfileStore) -> bool:
-	if _identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null or _resolving or profile == null:
+	if _identity.is_empty() or _exit != Exit.ACTIVE or _ordinary_ending or _gateway != null or _resolving or profile == null:
 		return false
 	if _ordinary_session != null:
 		if not _ordinary_session.uses(profile):
@@ -95,7 +104,8 @@ func begin_ordinary_session(profile: ProfileStore) -> bool:
 
 ## Also used by the group owner before opening an earning boundary within a tick.
 func can_open_earning_group() -> bool:
-	if _exit != Exit.ACTIVE or _gateway != null or (_ordinary_session != null and not _ordinary_session.is_open()):
+	if (_exit != Exit.ACTIVE or _ordinary_ending or _closing != null or _gateway != null
+			or (_ordinary_session != null and not _ordinary_session.is_open())):
 		return false
 	var permitted := true
 	for earnings: OrdinaryCurrency in _ordinary_currency:
@@ -126,7 +136,8 @@ func settle_orderly_quit() -> bool:
 ## Supply the closed authority component after all ordinary earnings settle.
 ## WP24 owns the full recovery image and the durable suspension acknowledgement.
 func prepare_orderly_suspension() -> Dictionary:
-	if _gateway != null or _identity.get("role") != RunSetup.Role.HOST or not _settle_exit(Exit.SUSPEND):
+	if (_gateway != null or _closing != null or (_ordinary_ending and _exit == Exit.ACTIVE)
+			or _identity.get("role") != RunSetup.Role.HOST or not _settle_exit(Exit.SUSPEND)):
 		return {}
 	return _closed_checkpoint()
 
@@ -136,16 +147,23 @@ func prepare_orderly_suspension() -> Dictionary:
 func _settle_exit(requested: Exit) -> bool:
 	if _identity.is_empty() or _resolving or (_exit == Exit.QUIT and requested != Exit.QUIT):
 		return false
-	var starting := _exit == Exit.ACTIVE
 	_exit = requested
-	if starting:
+	return _close_ordinary_session()
+
+
+## The party calls this only after combat or survival has decided a terminal result.
+func settle_terminal_currency() -> bool:
+	return not _identity.is_empty() and _close_ordinary_session()
+
+
+func _close_ordinary_session() -> bool:
+	if not _ordinary_ending:
+		_ordinary_ending = true
 		for earnings: OrdinaryCurrency in _ordinary_currency:
 			earnings.end_earning()
-	if not _exit_settled:
-		_exit_settled = flush_ordinary_currency()
-		if _exit_settled and _ordinary_session != null:
-			_exit_settled = _ordinary_session.settle()
-	return _exit_settled
+	if not _ordinary_settled:
+		_ordinary_settled = flush_ordinary_currency() and (_ordinary_session == null or _ordinary_session.settle())
+	return _ordinary_settled
 
 
 ## Apply the accepted interact at its closed boundary. Revoke any input
@@ -210,7 +228,7 @@ func _progression_can_cross(progression: PartyProgression) -> bool:
 
 
 func _accepted_interaction(intent: RunIntent, party: RunParty) -> bool:
-	return (_exit == Exit.ACTIVE and _gateway == null and not _resolving and intent != null and party != null
+	return (_exit == Exit.ACTIVE and not _ordinary_ending and _gateway == null and not _resolving and intent != null and party != null
 		and intent.action == PlayerCommand.INTERACT and intent.tick == _closed_tick
 		and belongs_to(intent.run_id, intent.epoch) and party.belongs_to(intent.run_id, intent.epoch)
 		and _realms.get(intent.seat_id) == intent.realm_id and intent.receipt() in _observation["accepted"])
@@ -220,6 +238,7 @@ func _retire_scope(seat: StringName) -> void:
 	var inputs := _inputs[seat]
 	for sequence: int in inputs.primary.pending:
 		inputs.primary.through = maxi(inputs.primary.through, sequence)
+	inputs.published_movement = inputs.primary.through
 	inputs.primary.pending.clear()
 	inputs.reliable = InputStream.new()
 	inputs.overflowed = false
@@ -234,7 +253,8 @@ func retire_reliable_interactions(run: StringName, epoch: int, seat: StringName,
 
 ## The binding is supplied by the adapter. The intent alone cannot nominate its sender.
 func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
-	if _identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null or intent == null or _closed_tick >= MAX_TICK:
+	if (_identity.is_empty() or _exit != Exit.ACTIVE or _ordinary_ending or _closing != null or _resolving
+			or _gateway != null or intent == null or _closed_tick >= MAX_TICK):
 		return Admission.INACTIVE
 	if intent.run_id != _identity["run"]:
 		return Admission.WRONG_RUN
@@ -274,15 +294,34 @@ func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
 
 ## Called by the authoritative fixed-step driver. No signals or view callbacks run here.
 func close_tick() -> bool:
-	if _identity.is_empty() or _closed_tick >= MAX_TICK or not can_open_earning_group():
+	if _identity.is_empty() or _closed_tick >= MAX_TICK or _resolving or _exit != Exit.ACTIVE:
 		return false
+	if _closing == null and not can_open_earning_group():
+		return false
+	_resolving = true
+	var tick := next_tick()
+	if _closing == null:
+		_closing = _resolve_open_tick(tick)
+	var published := _finish_resolved_tick(tick, _closing.outcomes)
+	if published:
+		_closed_tick = tick
+		_publish(_closing.accepted, _closing.conflicts, _closing.overflowed, _closing.outcomes)
+		_closing = null
+	_resolving = false
+	return published
+
+
+func has_unpublished_tick() -> bool:
+	return _closing != null
+
+
+func _resolve_open_tick(tick: int) -> ClosingTick:
 	var accepted: Array[RunIntent] = []
-	var conflicts: Array[Dictionary] = []
-	var overflowed: Array[StringName] = []
+	var closing := ClosingTick.new()
 	for seat: StringName in _realms:
 		var inputs := _inputs[seat]
 		if inputs.overflowed:
-			overflowed.append(seat)
+			closing.overflowed.append(seat)
 			inputs.overflowed = false
 		# The two streams keep independent sequence domains. Movement resolves
 		# first and reliable interactions retain their own admitted order.
@@ -295,22 +334,16 @@ func close_tick() -> bool:
 					var conflict := {"seat": seat, "sequence": sequence}
 					if stream == inputs.reliable:
 						conflict["reliable"] = true
-					conflicts.append(conflict)
+					closing.conflicts.append(conflict)
 				else:
 					accepted.append(intent)
 				stream.through = sequence
 			stream.pending.clear()
 
-	var receipts: Array[Dictionary] = []
 	for intent: RunIntent in accepted:
-		receipts.append(intent.receipt())
-	var tick := next_tick()
-	_resolving = true
-	var outcomes := _resolve_tick(tick, accepted, _random)
-	_closed_tick = tick
-	_publish(receipts, conflicts, overflowed, outcomes)
-	_resolving = false
-	return true
+		closing.accepted.append(intent.receipt())
+	closing.outcomes = _resolve_tick(tick, accepted, _random)
+	return closing
 
 
 ## Detached authority result. View adapters must project their permitted subset.
@@ -320,7 +353,7 @@ func closed_result() -> Dictionary:
 
 ## The last closed admission/RNG frontier. Pending intents are never checkpointed.
 func checkpoint() -> Dictionary:
-	if _identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null:
+	if _identity.is_empty() or _exit != Exit.ACTIVE or _closing != null or _resolving or _gateway != null:
 		return {}
 	return _closed_checkpoint()
 
@@ -406,6 +439,8 @@ func _publish(
 		overflowed: Array[StringName],
 		outcomes: Array[Dictionary]
 ) -> void:
+	for inputs: SeatInputs in _inputs.values():
+		inputs.published_movement = inputs.primary.through
 	_observation = {
 		"tick": _closed_tick,
 		"accepted": accepted,
@@ -425,3 +460,8 @@ func _supports_action(_action: StringName) -> bool:
 
 func _resolve_tick(_tick: int, _accepted: Array[RunIntent], _streams: RunRandom) -> Array[Dictionary]:
 	return []
+
+
+## A refused terminal write can keep the resolved batch private for retry.
+func _finish_resolved_tick(_tick: int, _outcomes: Array[Dictionary]) -> bool:
+	return true

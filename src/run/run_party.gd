@@ -397,7 +397,7 @@ func _stage_terminal(result: CombatKernel.Terminal, tick: int) -> void:
 func _close_terminal() -> bool:
 	if _settlement_pending:
 		var authority := _currency_authority.get_ref() as RunAuthority
-		if authority == null or not authority.flush_ordinary_currency():
+		if authority == null or not authority.settle_terminal_currency():
 			return false
 		_settlement_pending = false
 	_tick = _terminal_tick

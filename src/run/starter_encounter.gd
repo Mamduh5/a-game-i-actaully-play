@@ -70,6 +70,7 @@ var _party: RunParty
 var _seats: Dictionary[StringName, Seat] = {}
 var _enemies: Array[StringName] = []
 var _fault: StringName
+var _resolved_near_misses: Dictionary[StringName, bool] = {}
 
 
 ## The run owner supplies already prepared builds and their own reward queues.
@@ -95,7 +96,8 @@ static func assemble(setup: RunSetup, host: StringName, floor: WorldExploration,
 		actors[seat] = seat
 	var realms: Dictionary[StringName, RealmGeometry] = {encounter._geometry.realm_id: encounter._geometry}
 	encounter._party = RunParty.begin(setup, host, encounter._kernel, realms, actors, WorldExploration.BLOCKER)
-	if encounter._party == null or not encounter.start(setup, setup.authority_id):
+	if (encounter._party == null or not encounter.start(setup, setup.authority_id)
+			or not encounter._party.attach_currency_authority(encounter)):
 		encounter._geometry.adopt(draft)
 		return null
 	for seat: StringName in actors:
@@ -178,10 +180,12 @@ func fault() -> StringName:
 
 
 func party_statuses() -> Dictionary[StringName, StringName]:
-	return _party.status_ids()
+	return {} if has_unpublished_tick() else _party.status_ids()
 
 
 func movement_state(seat: StringName, baseline: int, serial: int) -> MovementSnapshot:
+	if has_unpublished_tick():
+		return null
 	var tick := _party.closed_tick
 	var member := _party.view(seat, CombatInstant.at_tick(tick))
 	if member == null:
@@ -212,26 +216,41 @@ func _supports_action(action: StringName) -> bool:
 func _resolve_tick(tick: int, accepted: Array[RunIntent], _streams: RunRandom) -> Array[Dictionary]:
 	var outcomes: Array[Dictionary] = []
 	var frame := _activity.advance(tick, self, _play.bind(tick, accepted, outcomes), _observe_wave)
-	if frame == null or not _party.close_tick(tick):
+	if frame == null:
 		_fault = _activity.fault() if not _activity.fault().is_empty() else &"encounter_boundary"
 		return [{"fault": _fault}]
+	_resolved_near_misses = frame.near_misses
 	for closed: CombatKernel.WaveResult in frame.combat:
 		for hit: CombatKernel.Hit in closed.hits:
 			if hit.accepted:
 				outcomes.append({"at": closed.due.tick, "family": hit.family, "owner": hit.origin.owner,
 					"target": hit.target, "damage": hit.dealt_hostile_damage(), "eliminated": hit.eliminated,
 					"pushed": hit.displacement != null})
-	for id: StringName in frame.near_misses:
+	return outcomes
+
+
+func _finish_resolved_tick(tick: int, outcomes: Array[Dictionary]) -> bool:
+	if not _fault.is_empty():
+		return true
+	if not _party.close_tick(tick):
+		if _party.settlement_pending:
+			return false
+		_fault = &"encounter_boundary"
+		outcomes.assign([{"fault": _fault}])
+		return true
+	for id: StringName in _resolved_near_misses:
 		if not _party.can_control(id):
 			continue
 		if not _seats[id].combat.record_close_call(tick):
 			_fault = &"close_call_frontier"
-			return [{"fault": _fault}]
+			outcomes.assign([{"fault": _fault}])
+			return true
 		outcomes.append({"seat": id, "close_call": true})
+	_resolved_near_misses.clear()
 	for id: StringName in _seats:
 		var state := _party.view(id, CombatInstant.at_tick(tick))
 		_floor.observe_seat(id, state.realm if state.alive else &"", state.position)
-	return outcomes
+	return true
 
 
 func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -> bool:
@@ -339,7 +358,7 @@ func _targets(from: RealmSweep.Point) -> Array[PlayerTargeting.Candidate]:
 ## actors, their projectiles, and hidden source identities for warnings.
 func view_for(id: StringName) -> View:
 	var seat: Seat = _seats.get(id)
-	if seat == null:
+	if seat == null or has_unpublished_tick():
 		return null
 	var actor := _kernel.actor_snapshot(id)
 	var pose := _geometry.circle_center(id, 0)
