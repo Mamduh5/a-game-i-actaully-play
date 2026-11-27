@@ -79,6 +79,14 @@ func advance(tick: int, candidates: Array[PlayerTargeting.Candidate]) -> bool:
 	return true
 
 
+func visible_segment() -> Array[RealmSweep.Point]:
+	var points := endpoints()
+	if points.size() != 2 or not CombatTether._valid_link(points[0], points[1], _reach):
+		return []
+	var clear := _geometry.certify_frozen_path(_geometry.realm_id, points[0], points[1], _width * 0.5, _blockers)
+	return points if clear != null and clear.unresolved.is_empty() and clear.contacts.is_empty() else []
+
+
 func _nearest(origin: RealmSweep.Point, reach: float, candidates: Array[PlayerTargeting.Candidate],
 		distinct_position: bool) -> CombatTether.Endpoint:
 	var best: CombatTether.Endpoint

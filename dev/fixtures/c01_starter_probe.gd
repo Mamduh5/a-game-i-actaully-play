@@ -17,6 +17,7 @@ class Rules extends RunAuthority:
 	var familiar: SketchFamiliar
 	var mines: RunicMines
 	var lance: SpectralLance
+	var tether: ArcaneTether
 	var targets: Array[PlayerTargeting.Candidate] = []
 	var scenario: String
 	var trace: Array[Array] = []
@@ -37,6 +38,9 @@ class Rules extends RunAuthority:
 		slots.fill(&"")
 		var hero := StarterCombatRules.CONDUCTOR if which.begins_with("conductor") else StarterCombatRules.UNDYING
 		var unlocked: Dictionary[StringName, bool] = {}
+		if which == "tether":
+			unlocked[&"P14"] = true
+			slots[0] = &"P14"
 		if which == "fracture":
 			hero = StarterCombatRules.CHRONOMANCER
 			weapon = &"W03"
@@ -59,9 +63,9 @@ class Rules extends RunAuthority:
 				or not kernel.attach_geometry(geometry, Wall)):
 			return false
 		combat = StarterCombat.create(tuning, catalog, prep, kernel, geometry, Player, Foe, Foe, Wall)
-		if which in ["familiar", "mines", "lance"]:
+		if which in ["familiar", "mines", "lance", "tether"]:
 			var rewards := RunRewardQueue.begin(prep, RunRandom.new(17), Player)
-			var family: StringName = {"familiar": &"P02", "mines": &"P03", "lance": &"P04"}[which]
+			var family: StringName = {"familiar": &"P02", "mines": &"P03", "lance": &"P04", "tether": &"P14"}[which]
 			for event: int in range(1, 100):
 				if rewards.ranks().get(family, 0) == 5:
 					break
@@ -74,8 +78,10 @@ class Rules extends RunAuthority:
 				familiar = SketchFamiliar.create(kernel, geometry, Player, rewards, Foe, Wall)
 			elif which == "mines":
 				mines = RunicMines.create(Player, rewards, kernel, geometry, Foe, Wall, combat)
-			else:
+			elif which == "lance":
 				lance = SpectralLance.create(Player, rewards, kernel, geometry, Foe, Wall)
+			else:
+				tether = ArcaneTether.create(Player, rewards, kernel, geometry, Foe, Wall)
 		var setup := RunSetup.new()
 		setup.run_id = Run
 		setup.authority_id = Player
@@ -88,6 +94,9 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"tether":
+				return (tether != null and _enemy(&"first", 400, 380, 200) and _enemy(&"last", 520, 380, 200)
+					and _enemy(&"visitor", 460, 390, 200, false))
 			"lance":
 				return (lance != null and _enemy(&"aim", 374, 380, 200)
 					and _enemy(&"edge", 404, 396, 200, false) and _enemy(&"rear", 444, 380, 200))
@@ -158,7 +167,7 @@ class Rules extends RunAuthority:
 				axes += int(intent.action == PlayerCommand.MOVE_AXES and intent.command.y < 0.0)
 				controls.apply(intent.command)
 		passed = passed and controls.step(geometry, Player, 0, Wall, 100.0, 1.0 / 60.0) != null
-		if (tick == 8 and scenario not in ["undying", "familiar", "mines", "lance"]) or (tick == 68 and scenario == "wake"):
+		if (tick == 8 and scenario not in ["undying", "familiar", "mines", "lance", "tether"]) or (tick == 68 and scenario == "wake"):
 			launches += int(combat.try_weapon(tick, targeting, targets) == StarterCombat.Attempt.COMMITTED)
 		if tick == 11 and scenario in ["bow", "bow-miss"]:
 			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(570, 500))
@@ -181,6 +190,16 @@ class Rules extends RunAuthority:
 			if tick == 2:
 				passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(374, 340))
 			passed = passed and lance.advance(tick, targets)
+		if tether != null:
+			if tick == 28:
+				var wall := RealmOutline.Edge.new()
+				wall.first = RealmSweep.Point.new(458, 350)
+				wall.last = RealmSweep.Point.new(458, 410)
+				passed = passed and geometry.add_segment(&"door", 0, wall, Wall, false)
+			if tick == 43:
+				passed = passed and geometry.remove_mutable(&"door", 0)
+				passed = passed and geometry.commit_circle_pose(&"last", 0, RealmSweep.Point.new(520, 452))
+			passed = passed and tether.advance(tick, targets)
 		if mines != null:
 			if tick == 35:
 				passed = passed and geometry.stage_circle_motion(&"arrival", 0, RealmSweep.Point.new(340, 380))
@@ -243,6 +262,10 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"tether":
+				return (trace == [[16, "P14", "first", false], [16, "P14", "last", false],
+					[16, "P14", "visitor", false], [46, "P14", "first", false], [46, "P14", "last", false]]
+					and kernel.actor_snapshot(&"first").hp.amount.native_at_scale(0) == 168)
 			"lance":
 				return (trace.size() == 2 and trace[0].slice(1) == ["P04", "edge", false]
 					and trace[1].slice(1) == ["P04", "rear", false] and trace[0][0] < trace[1][0]
@@ -371,6 +394,10 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "Spectral Lance\nEdge HP %d   Rear HP %d" % [
 			_rules.kernel.actor_snapshot(&"edge").hp.amount.native_at_scale(0),
 			_rules.kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0)]
+	elif _case == "tether":
+		_hud.text = "Arcane Tether\nEndpoint HP %d   Visitor HP %d" % [
+			_rules.kernel.actor_snapshot(&"first").hp.amount.native_at_scale(0),
+			_rules.kernel.actor_snapshot(&"visitor").hp.amount.native_at_scale(0)]
 	elif _case == "fracture":
 		_hud.text = "The Chronomancer\nTime Fracture"
 	elif _case == "rupture":
@@ -386,7 +413,7 @@ func _physics_process(_delta: float) -> void:
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
 			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23],
-			"mines": [6, 18, 38], "lance": [3, 10]}[_case]:
+			"mines": [6, 18, 38], "lance": [3, 10], "tether": [18, 33, 48]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -438,6 +465,12 @@ func _draw() -> void:
 	var player := _rules.geometry.circle_center(Player, 0)
 	if player == null:
 		return
+	if _rules.tether != null:
+		var segment := _rules.tether.visible_segment()
+		if segment.size() == 2:
+			draw_line(Vector2(segment[0].x, segment[0].y), Vector2(segment[1].x, segment[1].y), Color("#b6d4ff"), 4, true)
+		if _rules.next_tick() > 28 and _rules.next_tick() <= 43:
+			draw_line(Vector2(458, 350), Vector2(458, 410), Color("#bdafa3"), 6, true)
 	for target: PlayerTargeting.Candidate in _rules.targets:
 		var pose := _rules.geometry.circle_center(target.id, 0)
 		var location := Vector2(pose.x, pose.y)
