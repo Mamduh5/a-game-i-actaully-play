@@ -214,7 +214,7 @@ class Rules extends RunAuthority:
 				var dart_hits := 0
 				for row: Array in trace:
 					dart_hits += int(row[1] == "P02")
-				return (manual == 1 and axes > 0 and dart_hits == 4 and familiar.position().y < 350
+				return (manual == 1 and dart_hits == 4 and familiar.position().y < 350
 					and layer_units(StarterCombatRules.SIPHON) > 0)
 			"rupture":
 				return (launches == 1 and kernel.pending_count() == 0 and trace.size() == 6
@@ -339,7 +339,14 @@ func _physics_process(_delta: float) -> void:
 
 
 func _drive_visible_inputs(tick: int) -> void:
-	if _case in ["sword", "familiar"] and tick in [1, 31]:
+	if _case == "familiar" and tick == 10:
+		for pressed: bool in [true, false]:
+			var move := InputEventMouseButton.new()
+			move.button_index = MOUSE_BUTTON_RIGHT
+			move.position = Vector2(320, 330)
+			move.pressed = pressed
+			Input.parse_input_event(move)
+	if _case == "sword" and tick in [1, 31]:
 		var event := InputEventKey.new()
 		event.physical_keycode = KEY_W
 		event.pressed = tick == 1
