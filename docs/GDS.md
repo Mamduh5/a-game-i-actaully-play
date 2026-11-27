@@ -522,6 +522,8 @@ Resonance is hero-owned, separate from Architect Structural Resonance, Arcane Te
 
 Force, Collision Burst, mines, Death Bloom grouping, piercing alignment and movable objects are intended synergies. No particular rune/weapon is mandatory. **Discovery:** a genuine displacement-and-collision mastery accomplishment; thresholds remain tunable.
 
+**C04 provisional Singularity tuning under OWNER-T04/O20.** Place the field up to 150 units away on a clear path. Within radius 64, attract each eligible creature by up to 16 base units. After 24 ticks, deal 22 base magical damage and push eligible creatures up to 14 base units outward. Gravitational Influence applies to both displacement distances. Each stage uses its own current contacts and resistance, and the recovery has a 420-tick base period. Tune these fields in StarterCombatRules after owner playtesting. The movable-object and discovery consumers remain in their respective integration scopes. [C04 evidence](records/C04.md#gravity-weaver-creature-review-handoff)
+
 ### H06. The Summoner - unlockable
 <a id="catalog-h06"></a>
 
