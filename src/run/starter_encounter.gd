@@ -4,7 +4,6 @@ extends RunAuthority
 
 const PLAYER_BODY := 4
 const SIGHT := 420.0
-const BASIS_POINTS := 10000
 const TUNING: StarterCombatRules = preload("res://src/catalog/starter_combat.tres")
 
 class Build:
@@ -131,7 +130,8 @@ func _prepare_seat(id: StringName, build: Build, revision: StringName) -> bool:
 			or not _activity.track_player(id)):
 		return false
 	var seat := Seat.new()
-	seat.speed = PlayerControlState.REFERENCE_SPEED * (1.0 + float(prep.upgrade_basis_points(&"movement")) / BASIS_POINTS)
+	var movement_bonus := float(prep.upgrade_basis_points(&"movement")) / RunPreparation.BASIS_POINTS
+	seat.speed = PlayerControlState.REFERENCE_SPEED * (1.0 + movement_bonus)
 	seat.weapon = TUNING.weapon_for(build.preparation.weapon)
 	match build.preparation.hero:
 		StarterCombatRules.UNDYING: seat.manual = StarterCombatRules.SIPHON
@@ -157,7 +157,7 @@ static func _entry_amount(prep: RunPreparation, stat: StringName, authored: Quan
 	if authored == null or authored.sign_value < 0:
 		return null
 	var bonus := prep.upgrade_basis_points(stat)
-	return authored.multiply(Quantity.from_count(BASIS_POINTS + bonus, 4)) if bonus != 0 else authored
+	return authored.multiply(Quantity.from_count(RunPreparation.BASIS_POINTS + bonus, 4)) if bonus != 0 else authored
 
 
 func place_enemy(id: StringName, rules: WorldEnemy.Rules, at: RealmSweep.Point) -> bool:

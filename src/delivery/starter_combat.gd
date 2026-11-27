@@ -29,6 +29,7 @@ class Sigil:
 
 var _rules: StarterCombatRules
 var _weapon: StarterWeapon
+var _damage_multiplier: Quantity
 var _hero: StringName
 var _force_equipped: bool
 var _lightning_equipped: bool
@@ -66,6 +67,15 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	var result := StarterCombat.new()
 	result._rules = rules.duplicate() as StarterCombatRules
 	result._weapon = weapon.duplicate() as StarterWeapon
+	var damage_bonus := preparation.upgrade_basis_points(&"base_damage")
+	if damage_bonus != 0:
+		result._damage_multiplier = Quantity.from_count(RunPreparation.BASIS_POINTS + damage_bonus, 4)
+	var frequency := preparation.upgrade_basis_points(&"automatic_attack_frequency")
+	result._weapon.cooldown_ticks = _rate_period(weapon.cooldown_ticks, frequency)
+	var recovery := preparation.upgrade_basis_points(&"manual_cooldown_recovery")
+	result._rules.siphon_cooldown = _rate_period(rules.siphon_cooldown, recovery)
+	result._rules.harmonic_cooldown = _rate_period(rules.harmonic_cooldown, recovery)
+	result._rules.fracture_cooldown = _rate_period(rules.fracture_cooldown, recovery)
 	result._hero = preparation.hero
 	result._force_equipped = &"R03" in preparation.runes()
 	result._lightning_equipped = &"R02" in preparation.runes()
@@ -77,6 +87,15 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	result._hostiles = hostiles
 	result._blockers = blockers
 	return result
+
+
+## Round the adjusted period up to the next eligible whole tick. Express the
+## reduction by quotient and remainder to avoid multiplying a full-size period.
+@warning_ignore("integer_division")
+static func _rate_period(period: int, bonus: int) -> int:
+	var rate := RunPreparation.BASIS_POINTS + bonus
+	var reduction := (period / rate) * bonus + ((period % rate) * bonus) / rate
+	return period - reduction
 
 
 func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerTargeting.Candidate],
@@ -183,7 +202,7 @@ func try_manual(tick: int, selected: RealmSweep.Point = null) -> Attempt:
 
 func _place_fracture(tick: int, source: CombatantState, center: RealmSweep.Point, selected: RealmSweep.Point) -> Attempt:
 	if (selected == null or not is_finite(selected.x) or not is_finite(selected.y)
-			or tick > RunAuthority.MAX_TICK - _rules.fracture_cooldown
+			or tick > RunAuthority.MAX_TICK - maxi(_rules.fracture_duration, _rules.fracture_cooldown)
 			or (selected.x - center.x) ** 2 + (selected.y - center.y) ** 2 > _rules.fracture_reach ** 2
 			or not source.cooldown_ready(StarterCombatRules.TIME_FRACTURE, CombatInstant.at_tick(tick))):
 		return Attempt.REJECTED
@@ -480,7 +499,7 @@ func _open_tick(tick: int) -> bool:
 	return tick > 0 and tick < RunAuthority.MAX_TICK - 12 and (_last_tick < 0 or tick == _last_tick + 1)
 
 
-static func _action(source: CombatantState, tick: int, slot: int, family: StringName, damage: int, cooldown: int,
+func _action(source: CombatantState, tick: int, slot: int, family: StringName, damage: int, cooldown: int,
 		kind: CombatAction.Damage) -> CombatAction:
 	var result := CombatAction.new()
 	result.source = source.id
@@ -497,6 +516,8 @@ static func _action(source: CombatantState, tick: int, slot: int, family: String
 	var component := CombatAction.Component.new()
 	component.kind = kind
 	component.base = Quantity.from_count(damage)
+	if _damage_multiplier != null:
+		component.base = component.base.multiply(_damage_multiplier)
 	result.components.append(component)
 	return result
 

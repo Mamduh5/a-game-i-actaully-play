@@ -20,7 +20,7 @@ class Arena:
 
 	func _init(weapon: StringName, hero: StringName = &"H01", short_cooldown: bool = false,
 			rune: StringName = &"", second_rune: StringName = &"", unlocked: Dictionary[StringName, bool] = {},
-			owner: StringName = HERO) -> void:
+			owner: StringName = HERO, upgrades: Dictionary[StringName, int] = {}) -> void:
 		var source: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		catalog = source.compile()
 		if short_cooldown:
@@ -29,7 +29,7 @@ class Arena:
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
-		var prep := RunPreparation.select(catalog, hero, weapon, [rune, second_rune], slots, unlocked)
+		var prep := RunPreparation.select(catalog, hero, weapon, [rune, second_rune], slots, unlocked, upgrades)
 		var actor := make_actor(HERO, 100, CombatOrigin.Provenance.SEAT)
 		actor.owner = owner
 		actor.physical.rating = Quantity.from_count(10)
@@ -194,30 +194,43 @@ func test_temporal_echo_rechecks_the_impact_area_after_owner_death_and_mitigates
 
 
 func test_temporal_echo_from_arrow_preserves_contact_point_and_one_typed_damage_snapshot() -> void:
-	var arena := Arena.new(&"W02", &"H04", false, &"", &"", {&"H04": true})
-	assert_true(arena.add(&"aim", 34, 0, 100))
-	assert_true(arena.add(&"arrival", 150, 0, 100, HOSTILE, false))
-	assert_eq(arena.attack(1), Committed)
-	var due := -1
-	for tick: int in range(1, 41):
-		assert_true(arena.combat.advance(tick))
-		for hit: CombatKernel.Hit in arena.settle(tick):
-			if hit.family == &"W02":
-				var cues := arena.kernel.echo_cues(HERO, REALM)
-				assert_eq(cues.size(), 1)
-				if cues.size() == 1:
-					assert_almost_eq(cues[0].center.x, 31.0, 0.000001)
-					due = cues[0].due
-					cues[0].center.x = 999
-				assert_true(arena.move(&"aim", 100, 0))
-				assert_true(arena.move(&"arrival", 20, 0))
-			else:
-				assert_eq(tick, due)
-				assert_eq(hit.family, StarterCombatRules.TEMPORAL_ECHO)
-				assert_eq(hit.target, &"arrival")
-	assert_eq(arena.hp(&"aim").native_at_scale(0), 76)
-	assert_eq(arena.hp(&"arrival").native_at_scale(0), 94)
-	assert_null(arena.kernel.next_due())
+	var impact_ticks: Array[int] = []
+	var echo_ticks: Array[int] = []
+	for upgraded: bool in [false, true]:
+		var upgrades: Dictionary[StringName, int] = {}
+		if upgraded:
+			upgrades = {&"base_damage": 2500, &"automatic_attack_frequency": 2000}
+		var arena := Arena.new(&"W02", &"H04", false, &"", &"", {&"H04": true}, HERO, upgrades)
+		assert_true(arena.add(&"aim", 34, 0, 100))
+		assert_true(arena.add(&"arrival", 150, 0, 100, HOSTILE, false))
+		assert_eq(arena.attack(1), Committed)
+		var due := -1
+		for tick: int in range(1, 41):
+			assert_true(arena.combat.advance(tick))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				if hit.family == &"W02":
+					impact_ticks.append(tick)
+					var cues := arena.kernel.echo_cues(HERO, REALM)
+					assert_eq(cues.size(), 1)
+					if cues.size() == 1:
+						assert_almost_eq(cues[0].center.x, 31.0, 0.000001)
+						due = cues[0].due
+						cues[0].center.x = 999
+					assert_true(arena.move(&"aim", 100, 0))
+					assert_true(arena.move(&"arrival", 20, 0))
+				else:
+					echo_ticks.append(tick)
+					assert_eq(tick, due)
+					assert_eq(hit.family, StarterCombatRules.TEMPORAL_ECHO)
+					assert_eq(hit.target, &"arrival")
+		assert_eq(arena.hp(&"aim").native_at_scale(1), 700 if upgraded else 760)
+		assert_eq(arena.hp(&"arrival").native_at_scale(1), 925 if upgraded else 940)
+		assert_null(arena.kernel.next_due())
+	assert_eq(impact_ticks.size(), 2)
+	assert_eq(echo_ticks.size(), 2)
+	if impact_ticks.size() == 2 and echo_ticks.size() == 2:
+		assert_eq(impact_ticks[0], impact_ticks[1])
+		assert_eq(echo_ticks[0], echo_ticks[1])
 
 
 func test_fracture_compresses_owned_echo_and_bleed_when_seat_and_actor_ids_differ() -> void:
@@ -820,6 +833,31 @@ func test_siphon_converts_actual_hp_and_keeps_temporary_layer_before_harvest() -
 	assert_eq(hits[0].components[0].barriers[0].id, StarterCombatRules.SIPHON)
 	assert_eq(hits[0].components[0].barriers[1].id, StarterCombatRules.HARVEST)
 	assert_eq(arena.hp(HERO).native_at_scale(1), 975)
+
+
+func test_prepared_damage_and_recovery_keep_weapon_manual_and_effect_clocks_distinct() -> void:
+	for upgraded: bool in [false, true]:
+		var upgrades: Dictionary[StringName, int] = {}
+		if upgraded:
+			upgrades = {&"base_damage": 1250, &"automatic_attack_frequency": 500, &"manual_cooldown_recovery": 2000}
+		var arena := Arena.new(&"W01", &"H01", false, &"", &"", {}, HERO, upgrades)
+		assert_true(arena.add(&"target", 30, 0, 200))
+		assert_eq(arena.attack(1, {MANA: Quantity.from_count(11)}), StarterCombat.Attempt.REJECTED)
+		assert_eq(arena.attack(1), Committed)
+		assert_eq(arena.combat.try_manual(1), Committed)
+		assert_true(arena.combat.advance(1))
+		assert_eq(arena.settle(1).size(), 2)
+		assert_eq(arena.hp(&"target").native_at_scale(1), 1505 if upgraded else 1560)
+		var barrier := arena.layer(StarterCombatRules.SIPHON)
+		assert_eq(barrier.pool.amount.native_at_scale(2), 2025 if upgraded else 1800)
+		assert_eq(barrier.expires.tick, 241)
+		var source := arena.kernel.actor_snapshot(HERO)
+		var weapon_tick := 59 if upgraded else 61
+		var manual_tick := 501 if upgraded else 601
+		assert_false(source.cooldown_ready(StarterCombat.WEAPON_COOLDOWN, CombatInstant.at_tick(weapon_tick - 1)))
+		assert_true(source.cooldown_ready(StarterCombat.WEAPON_COOLDOWN, CombatInstant.at_tick(weapon_tick)))
+		assert_false(source.cooldown_ready(StarterCombatRules.SIPHON, CombatInstant.at_tick(manual_tick - 1)))
+		assert_true(source.cooldown_ready(StarterCombatRules.SIPHON, CombatInstant.at_tick(manual_tick)))
 
 
 func test_siphon_rejects_weaker_replacement_decays_and_preserves_miss_cooldown() -> void:

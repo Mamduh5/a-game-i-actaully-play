@@ -5,6 +5,7 @@ extends RefCounted
 
 const RUNE_SLOTS := 2
 const CANDIDATE_SLOTS := 10
+const BASIS_POINTS := 10000
 const UPGRADE_CAP_BASIS_POINTS := 2500
 const UPGRADE_STATS := [&"maximum_hp", &"base_damage", &"physical_defense", &"magical_defense", &"movement",
 	&"automatic_attack_frequency", &"manual_cooldown_recovery"]
