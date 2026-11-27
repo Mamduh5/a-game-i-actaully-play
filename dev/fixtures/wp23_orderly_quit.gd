@@ -77,7 +77,7 @@ func _exercise_suspension(authority: RunAuthority, earnings: OrdinaryCurrency) -
 	var pending: Variant = earnings.pending_amount().native_at_scale(0)
 	var settled := authority.prepare_orderly_suspension()
 	var balance: Variant = _store.balance(ACCOUNT).native_at_scale(0)
-	var matches := settled == frontier and settled["tick"] == 1
+	var matches := settled == frontier and int(settled.get("tick", -1)) == 1
 	print("WP23_SUSPENSION ", JSON.stringify({"first_refused": first.is_empty(), "fenced": fenced,
 		"pending": pending, "same_frontier": matches, "balance": balance}))
 	get_tree().quit(0 if first.is_empty() and fenced and pending == 17 and matches and balance == 17 else 7)
