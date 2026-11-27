@@ -19,6 +19,17 @@ class LostResultStore extends ProfileStore:
 			super._commit_io()
 		return false
 
+class DeferredOpeningStore extends LostResultStore:
+	var visible := false
+
+	func lookup(operation: String) -> ProfileStore.Receipt:
+		if not visible and operation.begins_with(ProfileStore.ORDINARY_SESSION_PREFIX) and operation.ends_with("/open"):
+			var pending := ProfileStore.Receipt.new()
+			pending.status = Commit.UNKNOWN
+			pending.id = operation
+			return pending
+		return super.lookup(operation)
+
 var _issuer: CryptoKey
 var _guest: CryptoKey
 
@@ -219,6 +230,46 @@ func test_disclosure_marker_fences_start_and_closes_only_after_the_last_confirme
 	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
 	assert_eq(store.balance(Currency).native_at_scale(0), 17)
 	assert_eq(store.checkpoint()["generation"], 3)
+	assert_true(store.close())
+
+
+func test_orderly_quit_after_a_refused_opening_leaves_no_activity_to_close() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-ordinary-unopened")
+	var store := LostResultStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var authority := _authority()
+	assert_false(authority.begin_ordinary_session(store))
+	assert_false(authority.close_tick())
+	assert_true(authority.settle_orderly_quit())
+	assert_true(authority.settle_orderly_quit())
+	assert_eq(store.checkpoint().generation, 0)
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
+	assert_true(store.close())
+
+
+func test_suspension_resolves_an_uncertain_opening_receipt_before_closing_it() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-ordinary-uncertain-open")
+	var store := DeferredOpeningStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	store.keep = true
+	var authority := _authority(RunSetup.Role.HOST)
+	assert_false(authority.begin_ordinary_session(store))
+	assert_false(authority.can_open_earning_group())
+	assert_true(authority.prepare_orderly_suspension().is_empty())
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.UNAVAILABLE)
+	store.visible = true
+	var suspended := authority.prepare_orderly_suspension()
+	assert_false(suspended.is_empty())
+	assert_eq(suspended.get("tick", -1), 0)
+	assert_eq(authority.prepare_orderly_suspension(), suspended)
+	assert_true(store.close())
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(store.checkpoint().generation, 2)
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
 	assert_true(store.close())
 
 

@@ -67,8 +67,17 @@ func open() -> bool:
 
 ## Call after admission is sealed and every ordinary batch is confirmed.
 func settle() -> bool:
-	if not is_open():
+	if not uses(_profile):
 		return false
+	if not _open:
+		# A failed start can leave an absent or uncertain opening receipt.
+		# Only confirmed absence lets this exit finish without a marker.
+		var opening := _profile.lookup(_start.id)
+		if opening.status == Commit.MISSING:
+			return true
+		_open = opening.status == Commit.COMMITTED and opening.digest == _start.record().sha256_text()
+		if not _open:
+			return false
 	# Query the closing operation first to resolve any uncertain prior close.
 	var settled := _profile.lookup(_finish.id)
 	if settled.status == Commit.COMMITTED:
