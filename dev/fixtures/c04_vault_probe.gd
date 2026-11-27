@@ -65,7 +65,10 @@ func _begin() -> bool:
 	_encounter = StarterEncounter.assemble(setup, SEAT, world, {SEAT: build})
 	if _encounter == null:
 		return false
-	_stage.prepare([Vector2i.ZERO], world.geometry(), [] if _close_call else [SOLID], Vector2(256, 128), Vector2(216, 192))
+	var solids: Array[StringName] = []
+	if not _close_call:
+		solids.append(SOLID)
+	_stage.prepare([Vector2i.ZERO], world.geometry(), solids, Vector2(256, 128), Vector2(216, 192))
 	var foe := WorldEnemy.Rules.new()
 	foe.faction = &"fixture"
 	foe.foes = [WorldEnemy.PARTY]
