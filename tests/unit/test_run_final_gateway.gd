@@ -9,12 +9,213 @@ const Arena := RunSetup.FINAL_REALM
 const Currency := "currency/common"
 const Transfer := RunAuthority.GatewayResult
 const Collapse := RunParty.COLLAPSE_TICK
+const Observatory := preload("res://src/run/run_observatory_gateway.gd")
 
 class RefusedStore extends ProfileStore:
 	var refuse := true
 
 	func _commit_io() -> bool:
 		return false if refuse else super._commit_io()
+
+
+func test_pr04_conditions_on_a_generated_observatory_and_keeps_the_ordinary_gateway() -> void:
+	var ordinary_seeds: Dictionary[bool, int] = {}
+	var eligible_seed := _early_seed()
+	assert_ne(eligible_seed, -1)
+	for seed: int in range(128):
+		var layout := WorldTopology.generate(seed)
+		if not layout.has_early_observatory():
+			ordinary_seeds[layout.center(WorldTopology.OBSERVATORY) != null] = seed
+			continue
+		assert_not_null(layout.center(WorldTopology.OBSERVATORY))
+		assert_true(WorldTopology.restore(layout.manifest()).has_early_observatory())
+	assert_eq(ordinary_seeds.size(), 2)
+	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
+	var catalog := bundle.compile()
+	for seed: int in ordinary_seeds.values():
+		var route := Route.new(Garden, seed)
+		assert_true(route.begin(catalog.revision))
+		var arena := RealmGeometry.new(Arena)
+		var progression := _progression(route.setup, catalog)
+		assert_null(Observatory.register(route.authority, route.party, route.outer, arena, _arrivals(), progression))
+		var normal := RunFinalGateway.register(route.authority, route.party, route.outer, arena, _arrivals(), 36.0, 10.0, progression)
+		assert_not_null(normal)
+		assert_null(normal.revealed_location())
+		route.authority._closed_tick = Collapse
+		assert_not_null(normal.revealed_location())
+
+
+func test_pr04_requires_local_alignment_and_carries_a_remote_body_after_settlement() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
+	var catalog := bundle.compile()
+	var route := Route.new(Garden, _early_seed())
+	assert_true(route.begin(catalog.revision))
+	var arena := RealmGeometry.new(Arena)
+	var arrivals := _arrivals()
+	var progression := _progression(route.setup, catalog)
+	var gate := Observatory.register(route.authority, route.party, route.outer, arena, arrivals, progression)
+	assert_not_null(gate)
+	if gate == null:
+		return
+	assert_null(Observatory.register(route.authority, route.party, route.outer, arena, arrivals, progression))
+	assert_true(gate.view_for(Host).is_empty())
+	var center := route.outer.module_center(WorldTopology.OBSERVATORY)
+	var floor := route.outer.geometry()
+	assert_true(floor.commit_circle_pose(Host, 0, Route.offset(center, 0, -12)))
+	var inscription := _observatory_mark(gate, Observatory.INSCRIPTION)
+	assert_false(inscription.inscription.is_empty())
+	assert_null(_observatory_mark(gate, Observatory.GATE))
+	assert_true(gate.view_for(Guest).is_empty())
+	var closed := route.input(Host, PlayerCommand.INTERACT, center)
+	assert_true(route.submit(closed))
+	assert_eq(gate.enter(closed), Transfer.REFUSED)
+	assert_eq(route.authority.request_gateway(closed, route.party, arena, arrivals, progression), Transfer.REFUSED)
+	var west := _observatory_mark(gate, Observatory.WEST_CONDUIT).position
+	var east := _observatory_mark(gate, Observatory.EAST_CONDUIT).position
+	var too_far := route.input(Host, PlayerCommand.INTERACT, west)
+	assert_true(route.submit(too_far))
+	assert_false(gate.turn(too_far))
+	assert_true(floor.commit_circle_pose(Host, 0, Route.offset(west, -16, 0)))
+	var obstruction := RealmOutline.Edge.new()
+	obstruction.first = Route.offset(west, -8, -12)
+	obstruction.last = Route.offset(west, -8, 12)
+	assert_true(floor.add_segment(&"conduit-screen", 0, obstruction, WorldExploration.BLOCKER, false))
+	var covered := route.input(Host, PlayerCommand.INTERACT, west)
+	assert_true(route.submit(covered))
+	assert_false(gate.turn(covered))
+	assert_true(floor.remove_mutable(&"conduit-screen", 0))
+	var turn := route.input(Host, PlayerCommand.INTERACT, west)
+	assert_false(gate.turn(turn))
+	assert_true(route.submit(turn))
+	assert_true(gate.turn(turn))
+	assert_false(gate.turn(turn))
+	assert_eq(_observatory_mark(gate, Observatory.WEST_CONDUIT).direction, Vector2i.RIGHT)
+	assert_null(_observatory_mark(gate, Observatory.GATE))
+	assert_true(floor.commit_circle_pose(Host, 0, Route.offset(east, 16, 0)))
+	for index: int in 3:
+		var rotate := route.input(Host, PlayerCommand.INTERACT, east)
+		assert_true(route.submit(rotate))
+		assert_true(gate.turn(rotate))
+	assert_eq(_observatory_mark(gate, Observatory.EAST_CONDUIT).direction, Vector2i.LEFT)
+	assert_not_null(_observatory_mark(gate, Observatory.GATE))
+
+	var entry := route.input(Guest, PlayerCommand.INTERACT, route.handle)
+	assert_true(route.submit(entry))
+	assert_true(route.passages.interact(entry))
+	var body_at := route.inner.module_center(WorldTopology.ENTRY)
+	assert_true(route.add_sentinel(Garden, Route.offset(body_at, 16, 0)))
+	var death := route.authority.next_tick()
+	assert_true(route.admit_sentinel_hit(Guest, death))
+	assert_true(route.party.observe_combat(route.kernel.resolve_next(CombatInstant.at_tick(death))))
+	assert_true(route.authority.close_tick())
+	var body := route.party.view(Guest, CombatInstant.at_tick(death))
+	assert_false(body.alive)
+	assert_eq(body.realm, Garden)
+	assert_true(gate.view_for(Guest).is_empty())
+	assert_eq(progression.grant_xp(&"ordinary-choice", Quantity.from_count(100), death), PartyProgression.Award.APPLIED)
+	var frozen := progression.offer(Guest, 1)
+
+	var store := RefusedStore.new()
+	var directory := DirAccess.create_temp("agip-early-gateway")
+	assert_eq(store.open("alice", directory.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var key := Crypto.new().generate_rsa(2048)
+	var earnings := OrdinaryCurrency.begin(store, _binding(store, route.setup, key), key, Currency)
+	assert_true(route.authority.attach_ordinary_currency(earnings))
+	assert_eq(earnings.accrue("observatory-award", Quantity.from_count(17)), OrdinaryCurrency.Eligibility.QUEUED)
+	assert_true(floor.commit_circle_pose(Host, 0, Route.offset(center, -15, 0)))
+	var click := route.input(Host, PlayerCommand.INTERACT, center)
+	click.reliable = true
+	assert_true(route.submit(click))
+	var now := CombatInstant.at_tick(click.tick)
+	assert_eq(route.kernel.advance_survival(now).result, CombatKernel.Result.CLOSED)
+	assert_eq(gate.enter(click), Transfer.SETTLEMENT_WAIT)
+	assert_eq(store.balance(Currency).sign_value, 0)
+	assert_false(route.authority.close_tick())
+	assert_eq(route.party.view(Guest, now).realm, Garden)
+	assert_null(arena.circle_center(Host, 0))
+	store.refuse = false
+	assert_eq(route.authority.retry_gateway(), Transfer.ENTERED)
+	assert_eq(gate.enter(click), Transfer.REFUSED)
+	assert_eq(route.authority.retry_gateway(), Transfer.REFUSED)
+	assert_eq(store.balance(Currency).native_at_scale(0), 17)
+	assert_null(route.kernel.actor_snapshot(&"sentinel"))
+	assert_true(gate.view_for(Host).is_empty())
+	var arrived := route.party.view(Guest, now)
+	assert_false(arrived.alive)
+	assert_eq(arrived.realm, Arena)
+	assert_eq(arrived.wait_until.tick, body.wait_until.tick)
+	assert_eq(progression.offer(Guest, 1).options, frozen.options)
+
+	var saved := route.authority.checkpoint()
+	assert_eq(saved["early_gateway_tick"], click.tick)
+	var reopened := RunAuthority.new()
+	assert_true(reopened.restore(route.setup, Host, saved))
+	assert_eq(reopened.checkpoint(), saved)
+	var earlier := saved.duplicate(true)
+	earlier.erase("early_gateway_tick")
+	assert_false(RunAuthority.new().restore(route.setup, Host, earlier))
+	var forged := saved.duplicate(true)
+	forged["early_gateway_tick"] = click.tick + 1
+	assert_false(RunAuthority.new().restore(route.setup, Host, forged))
+	var frontier := progression.frontier(click.tick)
+	var saved_frontier := {"epoch": frontier.epoch, "tick": frontier.tick, "image": frontier.image}
+	var recovered := PartyProgression.reopen(route.setup, catalog, saved_frontier)
+	assert_not_null(recovered)
+	assert_eq(recovered.frontier(click.tick).image, frontier.image)
+	var image: Dictionary = bytes_to_var(frontier.image)
+	image.erase("early_gateway_tick")
+	saved_frontier["image"] = var_to_bytes(image)
+	assert_null(PartyProgression.reopen(route.setup, catalog, saved_frontier))
+	assert_true(store.close())
+
+
+func test_pr04_gate_expires_at_collapse_after_the_conduits_are_aligned() -> void:
+	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
+	var catalog := bundle.compile()
+	var route := Route.new(Garden, _early_seed())
+	assert_true(route.begin(catalog.revision))
+	var progression := _progression(route.setup, catalog)
+	var arena := RealmGeometry.new(Arena)
+	var gate := Observatory.register(route.authority, route.party, route.outer, arena, _arrivals(), progression)
+	assert_not_null(gate)
+	var floor := route.outer.geometry()
+	var center := route.outer.module_center(WorldTopology.OBSERVATORY)
+	for side: StringName in [Observatory.WEST_CONDUIT, Observatory.EAST_CONDUIT]:
+		assert_true(floor.commit_circle_pose(Host, 0, center))
+		var mark := _observatory_mark(gate, side)
+		assert_true(floor.commit_circle_pose(Host, 0, mark.position))
+		for index: int in (1 if side == Observatory.WEST_CONDUIT else 3):
+			var rotate := route.input(Host, PlayerCommand.INTERACT, mark.position)
+			assert_true(route.submit(rotate))
+			assert_true(gate.turn(rotate))
+	assert_true(floor.commit_circle_pose(Host, 0, center))
+	route.authority._closed_tick = Collapse - 1
+	route.party._tick = Collapse - 1
+	assert_not_null(_observatory_mark(gate, Observatory.GATE))
+	var attempt := route.input(Host, PlayerCommand.INTERACT, center)
+	assert_true(route.submit(attempt))
+	assert_eq(attempt.tick, Collapse)
+	assert_null(_observatory_mark(gate, Observatory.GATE))
+	assert_eq(route.kernel.advance_survival(CombatInstant.at_tick(Collapse)).result, CombatKernel.Result.CLOSED)
+	assert_eq(gate.enter(attempt), Transfer.REFUSED)
+	assert_true(route.authority.belongs_to(route.setup.run_id, 1))
+	assert_null(arena.circle_center(Host, 0))
+
+
+static func _early_seed() -> int:
+	for seed: int in range(128):
+		if WorldTopology.generate(seed).has_early_observatory():
+			return seed
+	return -1
+
+
+static func _observatory_mark(gate: Observatory, id: StringName) -> Observatory.Mark:
+	for mark: Observatory.Mark in gate.view_for(Host):
+		if mark.id == id:
+			return mark
+	return null
 
 
 func test_normal_gateway_checks_the_clock_and_waits_for_durable_settlement_before_moving_all_seats() -> void:

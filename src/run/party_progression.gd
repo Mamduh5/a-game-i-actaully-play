@@ -24,6 +24,7 @@ var _preparation: Dictionary[StringName, Array] = {}
 var _identity: Dictionary = {}
 var _epoch: int
 var _gateway_tick: int
+var _early_gateway: bool
 var _random: RunRandom
 var _last_award_tick: int
 
@@ -58,9 +59,10 @@ func can_cross_gateway(identity: Dictionary, epoch: int, tick: int) -> bool:
 
 
 ## The authority calls this as part of the closed, validated gateway commit.
-func enter_gateway(tick: int) -> void:
+func enter_gateway(tick: int, early: bool = false) -> void:
 	_epoch += 1
 	_gateway_tick = tick
+	_early_gateway = early
 
 
 func grant_xp(entitlement: StringName, amount: Quantity, tick: int) -> Award:
@@ -209,6 +211,8 @@ func _make_frontier(closed_tick: int, blessings: Dictionary[StringName, Array]) 
 		snapshot["blessings"] = blessings
 	if _gateway_tick > 0:
 		snapshot["gateway_tick"] = _gateway_tick
+	if _early_gateway:
+		snapshot["early_gateway_tick"] = _gateway_tick
 	var image := var_to_bytes(snapshot)
 	if image.is_empty() or image.size() > ProfileMutation.MAX_BYTES:
 		return null
@@ -232,8 +236,15 @@ static func reopen(setup: RunSetup, catalog: DefinitionCatalog, saved: Dictionar
 			or image["preparation"].size() != setup.initial_realms.size()):
 		return null
 	var gateway_tick: Variant = image.get("gateway_tick", 0)
-	if (not gateway_tick is int or (epoch == setup.epoch and gateway_tick != 0)
-			or (epoch != setup.epoch and (gateway_tick < RunParty.COLLAPSE_TICK or gateway_tick > saved["tick"]))):
+	var early: bool = image.has("early_gateway_tick")
+	if not gateway_tick is int or gateway_tick > saved["tick"]:
+		return null
+	if early:
+		var entry: Variant = image["early_gateway_tick"]
+		if (epoch == setup.epoch or entry != gateway_tick
+				or not RunObservatoryGateway.valid_early_tick(setup.seed, entry, saved["tick"])):
+			return null
+	elif (epoch == setup.epoch and gateway_tick != 0) or (epoch != setup.epoch and gateway_tick < RunParty.COLLAPSE_TICK):
 		return null
 	var preparations: Dictionary[StringName, RunPreparation] = {}
 	for seat: StringName in setup.initial_realms:
@@ -246,6 +257,7 @@ static func reopen(setup: RunSetup, catalog: DefinitionCatalog, saved: Dictionar
 		return null
 	party._epoch = epoch
 	party._gateway_tick = gateway_tick
+	party._early_gateway = early
 	return party
 
 

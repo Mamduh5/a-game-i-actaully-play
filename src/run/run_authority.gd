@@ -28,6 +28,7 @@ class PendingGateway:
 	var progression: PartyProgression
 	var transfer: CombatKernel.ArenaTransfer
 	var entrant: StringName
+	var early: bool
 
 var _identity: Dictionary = {}
 var _epoch: int
@@ -42,6 +43,7 @@ var _exit := Exit.ACTIVE
 var _exit_settled := false
 var _resolving := false
 var _gateway: PendingGateway
+var _early_gateway_tick: int
 
 
 func start(setup: RunSetup, local_authority_id: StringName) -> bool:
@@ -62,6 +64,10 @@ func movement_acknowledgement(seat: StringName) -> int:
 
 func belongs_to(run: StringName, epoch: int) -> bool:
 	return not _identity.is_empty() and _identity["run"] == run and _epoch == epoch
+
+
+func matches_world_seed(seed: int) -> bool:
+	return not _identity.is_empty() and _identity["seed"] == seed
 
 
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
@@ -152,7 +158,7 @@ func _settle_exit(requested: Exit) -> bool:
 ## already queued for this seat's old realm and keep the shared clock.
 func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, destination: RealmGeometry,
 		at: RealmSweep.Point) -> bool:
-	if not _accepted_interaction(intent, party) or source == null or destination == null or source.realm_id != intent.realm_id:
+	if not accepted_interaction(intent, party) or source == null or destination == null or source.realm_id != intent.realm_id:
 		return false
 	var seat := intent.seat_id
 	if not party.transfer_living(seat, _closed_tick, source, destination, at):
@@ -163,12 +169,19 @@ func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, de
 	return true
 
 
-## The gateway owner has already verified the handle against settled geometry.
+## The normal owner checks its handle. An early request also needs live PR04
+## proof from the Observatory bound to this authority and party.
 func request_gateway(intent: RunIntent, party: RunParty, arena: RealmGeometry,
-		arrivals: Dictionary[StringName, RealmSweep.Point], progression: PartyProgression) -> GatewayResult:
-	if (not _accepted_interaction(intent, party) or _epoch != _identity["epoch"] or _epoch == Quantity.INT_MAX
-			or _closed_tick < RunParty.COLLAPSE_TICK or intent.realm_id != WorldTopology.OVERWORLD
+		arrivals: Dictionary[StringName, RealmSweep.Point], progression: PartyProgression,
+		observatory: RunObservatoryGateway = null) -> GatewayResult:
+	if (not accepted_interaction(intent, party) or _epoch != _identity["epoch"] or _epoch == Quantity.INT_MAX
+			or intent.realm_id != WorldTopology.OVERWORLD or arena == null or arena.realm_id != RunSetup.FINAL_REALM
 			or not _progression_can_cross(progression)):
+		return GatewayResult.REFUSED
+	if observatory != null:
+		if not observatory.permits_entry(self, party, intent):
+			return GatewayResult.REFUSED
+	elif _closed_tick < RunParty.COLLAPSE_TICK:
 		return GatewayResult.REFUSED
 	var transfer := party.stage_gateway(intent.seat_id, _closed_tick, arena, arrivals)
 	if transfer == null:
@@ -178,6 +191,7 @@ func request_gateway(intent: RunIntent, party: RunParty, arena: RealmGeometry,
 	_gateway.progression = progression
 	_gateway.transfer = transfer
 	_gateway.entrant = intent.seat_id
+	_gateway.early = observatory != null
 	return retry_gateway()
 
 
@@ -195,7 +209,9 @@ func retry_gateway() -> GatewayResult:
 	_gateway = null
 	if not _progression_can_cross(attempt.progression) or not attempt.party.enter_gateway(attempt.transfer, _epoch + 1):
 		return GatewayResult.REFUSED
-	attempt.progression.enter_gateway(_closed_tick)
+	attempt.progression.enter_gateway(_closed_tick, attempt.early)
+	if attempt.early:
+		_early_gateway_tick = _closed_tick
 	_epoch += 1
 	for seat: StringName in _realms:
 		_retire_scope(seat)
@@ -209,9 +225,9 @@ func _progression_can_cross(progression: PartyProgression) -> bool:
 	return progression != null and progression.can_cross_gateway(_identity, _epoch, _closed_tick)
 
 
-func _accepted_interaction(intent: RunIntent, party: RunParty) -> bool:
+func accepted_interaction(intent: RunIntent, party: RunParty) -> bool:
 	return (_exit == Exit.ACTIVE and _gateway == null and not _resolving and intent != null and party != null
-		and intent.action == PlayerCommand.INTERACT and intent.tick == _closed_tick
+		and intent.action == PlayerCommand.INTERACT and intent.valid_payload() and intent.tick == _closed_tick
 		and belongs_to(intent.run_id, intent.epoch) and party.belongs_to(intent.run_id, intent.epoch)
 		and _realms.get(intent.seat_id) == intent.realm_id and intent.receipt() in _observation["accepted"])
 
@@ -341,6 +357,8 @@ func _closed_checkpoint() -> Dictionary:
 		saved["current_realms"] = _realms.duplicate()
 	if _epoch != _identity["epoch"]:
 		saved["world_epoch"] = _epoch
+	if _early_gateway_tick > 0:
+		saved["early_gateway_tick"] = _early_gateway_tick
 	return saved
 
 
@@ -360,6 +378,12 @@ func restore(setup: RunSetup, local_authority_id: StringName, saved: Dictionary)
 	var epoch: Variant = saved.get("world_epoch", setup.epoch)
 	if not epoch is int or epoch < setup.epoch or epoch - setup.epoch > 1:
 		return false
+	var early_tick := 0
+	if saved.has("early_gateway_tick"):
+		var entry: Variant = saved["early_gateway_tick"]
+		if epoch == setup.epoch or not RunObservatoryGateway.valid_early_tick(setup.seed, entry, tick):
+			return false
+		early_tick = entry
 	if sequences.size() != setup.initial_realms.size():
 		return false
 	if (not realms is Dictionary or realms.size() != setup.initial_realms.size()
@@ -371,7 +395,7 @@ func restore(setup: RunSetup, local_authority_id: StringName, saved: Dictionary)
 		if (not sequence is int or sequence < 0 or (tick == 0 and sequence != 0)
 				or not realm is StringName or realm.is_empty()):
 			return false
-		if epoch != setup.epoch and (tick < RunParty.COLLAPSE_TICK or realm != RunSetup.FINAL_REALM):
+		if epoch != setup.epoch and ((early_tick == 0 and tick < RunParty.COLLAPSE_TICK) or realm != RunSetup.FINAL_REALM):
 			return false
 		if epoch == setup.epoch and realm == RunSetup.FINAL_REALM and setup.initial_realms[seat] != realm:
 			return false
@@ -382,6 +406,7 @@ func restore(setup: RunSetup, local_authority_id: StringName, saved: Dictionary)
 		return false
 	_install(setup, random, tick, sequences)
 	_epoch = epoch
+	_early_gateway_tick = early_tick
 	_realms.assign(realms)
 	_publish([], [], [], [])
 	return true

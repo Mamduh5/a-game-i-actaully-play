@@ -86,6 +86,14 @@ func module_center(id: StringName) -> RealmSweep.Point:
 	return _layout.center(id)
 
 
+func early_observatory_center() -> RealmSweep.Point:
+	return _layout.center(WorldTopology.OBSERVATORY) if _layout.has_early_observatory() else null
+
+
+func layout_seed() -> int:
+	return _layout.seed
+
+
 func route(origin: StringName, destination: StringName) -> Array[StringName]:
 	return _layout.route(origin, destination, _shortcut_open)
 
@@ -114,8 +122,8 @@ func enemy_waypoint(origin: RealmSweep.Point, destination: RealmSweep.Point, rad
 
 
 ## The run reserves reachable occupied or rescue positions by stable ID.
-func reserve_route_approach(id: StringName, point: RealmSweep.Point) -> bool:
-	return _ensure_routes() and _routes.reserve_approach(_geometry, id, point)
+func reserve_route_approach(id: StringName, point: RealmSweep.Point, exclusive: bool = false) -> bool:
+	return _ensure_routes() and _routes.reserve_approach(_geometry, id, point, exclusive)
 
 
 func release_route_approach(id: StringName) -> bool:
