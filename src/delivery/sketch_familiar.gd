@@ -70,7 +70,7 @@ func advance(tick: int, candidates: Array[PlayerTargeting.Candidate]) -> bool:
 		if owner_pose == null or not _follow(owner_pose):
 			return false
 		if actor.cooldown_ready(FAMILY, CombatInstant.at_tick(tick)):
-			var target := _choose_target(candidates)
+			var target := CombatDelivery.nearest_known_hostile(_kernel, _geometry, _position, REACH, candidates)
 			if target != null and not _launch(tick, actor, target, _rewards.ranks()[FAMILY]):
 				return false
 	else:
@@ -103,24 +103,6 @@ func _follow(owner_pose: RealmSweep.Point) -> bool:
 	if path.contacts.is_empty():
 		_position = finish
 	return true
-
-
-func _choose_target(candidates: Array[PlayerTargeting.Candidate]) -> RealmSweep.Point:
-	var visible: Array[PlayerTargeting.Candidate] = []
-	for entry: PlayerTargeting.Candidate in candidates:
-		if entry == null or entry.kind != PlayerTargeting.Kind.HOSTILE or not entry.known or not entry.compatible:
-			continue
-		var actor := _kernel.actor_snapshot(entry.id)
-		if actor == null or actor.realm != _geometry.realm_id or not actor.is_alive():
-			continue
-		var settled := PlayerTargeting.Candidate.new()
-		settled.id = entry.id
-		settled.position = _geometry.circle_center(entry.id, 0)
-		settled.known = true
-		settled.compatible = true
-		visible.append(settled)
-	var id := PlayerTargeting.new().attack_target(_position, REACH, visible)
-	return _geometry.circle_center(id, 0) if not id.is_empty() else null
 
 
 func _launch(tick: int, actor: CombatantState, target: RealmSweep.Point, rank: int) -> bool:

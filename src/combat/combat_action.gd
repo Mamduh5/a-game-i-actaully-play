@@ -121,6 +121,7 @@ var lightning_damage: Quantity
 var storm_relay: bool
 var rupture_per_stack: int
 var echo_delay: int
+var ascending_pierce: bool
 var echo_radius: float
 var echo_targets: int
 var wake_targets: int
@@ -203,6 +204,7 @@ func copy() -> CombatAction:
 	result.storm_relay = storm_relay
 	result.rupture_per_stack = rupture_per_stack
 	result.echo_delay = echo_delay
+	result.ascending_pierce = ascending_pierce
 	result.echo_radius = echo_radius
 	result.echo_targets = echo_targets
 	result.wake_targets = wake_targets

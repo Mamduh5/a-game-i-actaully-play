@@ -189,3 +189,22 @@ static func _contact_order(left: RealmGeometry.Contact, right: RealmGeometry.Con
 	if left.shape != right.shape:
 		return RealmCircleTime.Order.BEFORE if left.shape < right.shape else RealmCircleTime.Order.AFTER
 	return RealmCircleTime.Order.SAME
+
+
+static func nearest_known_hostile(kernel: CombatKernel, geometry: RealmGeometry, origin: RealmSweep.Point, reach: float,
+		candidates: Array[PlayerTargeting.Candidate]) -> RealmSweep.Point:
+	var visible: Array[PlayerTargeting.Candidate] = []
+	for entry: PlayerTargeting.Candidate in candidates:
+		if entry == null or entry.kind != PlayerTargeting.Kind.HOSTILE or not entry.known or not entry.compatible:
+			continue
+		var actor := kernel.actor_snapshot(entry.id)
+		if actor == null or actor.realm != geometry.realm_id or not actor.is_alive():
+			continue
+		var settled := PlayerTargeting.Candidate.new()
+		settled.id = entry.id
+		settled.position = geometry.circle_center(entry.id, 0)
+		settled.known = true
+		settled.compatible = true
+		visible.append(settled)
+	var id := PlayerTargeting.new().attack_target(origin, reach, visible)
+	return geometry.circle_center(id, 0) if not id.is_empty() else null

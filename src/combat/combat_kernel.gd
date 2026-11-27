@@ -106,6 +106,7 @@ class WaveResult:
 	var fault_wave: int
 
 class Commitment:
+	var penetrations: int
 	var armed_mine: CombatMineCharge
 	var mine_center: RealmSweep.Point
 	var mine_trigger_radius: float
@@ -117,6 +118,7 @@ class Commitment:
 	var payment_pending: bool
 
 class Impact:
+	var lance: Commitment
 	var contact_position: RealmSweep.Point
 	var pre_parent_bleed: CombatBleedLedger.Prestate
 	var arc_start: RealmSweep.Point
@@ -170,6 +172,7 @@ class ReactionClaim:
 	var shape: int
 
 class Group:
+	var penetrations: Dictionary[Commitment, int] = {}
 	var detonations: Array[CombatMineCharge] = []
 	var echoes: Array[Echo] = []
 	var wakes: Array[Wake] = []
@@ -615,6 +618,8 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 	var impact := Impact.new()
 	impact.contact_position = PlayerControlState.copy_point(position) if position != null else null
 	impact.action = held.action
+	if held.action.ascending_pierce:
+		impact.lance = held
 	impact.origin = held.action.origin.copy()
 	impact.origin.delivery_part = part
 	impact.root_occurrence = impact.origin.occurrence_key()
@@ -1030,13 +1035,18 @@ func _resolve_wave(group: Group) -> StringName:
 		var before := group.actors[id]
 		var after := before.copy()
 		for impact: Impact in per_target[id]:
-			var hit := _draft_hit(impact, before, after, group.receipt.due)
+			var count := 0
+			if impact.lance != null:
+				count = group.penetrations.get(impact.lance, impact.lance.penetrations)
+			var hit := _draft_hit(impact, before, after, group.receipt.due, count)
 			if hit == null:
 				return &"numeric_posting"
 			hit.wave = group.receipt.waves
 			hit.event = group.receipt.hits.size() + 1
 			group.receipt.hits.append(hit)
 			if hit.accepted:
+				if impact.lance != null:
+					group.penetrations[impact.lance] = mini(count + 1, 4)
 				var posting := Posting.new()
 				if group.bleeds.has(id):
 					posting.before_bleed = group.bleeds[id].capture(group.receipt.due)
@@ -1101,6 +1111,8 @@ func _publish_group() -> WaveResult:
 	_bleeds = group.bleeds
 	_wakes = group.wakes
 	_echoes = group.echoes
+	for lance: Commitment in group.penetrations:
+		lance.penetrations = group.penetrations[lance]
 	for origin: CombatOrigin in group.root.origins:
 		_impacts.erase(origin.occurrence_key())
 		_mine_entries.erase(origin.occurrence_key())
@@ -1688,7 +1700,7 @@ static func _insert_claim(ordered: Array, impact: Impact) -> bool:
 	return true
 
 
-func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState, now: CombatInstant) -> Hit:
+func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState, now: CombatInstant, penetrations: int) -> Hit:
 	var hit := Hit.new()
 	hit.origin = impact.origin.copy()
 	hit.family = impact.action.family
@@ -1717,7 +1729,10 @@ func _draft_hit(impact: Impact, before: CombatantState, after: CombatantState, n
 		var uses_physical := component.kind == CombatAction.Damage.PHYSICAL
 		var defense := before.physical if uses_physical else before.magical
 		var mitigation := _physical_mitigation if uses_physical else _magical_mitigation
-		var raw := QuantityFormula.damage_component(component.base, component.categories, defense.rating, defense.reduction,
+		var base := component.base
+		if penetrations > 0:
+			base = base.multiply(Quantity.from_count(100 + 25 * penetrations, 2))
+		var raw := QuantityFormula.damage_component(base, component.categories, defense.rating, defense.reduction,
 			component.penetration, mitigation, defense.vulnerability, defense.immune)
 		if raw == null or raw.numerator.sign_value < 0:
 			return null
