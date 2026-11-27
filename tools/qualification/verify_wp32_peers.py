@@ -17,6 +17,8 @@ PREFIX = "WP32_PEER "
 FAMILIES = {"sword": "W01", "bow": "W02"}
 MANUALS = {"sword": "H01.siphon_pulse", "bow": "H03.harmonic_burst"}
 OBSERVABLE = {"player", "radius", "enemies", "warnings", "manual_ready", "goal", "passage"}
+POSITION_TOLERANCE = 1e-9
+POSITION_FIELDS = {"player", "actors", "warnings"}
 
 
 def rendered(exe, log, environment, *args):
@@ -37,12 +39,41 @@ def rows(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
+def same_point(source, received):
+    return dist(source, received) <= POSITION_TOLERANCE
+
+
+def same_projection(source, received):
+    if source is None or source.keys() != received.keys():
+        return False
+    for field in source.keys() - POSITION_FIELDS:
+        if source[field] != received[field]:
+            return False
+    # The receipt compares decoded double positions with the source before JSON
+    # encoding. The payload digest still has to match exactly.
+    if not same_point(source["player"], received["player"]):
+        return False
+    if source["actors"].keys() != received["actors"].keys():
+        return False
+    for actor, (position, hp) in source["actors"].items():
+        guest_position, guest_hp = received["actors"][actor]
+        if hp != guest_hp or not same_point(position, guest_position):
+            return False
+    if len(source["warnings"]) != len(received["warnings"]):
+        return False
+    for warning, guest_warning in zip(source["warnings"], received["warnings"]):
+        if (warning[:2] != guest_warning[:2] or warning[3] != guest_warning[3]
+                or not same_point(warning[2], guest_warning[2])):
+            return False
+    return True
+
+
 def measure(evidence, host_facts, guest_facts):
     host = rows(evidence / "host" / "peer.jsonl")
     guest = rows(evidence / "guest" / "peer.jsonl")
     sent = {row["hash"]: row["sent"] for row in host if "sent" in row}
     accepted = [row for row in guest if "received" in row]
-    compared = bool(accepted) and all(sent.get(row["hash"]) == row["received"] for row in accepted)
+    matched = sum(same_projection(sent.get(row["hash"]), row["received"]) for row in accepted)
     ticks = {row["tick"]: row for row in host if "outcomes" in row}
     displacements = sum(event.get("pushed", False) for row in ticks.values() for event in row["outcomes"])
     damage = {seat: set() for seat in ("host", "guest")}
@@ -69,10 +100,10 @@ def measure(evidence, host_facts, guest_facts):
     replays = [row["received"] for row in accepted]
     ended_together = bool(replays) and replays[-1]["cleared"] and (
         replays[-1]["tick"] == guest_facts["closed_tick"] == host_facts["closed_tick"])
-    passed = (compared and captures and visible_only and ended_together and len(ticks) >= 240
+    passed = (matched == len(accepted) and captures and visible_only and ended_together and len(ticks) >= 240
               and len(accepted) >= 75 and guest_facts["last_move_ack"] >= 8
               and mechanic_coverage and bool(avoided) and displacements > 0)
-    return {"passed": passed, "projected_matches": len(accepted) if compared else 0, "visible_only": visible_only,
+    return {"passed": passed, "projected_matches": matched, "visible_only": visible_only,
             "source_ticks": len(ticks), "captures": captures, "ended_together": ended_together,
             "families": {seat: sorted(families) for seat, families in damage.items()}, "inputs": inputs,
             "guest_avoided": len(avoided), "displacements": displacements}
