@@ -76,7 +76,7 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 
 
 func is_valid_for(catalog: DefinitionCatalog) -> bool:
-	if (catalog == null or not catalog.is_valid() or revision <= 0 or weapons.size() != 4
+	if (catalog == null or not catalog.is_valid() or revision <= 0 or weapons.size() != 5
 			or not is_finite(fracture_reach) or fracture_reach <= 0.0
 			or not is_finite(fracture_radius) or fracture_radius <= 0.0
 			or fracture_duration <= 0 or fracture_cooldown < fracture_duration

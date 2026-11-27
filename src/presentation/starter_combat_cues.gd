@@ -7,6 +7,7 @@ const SWORD := Color("#f5c989")
 const ARROW := Color("#fff0b7")
 const SIGIL := Color("#a9c1ff")
 const SIPHON := Color("#73d9c3")
+const DAGGERS := Color("#d9e5f6")
 
 var _cues: Array[StarterCombat.Cue]
 var _tick: int
@@ -33,6 +34,7 @@ func _draw() -> void:
 					center - axis * 5.0 - axis.orthogonal() * 4.0]), ARROW)
 			&"W03": _circle(center, cue.reach, SIGIL, _tick >= cue.impact)
 			&"W04": _thrust(center, cue)
+			&"W06": _thrust(center, cue, DAGGERS)
 			StarterCombatRules.TIME_FRACTURE: _circle(center, cue.reach, Color("#8bd9ed"), true)
 			StarterCombatRules.TEMPORAL_ECHO: _circle(center, cue.reach, Color("#f2d5ff"), false)
 			StarterCombatRules.CLOSE_CALL: draw_arc(center, cue.reach, 0.0, TAU, 48, SIPHON, 2.0, true)
@@ -67,14 +69,14 @@ func _fan(center: Vector2, cue: StarterCombat.Cue) -> void:
 	draw_arc(center, cue.reach, minimum, maximum, 24, SWORD, 3.0, true)
 
 
-func _thrust(center: Vector2, cue: StarterCombat.Cue) -> void:
+func _thrust(center: Vector2, cue: StarterCombat.Cue, ink: Color = SWORD) -> void:
 	var axis := Vector2(cue.heading.x, cue.heading.y)
 	var start := center + axis * cue.radius
 	var end := center + axis * (cue.reach - cue.radius)
 	var side := axis.orthogonal() * cue.radius
 	if not _reduce_fill and cue.reach > cue.radius * 2.0:
-		draw_colored_polygon(PackedVector2Array([start - side, end - side, end + side, start + side]), Color(SWORD, 0.24))
-	_capsule_outline(start, end, side, SWORD, 2.0)
+		draw_colored_polygon(PackedVector2Array([start - side, end - side, end + side, start + side]), Color(ink, 0.24))
+	_capsule_outline(start, end, side, ink, 2.0)
 
 
 func _capsule_outline(start: Vector2, end: Vector2, side: Vector2, ink: Color, width: float) -> void:

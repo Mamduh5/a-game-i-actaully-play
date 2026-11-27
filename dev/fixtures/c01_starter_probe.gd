@@ -11,6 +11,8 @@ const POWER_CASES := ["familiar", "mines", "lance", "tether"]
 const SPEAR_CASES := ["spear-clear", "spear-blocked"]
 const SPEAR_WALL_TOP := Vector2(408, 327)
 const SPEAR_WALL_BOTTOM := Vector2(408, 433)
+const DAGGER_WALL_TOP := Vector2(346, 382)
+const DAGGER_WALL_BOTTOM := Vector2(346, 432)
 
 class Rules extends RunAuthority:
 	var geometry := RealmGeometry.new(Realm)
@@ -25,6 +27,7 @@ class Rules extends RunAuthority:
 	var targets: Array[PlayerTargeting.Candidate] = []
 	var scenario: String
 	var trace: Array[Array] = []
+	var dagger_strokes: Array[Array] = []
 	var manual: int
 	var axes: int
 	var launches: int
@@ -48,6 +51,9 @@ class Rules extends RunAuthority:
 		var unlocked: Dictionary[StringName, bool] = {}
 		if which in SPEAR_CASES:
 			weapon = &"W04"
+			unlocked[weapon] = true
+		if which == "daggers":
+			weapon = &"W06"
 			unlocked[weapon] = true
 		if which == "tether":
 			unlocked[&"P14"] = true
@@ -114,10 +120,10 @@ class Rules extends RunAuthority:
 					return false
 				if which == "spear-clear":
 					return true
-				var edge := RealmOutline.Edge.new()
-				edge.first = RealmSweep.Point.new(SPEAR_WALL_TOP.x, SPEAR_WALL_TOP.y)
-				edge.last = RealmSweep.Point.new(SPEAR_WALL_BOTTOM.x, SPEAR_WALL_BOTTOM.y)
-				return geometry.add_segment(&"fixture/shield", 0, edge, Wall, false)
+				return _shield(SPEAR_WALL_TOP, SPEAR_WALL_BOTTOM)
+			"daggers":
+				return (_enemy(&"front", 352, 365, 100, false) and _enemy(&"rear", 363, 375, 100, false)
+					and _enemy(&"aim", 367, 380, 100) and _shield(DAGGER_WALL_TOP, DAGGER_WALL_BOTTOM))
 			"tether":
 				return (tether != null and _enemy(&"first", 400, 380, 200) and _enemy(&"last", 520, 380, 200)
 					and _enemy(&"visitor", 460, 390, 200, false))
@@ -156,6 +162,12 @@ class Rules extends RunAuthority:
 					and _enemy(&"durable", 378, 416, 100))
 		return false
 
+	func _shield(first: Vector2, last: Vector2) -> bool:
+		var edge := RealmOutline.Edge.new()
+		edge.first = RealmSweep.Point.new(first.x, first.y)
+		edge.last = RealmSweep.Point.new(last.x, last.y)
+		return geometry.add_segment(&"fixture/shield", 0, edge, Wall, false)
+
 	func _enemy(id: StringName, x: float, y: float, health: int, known: bool = true) -> bool:
 		var target := PlayerTargeting.Candidate.new()
 		target.id = id
@@ -191,7 +203,15 @@ class Rules extends RunAuthority:
 				axes += int(intent.action == PlayerCommand.MOVE_AXES and intent.command.y < 0.0)
 				controls.apply(intent.command)
 		passed = passed and controls.step(geometry, Player, 0, Wall, 100.0, 1.0 / 60.0) != null
-		if (tick == 8 and scenario not in ["undying", "familiar", "mines", "lance", "tether"]) or (tick == 68 and scenario == "wake"):
+		if scenario == "daggers" and tick >= 8:
+			var attempt := combat.try_weapon(tick, targeting, targets)
+			passed = passed and attempt != StarterCombat.Attempt.FAULT
+			if attempt == StarterCombat.Attempt.COMMITTED:
+				launches += 1
+				var cue := combat.cues()[0]
+				var at := geometry.circle_center(Player, 0)
+				dagger_strokes.append([tick, cue.position.y - at.y, snappedf(cue.reach, 0.001)])
+		elif (tick == 8 and scenario not in ["undying", "familiar", "mines", "lance", "tether"]) or (tick == 68 and scenario == "wake"):
 			launches += int(combat.try_weapon(tick, targeting, targets) == StarterCombat.Attempt.COMMITTED)
 		if tick == 11 and scenario in ["bow", "bow-miss"]:
 			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(570, 500))
@@ -294,6 +314,13 @@ class Rules extends RunAuthority:
 					and kernel.actor_snapshot(&"front").hp.amount.native_at_scale(0) == 80
 					and kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0) == (80 if scenario == "spear-clear" else 100)
 					and kernel.actor_snapshot(&"flank").hp.amount.native_at_scale(0) == 100)
+			"daggers":
+				return (launches == 3 and dagger_strokes[0] == [8, -5.0, 50.0]
+					and dagger_strokes[1].slice(0, 2) == [32, 5.0] and is_equal_approx(dagger_strokes[1][2], 20.333)
+					and dagger_strokes[2] == [56, -5.0, 50.0] and is_equal_approx(player.x, 332.0)
+					and trace == [[8, "W06", "front", false], [56, "W06", "front", false]]
+					and kernel.actor_snapshot(&"front").hp.amount.native_at_scale(0) == 82
+					and kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0) == 100)
 			"tether":
 				return (trace == [[16, "P14", "first", false], [16, "P14", "last", false],
 					[16, "P14", "visitor", false], [46, "P14", "first", false], [46, "P14", "last", false]]
@@ -435,6 +462,13 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "Spear\nFront HP %d   Rear HP %d" % [
 			_rules.kernel.actor_snapshot(&"front").hp.amount.native_at_scale(0),
 			_rules.kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0)]
+	elif _case == "daggers":
+		var hand := "Ready"
+		if not _rules.dagger_strokes.is_empty():
+			hand = "Left" if _rules.dagger_strokes[-1][1] < 0.0 else "Right"
+		_hud.text = "Twin Daggers / %s\nFront HP %d   Rear HP %d" % [hand,
+			_rules.kernel.actor_snapshot(&"front").hp.amount.native_at_scale(0),
+			_rules.kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0)]
 	elif _case == "tether":
 		_hud.text = "Arcane Tether\nEndpoint HP %d   Visitor HP %d" % [
 			_rules.kernel.actor_snapshot(&"first").hp.amount.native_at_scale(0),
@@ -455,7 +489,7 @@ func _physics_process(_delta: float) -> void:
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
 			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23],
 			"mines": [6, 18, 38], "lance": [3, 10], "tether": [18, 33, 48],
-			"spear-clear": [9], "spear-blocked": [9]}[_case]
+			"spear-clear": [9], "spear-blocked": [9], "daggers": [9, 33, 57]}[_case]
 	var extra_capture := _rules.prepared and ((_case == "familiar" and tick == 50) or (_case == "lance" and tick == 59))
 	if not _capture_dir.is_empty() and (tick in capture_ticks or extra_capture):
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
@@ -467,6 +501,9 @@ func _physics_process(_delta: float) -> void:
 			_rules.layer_units(StarterCombatRules.HARVEST), _rules.layer_units(StarterCombatRules.SIPHON)]
 		if _case in SPEAR_CASES:
 			facts.append(snappedf(pose.x, 0.001))
+		if _case == "daggers":
+			facts.append(snappedf(pose.x, 0.001))
+			facts.append(_rules.dagger_strokes)
 		var serial := JSON.stringify(facts)
 		print("C01 passed=%s hash=%s facts=%s" % [good, serial.sha256_text(), serial])
 		if _rules.prepared:
@@ -493,11 +530,12 @@ func _drive_visible_inputs(tick: int) -> void:
 			move.position = Vector2(320, 330)
 			move.pressed = pressed
 			get_viewport().push_input(move, true)
-	if _case in SPEAR_CASES and tick == 1:
+	if (_case in SPEAR_CASES and tick == 1) or (_case == "daggers" and tick in [8, 32, 56]):
+		var target_x := 324.0 + float(tick - 8) / 6.0 if _case == "daggers" else 355.0
 		for pressed: bool in [true, false]:
 			var move := InputEventMouseButton.new()
 			move.button_index = MOUSE_BUTTON_RIGHT
-			move.position = Vector2(355, 380)
+			move.position = Vector2(target_x, 380)
 			move.pressed = pressed
 			get_viewport().push_input(move, true)
 	if _case == "sword" and tick in [1, 31]:
@@ -527,6 +565,8 @@ func _draw() -> void:
 		return
 	if _case == "spear-blocked":
 		draw_line(SPEAR_WALL_TOP, SPEAR_WALL_BOTTOM, Color("#bdafa3"), 6, true)
+	elif _case == "daggers":
+		draw_line(DAGGER_WALL_TOP, DAGGER_WALL_BOTTOM, Color("#bdafa3"), 3, true)
 	if _rules.tether != null:
 		var segment := _rules.tether.visible_segment()
 		if segment.size() == 2:

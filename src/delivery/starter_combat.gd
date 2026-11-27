@@ -39,6 +39,7 @@ var _weapon_rate: Quantity
 var _boosted_weapon_rate: Quantity
 var _weapon_recovery: CombatCadenceProgress
 var _weapon_rate_tick: int
+var _left_dagger_next := true
 var _boosted_through: int
 var _pending_offering: String
 var _crimson_bonus: Quantity
@@ -168,7 +169,7 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 			action.wake_duration = _rules.wake_duration
 			action.wake_damage = _rules.wake_damage
 		var force := _force_strength(_rules.force_distance)
-		if _weapon.delivery in [StarterWeapon.Delivery.ARROW, StarterWeapon.Delivery.THRUST]:
+		if _weapon.delivery in [StarterWeapon.Delivery.ARROW, StarterWeapon.Delivery.THRUST, StarterWeapon.Delivery.DAGGERS]:
 			action.displacement = RealmSweep.Point.new(heading.x * force, heading.y * force)
 		else:
 			action.push_center = aim if _weapon.delivery == StarterWeapon.Delivery.SIGIL else start
@@ -178,7 +179,7 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		StarterWeapon.Delivery.CLEAVE: result = _cleave(action, tick, start, heading)
 		StarterWeapon.Delivery.ARROW: result = _launch_arrow(action, start, heading)
 		StarterWeapon.Delivery.SIGIL: result = _place_sigil(action, tick, start, aim)
-		StarterWeapon.Delivery.THRUST: result = _thrust(action, tick, start, heading)
+		StarterWeapon.Delivery.THRUST, StarterWeapon.Delivery.DAGGERS: result = _thrust(action, tick, start, heading)
 	if result == Attempt.COMMITTED:
 		targeting.commit_attack_target(id)
 		if _weapon_rate != null:
@@ -648,10 +649,17 @@ func _launch_arrow(action: CombatAction, center: RealmSweep.Point, heading: Real
 
 
 func _thrust(action: CombatAction, tick: int, center: RealmSweep.Point, heading: RealmSweep.Point) -> Attempt:
+	var single := _weapon.delivery == StarterWeapon.Delivery.DAGGERS
+	var first_eligible := Callable()
+	if single:
+		var side := RealmSweep.Point.new(heading.y, -heading.x)
+		center = _offset(center, side, _weapon.hand_offset if _left_dagger_next else -_weapon.hand_offset)
+		first_eligible = func(id: StringName) -> bool: return _living_target(id) != null
 	var radius := _weapon.thrust_width * 0.5
 	var first := _offset(center, heading, radius)
 	var tip := _offset(center, heading, _weapon.reach - radius)
-	var path := _geometry.certify_capsule_snapshot(_geometry.realm_id, first, tip, radius, _targets, _blockers, _actor)
+	var path := _geometry.certify_capsule_snapshot(_geometry.realm_id, first, tip, radius,
+		_targets, _blockers, _actor, first_eligible)
 	if path == null:
 		return Attempt.FAULT
 	var result := _instant_delivery(action, tick, path.contacts)
@@ -659,10 +667,12 @@ func _thrust(action: CombatAction, tick: int, center: RealmSweep.Point, heading:
 		var reach := _weapon.reach
 		if path.blocker != null:
 			reach = lerpf(_weapon.thrust_width, _weapon.reach, path.blocker.proof.earliest)
-		var cue := _ring(&"W04", center, reach, tick, tick + 9)
+		var cue := _ring(_weapon.id, center, reach, tick, tick + 9)
 		cue.heading = heading
 		cue.radius = radius
 		_effects.append(cue)
+		if single:
+			_left_dagger_next = not _left_dagger_next
 	return result
 
 

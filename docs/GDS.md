@@ -637,6 +637,8 @@ Force can add compatible displacement; it does not erase stage identity. Ground 
 
 No simultaneous double-strike default, mandatory combo finisher, movement lock, innate Bleed, poison, knockback or random critical bonus. High-frequency legitimate hit synergies remain intended. Each attack is distinct for activation costs, but source identity remains the same weapon for Converging Strikes. **Discovery - Relentless Rhythm:** a required number of qualifying successful attacks within a defined window; exact threshold delegated.
 
+**C06 provisional dagger geometry under OWNER-T04 and O26.** Start with the left hand. Each paid activation uses a forward capsule of full width 12 whose axis is five units to the current hand's side of the committed heading. The leading edge is 50 units forward. The small lateral offset gives each hand a distinct path while allowing a centered target to receive either strike. The earliest eligible contact wins. Equal-time terrain or a compatible shield intercepts first, and exactly tied eligible targets use stable entity and shape order. A paid miss alternates hands. A missing target or unaffordable activation leaves the pending hand unchanged. The width and offset live in the native weapon rules and await owner playtesting. [C06 evidence](records/C06.md#twin-daggers-review-handoff)
+
 ### W07. Chakram - unlockable
 <a id="catalog-w07"></a>
 

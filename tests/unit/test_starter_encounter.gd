@@ -170,6 +170,38 @@ func test_spear_is_selectable_for_an_eligible_hero_and_publishes_direction_while
 	assert_eq(view.cues[0].reach, 125.0)
 
 
+func test_twin_daggers_cadence_and_hands_reach_guest_replica_while_hero_moves() -> void:
+	var encounter := _encounter(121.0, &"H02", &"W06")
+	assert_not_null(encounter)
+	var sides: Array[float] = []
+	for tick: int in range(1, 26):
+		if tick in [1, 25]:
+			assert_eq(_submit(encounter, tick, PlayerCommand.new(PlayerCommand.MOVE_AXES, 1, 0)), RunAuthority.Admission.QUEUED)
+		elif tick == 4:
+			assert_eq(_submit(encounter, tick, PlayerCommand.new(PlayerCommand.MOVE_AXES)), RunAuthority.Admission.QUEUED)
+		assert_true(encounter.close_tick())
+		if tick not in [1, 24, 25]:
+			continue
+		var source := encounter.view_for(SEAT)
+		var state := encounter.movement_state(SEAT, 1, 2)
+		var replica := GuestReplica.new()
+		assert_true(replica.install_scope(REALM, state))
+		var body := RecipientView.pack_encounter(source, state, REALM, encounter.party_statuses(), null)
+		assert_eq(replica.receive_frame(_view_frame(body, ReplicationMessage.Kind.VIEW_STATE)), GuestReplica.Acceptance.APPLIED)
+		var view := replica.encounter_view(SEAT, tick)
+		assert_not_null(view)
+		assert_eq(view.others[0].hp.native_at_scale(0), 82 if tick == 25 else 91)
+		if tick == 24:
+			assert_true(view.cues.is_empty())
+			continue
+		assert_almost_eq(view.player.at.x, 121.0 + (4.0 if tick == 25 else 1.0) * 100.0 / 60.0, 0.000001)
+		assert_eq(view.cues.size(), 1)
+		assert_eq(view.cues[0].id, &"W06")
+		assert_eq(view.cues[0].heading.x, 1.0)
+		sides.append(view.cues[0].position.y - view.player.at.y)
+	assert_eq(sides, [-5.0, 5.0])
+
+
 func test_live_defeat_waits_for_currency_and_closing_marker_then_publishes_once() -> void:
 	if not OS.has_feature("windows"):
 		return

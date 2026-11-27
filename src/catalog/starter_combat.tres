@@ -39,6 +39,16 @@ cooldown_ticks = 60
 reach = 125.0
 thrust_width = 22.0
 
+[sub_resource type="Resource" id="TwinDaggers"]
+script = ExtResource("2_weapon")
+id = &"W06"
+delivery = 4
+damage = 9
+cooldown_ticks = 24
+reach = 50.0
+thrust_width = 12.0
+hand_offset = 5.0
+
 [resource]
 script = ExtResource("1_rules")
-weapons = Array[ExtResource("2_weapon")]([SubResource("Sword"), SubResource("Bow"), SubResource("Staff"), SubResource("Spear")])
+weapons = Array[ExtResource("2_weapon")]([SubResource("Sword"), SubResource("Bow"), SubResource("Staff"), SubResource("Spear"), SubResource("TwinDaggers")])

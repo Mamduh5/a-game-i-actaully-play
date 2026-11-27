@@ -307,8 +307,9 @@ func certify_frozen_path(realm: StringName, start: RealmSweep.Point, finish: Rea
 
 ## Order contacts along the geometry of one instantaneous strike. Blockers
 ## win equal-position ties. Accepted hits all belong to the same instant.
+## An eligibility predicate selects just the first matching contact.
 func certify_capsule_snapshot(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
-		targets: int, blockers: int, except_entity: StringName) -> SweepCandidates:
+		targets: int, blockers: int, except_entity: StringName, first_eligible: Callable = Callable()) -> SweepCandidates:
 	if targets <= 0 or blockers < 0 or (targets & blockers) != 0:
 		return null
 	var path := certify_frozen_path(realm, start, finish, radius, targets | blockers, except_entity)
@@ -319,21 +320,33 @@ func certify_capsule_snapshot(realm: StringName, start: RealmSweep.Point, finish
 		if (contact.category & blockers) != 0:
 			obstructions.append(contact)
 	if not obstructions.is_empty():
-		path.blocker = _first_blocker(obstructions)
+		path.blocker = _first_contact(obstructions)
 		if path.blocker == null:
 			return null
 	var hits: Array[Contact] = []
-	var instant := RealmCircleTime.Contact.new(RealmCircleTime.Result.HIT)
+	var single := first_eligible.is_valid()
 	for contact: Contact in path.contacts:
-		if (contact.category & blockers) != 0:
+		if (contact.category & blockers) != 0 or (single and not first_eligible.call(contact.entity)):
 			continue
 		if path.blocker != null:
 			match contact.proof.order_against(path.blocker.proof):
 				RealmCircleTime.Order.AFTER, RealmCircleTime.Order.SAME: continue
 				RealmCircleTime.Order.UNRESOLVED: return null
+		hits.append(contact)
+	if single and hits.size() > 1:
+		var nearest := _first_contact(hits)
+		if nearest == null:
+			return null
+		# The original shape order breaks ties between eligible contacts.
+		for contact: Contact in hits:
+			if contact == nearest or contact.proof.order_against(nearest.proof) == RealmCircleTime.Order.SAME:
+				nearest = contact
+				break
+		hits = [nearest]
+	var instant := RealmCircleTime.Contact.new(RealmCircleTime.Result.HIT)
+	for contact: Contact in hits:
 		contact.proof = instant
 		contact.time = 0.0
-		hits.append(contact)
 	path.contacts = hits
 	return path
 
@@ -361,7 +374,7 @@ func displace_circle(entity: StringName, slot: int, requested: RealmSweep.Point,
 	result.start = RealmSweep.Point.new(start.x, start.y)
 	result.finish = RealmSweep.Point.new(requested.x, requested.y)
 	if not path.contacts.is_empty():
-		var first := _first_blocker(path.contacts)
+		var first := _first_contact(path.contacts)
 		if first == null:
 			return null
 		for contact: Contact in path.contacts:
@@ -405,7 +418,7 @@ func displace_body(entity: StringName, slot: int, requested: RealmSweep.Point, b
 	var limit := 1.0
 	var retreat := 0.0
 	if not contacts.is_empty():
-		var first := _first_blocker(contacts)
+		var first := _first_contact(contacts)
 		if first == null:
 			return null
 		var recorded: Dictionary[StringName, bool] = {}
@@ -449,7 +462,7 @@ static func _compare_shape_ids(left: Contact, right: Contact) -> bool:
 	return String(left.entity) < String(right.entity)
 
 
-static func _first_blocker(contacts: Array[Contact]) -> Contact:
+static func _first_contact(contacts: Array[Contact]) -> Contact:
 	var first := contacts[0]
 	for contact: Contact in contacts:
 		if contact.proof.earliest < first.proof.earliest:

@@ -257,6 +257,74 @@ func test_spear_blocked_commit_pays_once_but_rejected_action_spends_nothing() ->
 	assert_true(actor.cooldown_ready(StarterCombat.WEAPON_COOLDOWN, CombatInstant.at_tick(61)))
 
 
+func test_twin_daggers_alternate_on_paid_miss_and_strike_once_per_activation() -> void:
+	var arena := Arena.new(&"W06", &"H01", false, &"", &"", {&"W06": true})
+	assert_false(&"W06" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.WEAPON, {}))
+	assert_eq(arena.attack(1), StarterCombat.Attempt.NO_TARGET)
+	assert_true(arena.add(&"aim", 47, 0, 100))
+	assert_true(arena.add(&"z_front", 24, -5, 100, HOSTILE, false))
+	assert_true(arena.geometry.add_circle(&"z_front", 1, RealmSweep.Point.new(23, -6), 3.0, HOSTILE))
+	assert_true(arena.add(&"a_rear", 35, -5, 100, HOSTILE, false))
+	assert_true(arena.add(&"off_left_path", 16, 4.01, 100, HOSTILE, false))
+	assert_eq(arena.attack(1, {MANA: Quantity.from_count(11)}), StarterCombat.Attempt.REJECTED)
+	assert_eq(arena.kernel.actor_snapshot(HERO).resources[MANA].native_at_scale(0), 10)
+	assert_true(arena.combat.cues().is_empty())
+	var price: Dictionary[StringName, Quantity] = {MANA: Quantity.from_count(3)}
+	var hands: Array[float] = []
+	var hit_ticks: Array[int] = []
+	for tick: int in range(1, 50):
+		if tick in [24, 48]:
+			assert_eq(arena.attack(tick, price), StarterCombat.Attempt.REJECTED)
+		if tick == 25:
+			assert_true(arena.wall(12.0, 2.0, 28.0))
+		if tick in [1, 25, 49]:
+			assert_eq(arena.attack(tick, price), Committed)
+			var cues := arena.combat.cues()
+			assert_eq(cues.size(), 1)
+			assert_eq(cues[0].id, &"W06")
+			hands.append(cues[0].position.y)
+			assert_almost_eq(cues[0].reach, 12.0 if tick == 25 else 50.0, 0.000001)
+		assert_true(arena.combat.advance(tick))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			hit_ticks.append(tick)
+			assert_eq(hit.target, &"z_front")
+			assert_eq(hit.family, &"W06")
+			assert_eq(hit.components[0].kind, CombatAction.Damage.PHYSICAL)
+			assert_eq(hit.components[0].hp_removed.native_at_scale(0), 9)
+			assert_null(hit.displacement)
+	assert_eq(hands, [-5.0, 5.0, -5.0])
+	assert_eq(hit_ticks, [1, 49])
+	assert_eq(arena.hp(&"z_front").native_at_scale(0), 82)
+	for target: StringName in [&"aim", &"a_rear", &"off_left_path"]:
+		assert_eq(arena.hp(target).native_at_scale(0), 100)
+	assert_eq(arena.kernel.actor_snapshot(HERO).resources[MANA].native_at_scale(0), 1)
+
+
+func test_twin_daggers_skip_corpses_choose_stable_first_target_and_yield_to_blocker_tie() -> void:
+	for blocked: bool in [false, true]:
+		var arena := Arena.new(&"W06", &"H01", false, &"", &"", {&"W06": true})
+		assert_true(arena.add(&"aim", 49, 0, 100))
+		assert_true(arena.add(&"z_second", 31, -5, 100, HOSTILE, false))
+		assert_true(arena.add(&"z_first", 31, -5, 100, HOSTILE, false))
+		assert_true(arena.add(&"a_rear", 38, -5, 100, HOSTILE, false))
+		assert_true(arena.add(&"corpse", 14, -5, 1, HOSTILE, false))
+		assert_true(arena.swing_from(HERO, &"corpse", 1, 1))
+		assert_true(arena.combat.advance(1))
+		assert_eq(arena.settle(1).size(), 1)
+		assert_eq(arena.hp(&"corpse").native_at_scale(0), 0)
+		if blocked:
+			assert_true(arena.wall(28, -20, 20))
+		assert_eq(arena.attack(2), Committed)
+		assert_true(arena.combat.advance(2))
+		var hits := arena.settle(2)
+		assert_eq(hits.size(), 0 if blocked else 1)
+		if not hits.is_empty():
+			assert_eq(hits[0].target, &"z_first")
+		assert_eq(arena.hp(&"z_first").native_at_scale(0), 100 if blocked else 91)
+		assert_eq(arena.hp(&"z_second").native_at_scale(0), 100)
+		assert_eq(arena.hp(&"a_rear").native_at_scale(0), 100)
+
+
 func test_fracture_compresses_only_the_owners_sigil_inside_the_selected_field() -> void:
 	for inside: bool in [false, true]:
 		var arena := Arena.new(&"W03", &"H04", false, &"", &"", {&"H04": true})
