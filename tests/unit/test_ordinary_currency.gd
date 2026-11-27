@@ -126,6 +126,7 @@ func test_orderly_quit_retries_the_same_receipt_and_seals_all_earning_before_exi
 	assert_eq(earnings.accrue("last-encounter", Quantity.from_count(9)), Add.QUEUED)
 	var operation := earnings.dispatch(true)
 	assert_false(authority.settle_orderly_quit())
+	assert_true(authority.checkpoint().is_empty())
 	assert_false(authority.close_tick())
 	assert_eq(authority.next_tick(), 1)
 	assert_eq(earnings.accrue("after-quit", Quantity.from_count(2)), Add.FENCED)

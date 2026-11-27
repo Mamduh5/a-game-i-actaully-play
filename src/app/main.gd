@@ -36,7 +36,7 @@ func request_orderly_quit() -> void:
 	_quit_requested = true
 	if _authority == null or _authority.settle_orderly_quit():
 		set_process(false)
-		_finish_quit()
+		get_tree().quit()
 		return
 	_identity_label.text = "Saving run earnings. Retrying before exit.\nForcing the game closed can lose uncommitted earnings."
 	_retry_at = Time.get_ticks_msec() + 1000
@@ -46,7 +46,3 @@ func request_orderly_quit() -> void:
 func _process(_delta: float) -> void:
 	if _quit_requested and Time.get_ticks_msec() >= _retry_at:
 		request_orderly_quit()
-
-
-func _finish_quit() -> void:
-	get_tree().quit()

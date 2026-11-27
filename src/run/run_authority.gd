@@ -96,7 +96,7 @@ func settle_orderly_quit() -> bool:
 ## already queued for this seat's old realm and keep the shared clock.
 func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, destination: RealmGeometry,
 		at: RealmSweep.Point) -> bool:
-	if (intent == null or party == null or source == null or destination == null
+	if (_quitting or intent == null or party == null or source == null or destination == null
 			or intent.action != PlayerCommand.INTERACT or intent.tick != _closed_tick
 			or not belongs_to(intent.run_id, intent.epoch) or not party.belongs_to(intent.run_id, intent.epoch)
 			or source.realm_id != intent.realm_id or _realms.get(intent.seat_id) != source.realm_id
@@ -194,7 +194,7 @@ func closed_result() -> Dictionary:
 
 ## The last closed admission/RNG frontier. Pending intents are never checkpointed.
 func checkpoint() -> Dictionary:
-	if _identity.is_empty():
+	if _identity.is_empty() or _quitting:
 		return {}
 	var saved := {
 		"version": CHECKPOINT_VERSION,
