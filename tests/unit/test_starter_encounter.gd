@@ -4,6 +4,16 @@ const SEAT := &"player"
 const REALM := WorldTopology.OVERWORLD
 const RUN := &"wp32-test"
 
+class TerminalWriteStore extends ProfileStore:
+	var commits_before_refusal := -1
+
+	func _commit_io() -> bool:
+		if commits_before_refusal == 0:
+			return false
+		if commits_before_refusal > 0:
+			commits_before_refusal -= 1
+		return super._commit_io()
+
 
 func test_generated_encounter_strike_hits_a_stationary_player_and_misses_after_legal_movement() -> void:
 	for evades: bool in [false, true]:
@@ -149,7 +159,70 @@ func test_spear_is_selectable_for_an_eligible_hero_and_publishes_direction_while
 	assert_eq(view.cues[0].reach, 125.0)
 
 
-static func _encounter(start_x: float, hero: StringName = &"H01", weapon: StringName = &"W01") -> StarterEncounter:
+func test_live_defeat_waits_for_currency_and_closing_marker_then_publishes_once() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var signer := Crypto.new().generate_rsa(2048)
+	for committed_before_refusal: int in [0, 1]:
+		var foe := _foe()
+		foe.damage = Quantity.from_count(100)
+		foe.windup_ticks = 2
+		var encounter := _encounter(62.0, &"H01", &"W01", foe)
+		assert_not_null(encounter)
+		var scope := encounter.checkpoint().identity as Dictionary
+		var scratch := DirAccess.create_temp("agip-encounter-ending")
+		var store := TerminalWriteStore.new()
+		assert_eq(store.open(String(SEAT), scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+		var binding := ProfileGrant.Binding.new()
+		binding.run = String(scope.run)
+		binding.rules = String(scope.rules)
+		binding.catalog = String(scope.catalog)
+		binding.recipient = String(SEAT)
+		binding.issuer = signer
+		binding.recipient_key = signer
+		var account := "currency/permanent"
+		var ordinary := OrdinaryCurrency.begin(store, binding, signer, account)
+		assert_true(encounter.attach_ordinary_currency(ordinary))
+		assert_true(encounter.begin_ordinary_session(store))
+		assert_true(encounter.close_tick())
+		assert_true(encounter.close_tick())
+		assert_eq(encounter.view_for(SEAT).threats[0].impact_tick, 3)
+		assert_eq(ordinary.accrue("fixture/earlier-spawn", Quantity.from_count(7)), OrdinaryCurrency.Eligibility.QUEUED)
+		var previous := encounter.closed_result()
+		var move := PlayerCommand.new(PlayerCommand.MOVE_TO, 64, 128)
+		assert_eq(_submit(encounter, 1, move), RunAuthority.Admission.QUEUED)
+		store.commits_before_refusal = committed_before_refusal
+		assert_false(encounter.close_tick())
+		assert_eq(encounter.next_tick(), 3)
+		assert_eq(encounter.movement_acknowledgement(SEAT), 0)
+		assert_eq(encounter.closed_result(), previous)
+		assert_true(encounter.checkpoint().is_empty())
+		assert_eq(encounter.fault(), &"")
+		assert_null(encounter.view_for(SEAT))
+		assert_eq(_submit(encounter, 2, move), RunAuthority.Admission.INACTIVE)
+		assert_eq(ordinary.accrue("fixture/late-spawn", Quantity.from_count(1)), OrdinaryCurrency.Eligibility.FENCED)
+		assert_eq(store.balance(account).native_at_scale(0), 7 * committed_before_refusal)
+		assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.POSSIBLE_EXPOSURE)
+		assert_false(encounter.close_tick())
+		store.commits_before_refusal = -1
+		assert_true(encounter.close_tick())
+		assert_eq(encounter.closed_result().accepted.size(), 1)
+		assert_eq(encounter.closed_result().outcomes.size(), 1)
+		assert_eq(encounter.movement_acknowledgement(SEAT), 1)
+		assert_true(encounter.view_for(SEAT).defeated)
+		assert_eq(encounter.view_for(SEAT).player.hp.sign_value, 0)
+		assert_false(encounter.close_tick())
+		assert_eq(encounter.next_tick(), 4)
+		assert_true(store.close())
+		assert_eq(store.open(String(SEAT), scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+		assert_eq(store.balance(account).native_at_scale(0), 7)
+		assert_eq(store.checkpoint()["generation"], 3)
+		assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
+		assert_true(store.close())
+
+
+static func _encounter(start_x: float, hero: StringName = &"H01", weapon: StringName = &"W01",
+		foe: WorldEnemy.Rules = null) -> StarterEncounter:
 	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 	var catalog := bundle.compile()
 	var slots: Array[StringName] = []
@@ -171,7 +244,8 @@ static func _encounter(start_x: float, hero: StringName = &"H01", weapon: String
 	build.maximum_hp = Quantity.from_count(100)
 	var floor := WorldExploration.create(WorldTopology.generate(setup.seed), [SEAT])
 	var encounter := StarterEncounter.assemble(setup, SEAT, floor, {SEAT: build})
-	return encounter if encounter != null and encounter.place_enemy(&"near", _foe(), RealmSweep.Point.new(155, 128)) else null
+	var enemy := foe if foe != null else _foe()
+	return encounter if encounter != null and encounter.place_enemy(&"near", enemy, RealmSweep.Point.new(155, 128)) else null
 
 
 static func _foe() -> WorldEnemy.Rules:
