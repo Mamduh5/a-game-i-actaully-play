@@ -106,6 +106,8 @@ class WaveResult:
 	var fault_wave: int
 
 class Commitment:
+	var armed_mine: CombatMineCharge
+	var detonation: CombatInstant
 	var action: CombatAction
 	var realm: StringName
 	var parts: Dictionary[int, bool] = {}
@@ -485,6 +487,29 @@ func finish_delivery(key: String) -> bool:
 	return _accepting() and _actions.erase(key)
 
 
+func bind_mine(key: String, mine: CombatMineCharge) -> bool:
+	var held: Commitment = _actions.get(key)
+	if (not _accepting() or held == null or held.action.family != &"P03" or held.action.components.size() != 1
+			or held.armed_mine != null or not held.parts.is_empty() or mine == null or mine.end_reason != CombatMineCharge.End.LIVE):
+		return false
+	held.armed_mine = mine
+	return true
+
+
+## A placed mine retains its owner's paid action. Seal one potency before
+## admitting any simultaneous explosion contacts, even after the owner dies.
+func detonate_mine(key: String, at: CombatInstant) -> bool:
+	var held: Commitment = _actions.get(key)
+	if not _accepting() or held == null or held.armed_mine == null or not held.parts.is_empty():
+		return false
+	var potency := held.armed_mine.detonate(at)
+	if potency == null:
+		return false
+	held.action.components[0].base = potency
+	held.detonation = at
+	return true
+
+
 func admit_contact(key: String, part: int, realm: StringName, start_tick: int, contact: RealmGeometry.Contact,
 		target_life: int, hostile: bool, position: RealmSweep.Point = null) -> CombatRootQueue.Result:
 	var held: Commitment = _actions.get(key)
@@ -501,6 +526,9 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 		if source == null or source.life != held.action.source_life or not _live_controller(_actors, source):
 			return CombatRootQueue.Result.INVALID
 	var due := CombatInstant.at_contact(start_tick, contact.proof)
+	if held.armed_mine != null and (held.detonation == null or due == null
+			or held.detonation.order_against(due) != RealmCircleTime.Order.SAME):
+		return CombatRootQueue.Result.INVALID
 	if due != null and _closed != null and _closed.order_against(due) != RealmCircleTime.Order.BEFORE:
 		return CombatRootQueue.Result.CLOSED_INSTANT
 	if held.payment_pending and (due == null

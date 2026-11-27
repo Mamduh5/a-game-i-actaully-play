@@ -5,19 +5,19 @@ const HERO := &"hero"
 const FAMILY := &"P02"
 
 
-static func _earn(arena: Arena, rank: int) -> RunRewardQueue:
+static func _earn(arena: Arena, rank: int, family: StringName = FAMILY) -> RunRewardQueue:
 	var slots: Array[StringName] = []
 	slots.resize(RunPreparation.CANDIDATE_SLOTS)
 	slots.fill(&"")
-	slots[0] = FAMILY
+	slots[0] = family
 	var prep := RunPreparation.select(arena.catalog, &"H01", &"W01", [&"", &""], slots, {})
 	var rewards := RunRewardQueue.begin(prep, RunRandom.new(17), HERO)
 	for tick: int in range(1, 100):
-		if rewards.ranks().get(FAMILY, 0) == rank:
+		if rewards.ranks().get(family, 0) == rank:
 			break
 		var offer := rewards.earn(tick)
 		var options := rewards.read_offer(offer).options
-		rewards.select(offer, FAMILY if options.has(FAMILY) else options.keys()[0])
+		rewards.select(offer, family if options.has(family) else options.keys()[0])
 	return rewards
 
 

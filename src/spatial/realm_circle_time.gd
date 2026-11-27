@@ -60,6 +60,21 @@ class Contact:
 				_exact_root = ExactContact.ratio(PackedFloat64Array([earliest, 1.0]))
 		return _exact_root
 
+	## Sample a moving circle against a stationary disk at a previously
+	## certified trigger time, including tangency and simultaneous exits.
+	func disk_overlap(center: RealmSweep.Point, radius: float, start: RealmSweep.Point,
+			finish: RealmSweep.Point, target_radius: float) -> Result:
+		if (outcome != Result.HIT or not RealmCircleTime._finite_point(center) or not RealmCircleTime._finite_point(start)
+				or not RealmCircleTime._finite_point(finish) or not is_finite(radius) or radius < 0.0
+				or not is_finite(target_radius) or target_radius < 0.0):
+			return Result.UNRESOLVED
+		var time := _root()
+		if time == null:
+			return Result.UNRESOLVED
+		var path := ExactContact.path(PackedFloat64Array([center.x, center.y, center.x, center.y,
+			start.x, start.y, finish.x, finish.y, radius, target_radius]))
+		return Result.HIT if time.evaluate_path(path) <= 0 else Result.MISS
+
 class Interval:
 	var lower: float
 	var upper: float

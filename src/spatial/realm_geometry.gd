@@ -236,6 +236,44 @@ func certify_circle_snapshot(realm: StringName, center: RealmSweep.Point, radius
 	return certify_frozen_path(realm, center, center, radius, compatible, except_entity)
 
 
+## An instantaneous area at a certified time inside the staged movement
+## interval. The index includes every staged path's complete swept bounds.
+func certify_disk_at(realm: StringName, center: RealmSweep.Point, radius: float,
+		instant: RealmCircleTime.Contact, compatible: int, except_entity: StringName = &"") -> SweepCandidates:
+	if realm != realm_id or center == null or instant == null or instant.outcome != RealmCircleTime.Result.HIT or compatible <= 0:
+		return null
+	var broad := _index.query(RealmBounds.from_sweep(center.x, center.y, center.x, center.y, radius))
+	if broad == null:
+		return null
+	var result := SweepCandidates.new()
+	result.revision = revision
+	var certifier := RealmCircleTime.new()
+	for proxy: RealmSpatialIndex.Proxy in broad.proxies:
+		var shape := _shapes[RealmSpatialIndex.shape_key(proxy.entity, proxy.shape)]
+		if proxy.entity == except_entity or (shape.category & compatible) == 0:
+			continue
+		var outcome: RealmCircleTime.Result
+		if shape.edge != null:
+			outcome = certifier.measure_segment(center, center, radius, shape.edge.first, shape.edge.last).outcome
+		else:
+			var finish := shape.motion_end if shape.motion_end != null else shape.center
+			outcome = instant.disk_overlap(center, radius, shape.center, finish, shape.radius)
+		if outcome == RealmCircleTime.Result.MISS:
+			continue
+		var contact := Contact.new()
+		contact.entity = proxy.entity
+		contact.shape = proxy.shape
+		contact.category = shape.category
+		contact.proof = instant.copy()
+		contact.time = instant.earliest
+		if outcome == RealmCircleTime.Result.HIT:
+			result.contacts.append(contact)
+		else:
+			result.unresolved.append(contact)
+	result.contacts.sort_custom(_compare_shape_ids)
+	return result
+
+
 func certify_frozen_path(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
 		compatible: int, except_entity: StringName = &"") -> SweepCandidates:
 	return _sweep(realm, start, finish, radius, compatible, except_entity, RealmCircleTime.new(), true)

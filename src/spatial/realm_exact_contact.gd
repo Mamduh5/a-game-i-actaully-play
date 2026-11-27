@@ -141,9 +141,14 @@ class Root:
 	func compare(other: Root) -> int:
 		if evaluate_linear(other.speed, other.projection.opposite()) > 0:
 			return 1
+		return -evaluate_path(other)
+
+	## Sign of the other path's squared separation minus squared radius at
+	## this exact instant. Eliminate t² using this root's own equation.
+	func evaluate_path(other: Root) -> int:
 		var slope := other.speed.multiply(projection).subtract(speed.multiply(other.projection))
 		var offset := speed.multiply(other.separation).subtract(other.speed.multiply(separation))
-		return -evaluate_linear(slope.add(slope), offset)
+		return evaluate_linear(slope.add(slope), offset)
 
 	## Sign of slope * t + offset at the smaller root.
 	func evaluate_linear(slope: Integer, offset: Integer) -> int:

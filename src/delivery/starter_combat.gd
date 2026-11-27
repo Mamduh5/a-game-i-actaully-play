@@ -202,6 +202,12 @@ func _place_fracture(tick: int, source: CombatantState, center: RealmSweep.Point
 	return result
 
 
+func compresses_at(owner: StringName, realm: StringName, tick: int, point: RealmSweep.Point) -> bool:
+	return (_fracture != null and point != null and owner == _actor and realm == _geometry.realm_id
+		and tick >= _fracture.impact and tick < _fracture.ends and (point.x - _fracture.position.x) ** 2
+		+ (point.y - _fracture.position.y) ** 2 <= _fracture.reach ** 2)
+
+
 func _harmonic_burst(tick: int, source: CombatantState, center: RealmSweep.Point) -> Attempt:
 	if not source.cooldown_ready(StarterCombatRules.HARMONIC_BURST, CombatInstant.at_tick(tick)):
 		return Attempt.REJECTED
@@ -294,9 +300,7 @@ func advance(tick: int) -> bool:
 		return false
 	for index: int in range(_sigils.size() - 1, -1, -1):
 		var sigil := _sigils[index]
-		if (_fracture != null and tick > sigil.placed and sigil.cue.impact > tick
-				and (sigil.cue.position.x - _fracture.position.x) ** 2
-				+ (sigil.cue.position.y - _fracture.position.y) ** 2 <= _fracture.reach ** 2):
+		if tick > sigil.placed and sigil.cue.impact > tick and compresses_at(_actor, _geometry.realm_id, tick, sigil.cue.position):
 			sigil.cue.impact -= 1
 			sigil.cue.ends -= 1
 		if sigil.cue.impact > tick:

@@ -155,6 +155,14 @@ func finish() -> bool:
 	return true
 
 
+func bind_mine(charge: CombatMineCharge) -> bool:
+	return _kernel.bind_mine(_commitment, charge)
+
+
+func detonate_mine(at: CombatInstant) -> bool:
+	return _kernel.detonate_mine(_commitment, at)
+
+
 static func _insert_contact(ordered: Array[RealmGeometry.Contact], candidate: RealmGeometry.Contact) -> bool:
 	var lower := 0
 	var upper := ordered.size()

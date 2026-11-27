@@ -10,6 +10,19 @@ var _base: Quantity
 var _gain_per_tick: Quantity
 var _cap: Quantity
 var _end: End
+var _last_compressed: int = -1
+
+func armed_at(at: CombatInstant) -> bool:
+	return (_end == End.LIVE and at != null and _armed.order_against(at) in [
+		RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME])
+
+
+## Placement is tick-bound. Compression advances arming, preserving its
+## original expiry and the real elapsed waiting time after it actually arms.
+func compress_arming(tick: int) -> void:
+	if _end == End.LIVE and tick > _last_compressed and tick < _armed.tick and _armed.proof_snapshot().latest == 0.0:
+		_armed = CombatInstant.at_tick(_armed.tick - 1)
+		_last_compressed = tick
 
 var end_reason: End:
 	get: return _end
