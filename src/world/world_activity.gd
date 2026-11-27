@@ -25,12 +25,13 @@ class Frame:
 	var combat: Array[CombatKernel.WaveResult] = []
 	var terminal: CombatKernel.Terminal
 	var airborne: Dictionary[StringName, bool] = {}
+	var near_misses: Dictionary[StringName, bool] = {}
 
 var _kernel: CombatKernel
 var _random: RunRandom
 var _realms: Dictionary[StringName, WorldExploration] = {}
 var _enemies: Dictionary[StringName, WorldEnemy] = {}
-var _players: Dictionary[StringName, bool] = {}
+var _players: Dictionary[StringName, float] = {}
 var _sites: Dictionary[StringName, Schedule] = {}
 var _defeated_lives: Dictionary[StringName, int] = {}
 var _actor_mask := ACTORS
@@ -57,8 +58,9 @@ func register_realm(exploration: WorldExploration) -> bool:
 	return true
 
 
-func track_player(id: StringName) -> bool:
-	if _kernel == null or _kernel.arena_started() or _enemies.has(id) or _players.has(id) or _frame != null:
+func track_player(id: StringName, close_call_margin: float = 0.0) -> bool:
+	if (_kernel == null or _kernel.arena_started() or _enemies.has(id) or _players.has(id)
+			or _frame != null or not is_finite(close_call_margin) or close_call_margin < 0.0):
 		return false
 	var actor := _kernel.actor_snapshot(id)
 	if actor == null or actor.provenance != CombatOrigin.Provenance.SEAT or not actor.controller.is_empty():
@@ -69,7 +71,7 @@ func track_player(id: StringName) -> bool:
 	var category := realm.geometry().circle_category(id, 0)
 	if category <= 0 or (category & WorldExploration.BLOCKER) != 0:
 		return false
-	_players[id] = true
+	_players[id] = close_call_margin
 	_actor_mask |= category
 	return true
 
@@ -151,8 +153,8 @@ func advance(tick: int, authority: RunAuthority = null, play: Callable = Callabl
 			likeness = _subjects()
 		for id: StringName in due:
 			var place: WorldEnemy.Subject = likeness.get(id)
-			if place == null or not _enemies[id].release(_realms[place.realm].geometry(),
-					likeness, tick, WorldExploration.BLOCKER, _actor_mask):
+			if place == null or not _enemies[id].release(_kernel, _realms[place.realm].geometry(),
+					likeness, tick, WorldExploration.BLOCKER, _actor_mask, _frame.near_misses):
 				_fault = &"world_delivery"
 				return null
 		_decisions_opened = true
@@ -332,6 +334,7 @@ func _subjects() -> Dictionary[StringName, WorldEnemy.Subject]:
 		subject.hp = actor.hp
 		subject.maximum = actor.maximum
 		subject.airborne = _frame != null and _frame.airborne.has(id)
+		subject.close_call_margin = _players.get(id, 0.0)
 		subject.faction = _enemies[id].faction() if _enemies.has(id) else WorldEnemy.PARTY
 		result[id] = subject
 	return result

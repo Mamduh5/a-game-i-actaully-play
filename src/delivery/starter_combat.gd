@@ -30,6 +30,11 @@ class Sigil:
 var _rules: StarterCombatRules
 var _weapon: StarterWeapon
 var _damage_multiplier: Quantity
+var _weapon_rate: Quantity
+var _close_call_rate: Quantity
+var _acrobat_recovery: CombatCadenceProgress
+var _acrobat_rate_tick: int
+var _close_call_through: int
 var _hero: StringName
 var _force_equipped: bool
 var _lightning_equipped: bool
@@ -71,7 +76,12 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	if damage_bonus != 0:
 		result._damage_multiplier = Quantity.from_count(RunPreparation.BASIS_POINTS + damage_bonus, 4)
 	var frequency := preparation.upgrade_basis_points(&"automatic_attack_frequency")
-	result._weapon.cooldown_ticks = _rate_period(weapon.cooldown_ticks, frequency)
+	if preparation.hero == StarterCombatRules.ACROBAT:
+		var rate := RunPreparation.BASIS_POINTS + frequency
+		result._weapon_rate = Quantity.from_count(rate, 4)
+		result._close_call_rate = Quantity.from_count(rate + rules.close_call_basis_points, 4)
+	else:
+		result._weapon.cooldown_ticks = _rate_period(weapon.cooldown_ticks, frequency)
 	var recovery := preparation.upgrade_basis_points(&"manual_cooldown_recovery")
 	result._rules.siphon_cooldown = _rate_period(rules.siphon_cooldown, recovery)
 	result._rules.vault_cooldown = _rate_period(rules.vault_cooldown, recovery)
@@ -107,7 +117,9 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 	var start := _geometry.circle_center(_actor, 0)
 	if source == null or not source.is_alive() or not source.accepts_new_actions or start == null:
 		return Attempt.REJECTED
-	if not source.cooldown_ready(WEAPON_COOLDOWN, CombatInstant.at_tick(tick)):
+	if not _advance_weapon_rate(tick):
+		return Attempt.FAULT
+	if _acrobat_recovery != null or not source.cooldown_ready(WEAPON_COOLDOWN, CombatInstant.at_tick(tick)):
 		return Attempt.REJECTED
 	var id := targeting.attack_target(start, _weapon.reach, _settled_candidates(candidates))
 	if id.is_empty():
@@ -116,6 +128,9 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 	var action := _action(source, tick, 0, _weapon.id, _weapon.damage,
 		_weapon.cooldown_ticks, CombatAction.Damage.MAGICAL if _weapon.delivery == StarterWeapon.Delivery.SIGIL
 		else CombatAction.Damage.PHYSICAL)
+	if _weapon_rate != null:
+		action.cooldown = &""
+		action.cooldown_ticks = 0
 	action.components[0].categories = bonuses
 	action.activation_costs = costs
 	if _hero == StarterCombatRules.CHRONOMANCER:
@@ -151,7 +166,44 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		StarterWeapon.Delivery.SIGIL: result = _place_sigil(action, tick, start, aim)
 	if result == Attempt.COMMITTED:
 		targeting.commit_attack_target(id)
+		if _weapon_rate != null:
+			_acrobat_recovery = CombatCadenceProgress.create(_weapon.cooldown_ticks)
+			_acrobat_rate_tick = tick
 	return result
+
+
+## Account for each interval at its active rate. Each new paid activation
+## starts a fresh weapon cooldown after the previous one became eligible.
+func _advance_weapon_rate(tick: int) -> bool:
+	if _acrobat_recovery == null or tick == _acrobat_rate_tick:
+		return true
+	if tick < _acrobat_rate_tick:
+		return false
+	var boosted := clampi(_close_call_through - _acrobat_rate_tick, 0, tick - _acrobat_rate_tick)
+	var normal := tick - _acrobat_rate_tick - boosted
+	var cycles := _acrobat_recovery.advance(boosted, _close_call_rate) if boosted > 0 else 0
+	if cycles == 0 and normal > 0:
+		cycles = _acrobat_recovery.advance(normal, _weapon_rate)
+	if cycles < 0:
+		return false
+	if cycles > 0:
+		_acrobat_recovery = null
+	_acrobat_rate_tick = tick
+	return true
+
+
+func record_close_call(tick: int) -> bool:
+	if (_hero != StarterCombatRules.ACROBAT or tick != _last_tick
+			or tick >= RunAuthority.MAX_TICK or not _advance_weapon_rate(tick)):
+		return false
+	_close_call_through = tick + mini(_rules.close_call_duration, RunAuthority.MAX_TICK - tick)
+	return true
+
+
+func movement_multiplier(tick: int) -> float:
+	if _close_call_through == 0 or tick > _close_call_through:
+		return 1.0
+	return 1.0 + float(_rules.close_call_basis_points) / RunPreparation.BASIS_POINTS
 
 
 func _settled_candidates(candidates: Array[PlayerTargeting.Candidate]) -> Array[PlayerTargeting.Candidate]:
@@ -323,7 +375,7 @@ func observe_closed_group(group: CombatKernel.WaveResult) -> void:
 ## A run supplies the settled poses and planned obstacle motion at this
 ## boundary. An arrow can admit a hit within the following sub-tick interval.
 func advance(tick: int) -> bool:
-	if not _open_tick(tick) or not _decay(tick):
+	if not _open_tick(tick) or not _advance_weapon_rate(tick) or not _decay(tick):
 		return false
 	if _fracture != null and _fracture.ends <= tick:
 		_fracture = null
@@ -378,6 +430,10 @@ func advance(tick: int) -> bool:
 
 func cues() -> Array[Cue]:
 	var visible: Array[Cue] = []
+	if _close_call_through > 0 and _close_call_through > _last_tick:
+		var at := _geometry.circle_center(_actor, 0)
+		if at != null:
+			visible.append(_ring(StarterCombatRules.CLOSE_CALL, at, 19.0, _last_tick, _close_call_through))
 	if _hero == StarterCombatRules.CHRONOMANCER:
 		for echo: CombatKernel.EchoCue in _kernel.echo_cues(_actor, _geometry.realm_id):
 			visible.append(_ring(StarterCombatRules.TEMPORAL_ECHO, echo.center, echo.radius, echo.due, echo.due))

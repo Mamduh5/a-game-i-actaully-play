@@ -86,6 +86,73 @@ func test_airborne_ground_only_strike_misses_while_sword_and_airborne_reaching_s
 		assert_eq(encounter.view_for(SEAT).player.hp.native_at_scale(0), 84 if ground_only else 68)
 
 
+func test_close_call_rewards_only_a_narrow_miss_and_preserves_accrued_weapon_recovery() -> void:
+	for arm: String in ["hit", "narrow", "distant", "covered"]:
+		var floor := _floor()
+		var encounter := _acrobat(floor)
+		var foe := WorldEnemy.Rules.new()
+		foe.faction = &"fixture"
+		foe.foes = [WorldEnemy.PARTY]
+		foe.family = &"fixture/near-miss"
+		foe.hp = Quantity.from_count(1000)
+		foe.damage = Quantity.from_count(16)
+		foe.radius = 8.0
+		foe.sight = 160.0
+		foe.attack_range = 100.0
+		foe.attack_radius = 26.0
+		foe.windup_ticks = 39
+		foe.recovery_ticks = 1000
+		assert_true(encounter.place_enemy(&"foe", foe, RealmSweep.Point.new(135, Y)))
+		assert_true(encounter.close_tick())
+		assert_eq(encounter.view_for(SEAT).threats[0].impact_tick, 40)
+		var destination := 120.0 if arm == "distant" else (102.0 if arm == "hit" else 105.0)
+		var walk := PlayerCommand.new(PlayerCommand.MOVE_TO, destination, Y)
+		assert_eq(encounter.submit(SEAT, RunIntent.new(RUN, 1, REALM, SEAT, 2, 1, walk.action, walk)),
+			RunAuthority.Admission.QUEUED)
+		while encounter.next_tick() < 40:
+			assert_true(encounter.close_tick())
+		assert_almost_eq(encounter.view_for(SEAT).player.at.x, destination, 0.00001)
+		if arm == "covered":
+			var cover := RealmOutline.Edge.new()
+			cover.first = RealmSweep.Point.new(123, Y - 18)
+			cover.last = RealmSweep.Point.new(123, Y + 18)
+			assert_true(floor.geometry().add_segment(&"cover", 0, cover, WorldExploration.SEALED_BLOCKER, false))
+		assert_true(encounter.close_tick())
+		var near := arm == "narrow"
+		var view := encounter.view_for(SEAT)
+		assert_eq(view.player.hp.native_at_scale(0), 84 if arm == "hit" else 100)
+		assert_eq(encounter.movement_state(SEAT, 1, 41).speed, 120.0 if near else 100.0)
+		var outcomes: Array = encounter.closed_result().outcomes
+		assert_eq(outcomes.has({"seat": SEAT, "close_call": true}), near)
+		if arm == "covered":
+			assert_true(floor.geometry().remove_mutable(&"cover", 0))
+		if near:
+			var move := PlayerCommand.new(PlayerCommand.MOVE_TO, 107, Y)
+			var state := encounter.movement_state(SEAT, 1, 41)
+			var replica := RecipientView.read(RecipientView.pack_encounter(view, state, REALM, encounter.party_statuses(), null))
+			assert_not_null(replica)
+			assert_eq(replica.encounter.cues[0].id, StarterCombatRules.CLOSE_CALL)
+			var guest := GuestMovement.new()
+			assert_eq(guest.install_baseline(REALM, state, []), GuestMovement.Acceptance.APPLIED)
+			assert_false(guest.issue(move).is_empty())
+			assert_true(guest.advance())
+			assert_eq(encounter.submit(SEAT, RunIntent.new(RUN, 1, REALM, SEAT, 41, 2, move.action, move)),
+				RunAuthority.Admission.QUEUED)
+			assert_true(encounter.close_tick())
+			assert_almost_eq(encounter.view_for(SEAT).player.at.x, 107.0, 0.00001)
+			assert_almost_eq(guest.position().x, 107.0, 0.00001)
+		var followups: Array[int] = []
+		while encounter.next_tick() <= 266:
+			assert_true(encounter.close_tick())
+			var tick := encounter.next_tick() - 1
+			if tick in [219, 220]:
+				assert_eq(encounter.movement_state(SEAT, 1, tick + 1).speed, 120.0 if near and tick == 219 else 100.0)
+			for event: Dictionary in encounter.closed_result().outcomes:
+				if event.get("weapon") == &"W01":
+					followups.append(tick)
+		assert_eq(followups, [58, 108, 158, 208, 266] if near else [61, 121, 181, 241])
+
+
 static func _floor() -> WorldExploration:
 	return WorldExploration.create(WorldTopology.generate(3207), [SEAT])
 

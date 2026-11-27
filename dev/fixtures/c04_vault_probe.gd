@@ -12,6 +12,7 @@ var _encounter: StarterEncounter
 var _caption := Label.new()
 var _capture: String
 var _low := true
+var _close_call := false
 var _sequence: int
 var _committed := false
 var _warning := false
@@ -22,6 +23,7 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	_capture = args[0] if not args.is_empty() else ""
 	_low = args.size() < 2 or args[1] == "low"
+	_close_call = args.size() > 1 and args[1] == "close-call"
 	RenderingServer.set_default_clear_color(Color("#202b29"))
 	_stage.position = Vector2(435, 148)
 	_stage.scale = Vector2.ONE * 1.55
@@ -29,6 +31,8 @@ func _ready() -> void:
 	_caption.position = Vector2(435, 82)
 	_caption.add_theme_font_size_override("font_size", 29)
 	_caption.text = "Vault · low obstacle" if _low else "Vault · sealed obstacle"
+	if _close_call:
+		_caption.text = "The Acrobat"
 	add_child(_caption)
 	_router.world_from_viewport = _stage.world_from_viewport
 	add_child(_router)
@@ -56,12 +60,12 @@ func _begin() -> bool:
 	build.start = RealmSweep.Point.new(62, 128)
 	build.maximum_hp = Quantity.from_count(100)
 	var world := WorldExploration.create(WorldTopology.generate(setup.seed), [SEAT])
-	if not world.place_route_solid(SOLID, RealmSweep.Point.new(94, 128), 4.0, null, _low):
+	if not _close_call and not world.place_route_solid(SOLID, RealmSweep.Point.new(94, 128), 4.0, null, _low):
 		return false
 	_encounter = StarterEncounter.assemble(setup, SEAT, world, {SEAT: build})
 	if _encounter == null:
 		return false
-	_stage.prepare([Vector2i.ZERO], world.geometry(), [SOLID], Vector2(256, 128), Vector2(216, 192))
+	_stage.prepare([Vector2i.ZERO], world.geometry(), [] if _close_call else [SOLID], Vector2(256, 128), Vector2(216, 192))
 	var foe := WorldEnemy.Rules.new()
 	foe.faction = &"fixture"
 	foe.foes = [WorldEnemy.PARTY]
@@ -71,17 +75,21 @@ func _begin() -> bool:
 	foe.radius = 8
 	foe.sight = 160
 	foe.attack_range = 125
-	foe.attack_radius = 40
-	foe.windup_ticks = 7
+	foe.attack_radius = 26 if _close_call else 40
+	foe.windup_ticks = 39 if _close_call else 7
 	foe.recovery_ticks = 40
 	foe.ground_only = true
-	return _encounter.place_enemy(&"foe", foe, RealmSweep.Point.new(159, 76))
+	var position := RealmSweep.Point.new(135, 128) if _close_call else RealmSweep.Point.new(159, 76)
+	return _encounter.place_enemy(&"foe", foe, position)
 
 
 func _physics_process(_delta: float) -> void:
 	var tick := _encounter.next_tick()
 	if tick == 2 and _warning:
-		_click()
+		if _close_call:
+			_click(Vector2(105, 128), MOUSE_BUTTON_RIGHT)
+		else:
+			_click(Vector2(210, 128), MOUSE_BUTTON_LEFT)
 	for command: PlayerCommand in _router.drain():
 		_sequence += 1
 		var intent := RunIntent.new(RUN, 1, REALM, SEAT, tick, _sequence, command.action, command)
@@ -95,12 +103,20 @@ func _physics_process(_delta: float) -> void:
 		_committed = _committed or outcome.get("manual", false)
 	var view := _encounter.view_for(SEAT)
 	_stage.display(view)
-	if tick == 1 or tick == 16:
+	if tick == 1 or tick == (40 if _close_call else 16):
 		set_physics_process(false)
 		if tick == 1:
 			_warning = not view.threats.is_empty()
 			await _snap("warning.png")
 			set_physics_process(true)
+		elif _close_call:
+			var outcomes: Array = _encounter.closed_result()["outcomes"]
+			var active := outcomes.has({"seat": SEAT, "close_call": true})
+			_caption.text = "Close Call · movement and attack rate up" if active else "The Acrobat"
+			await _snap("close-call.png")
+			var speed := _encounter.movement_state(SEAT, 1, 41).speed
+			_finish(active and _warning and not _capture_fault and speed == 120.0
+				and view.player.hp.native_at_scale(0) == 100 and absf(view.player.at.x - 105.0) < 0.01)
 		else:
 			await _snap("landed.png")
 			var correct_x := 126.0 if _low else 76.0
@@ -108,13 +124,13 @@ func _physics_process(_delta: float) -> void:
 				and view.player.hp.native_at_scale(0) == 100 and _encounter.movement_state(SEAT, 1, 17).permits_prediction)
 
 
-func _click() -> void:
-	var point := _stage.get_global_transform_with_canvas() * Vector2(210, 128)
+func _click(at: Vector2, button: MouseButton) -> void:
+	var point := _stage.get_global_transform_with_canvas() * at
 	for pressed: bool in [true, false]:
 		var event := InputEventMouseButton.new()
 		event.position = point
 		event.global_position = point
-		event.button_index = MOUSE_BUTTON_LEFT
+		event.button_index = button
 		event.pressed = pressed
 		get_viewport().push_input(event, true)
 
@@ -129,7 +145,13 @@ func _snap(name: String) -> void:
 func _finish(passed: bool) -> void:
 	set_physics_process(false)
 	var final := _encounter.view_for(SEAT) if _encounter != null else null
-	print("C04_VAULT ", JSON.stringify({"passed": passed, "low": _low, "warning": _warning,
-		"sequence": _sequence, "committed": _committed, "x": final.player.at.x if final != null else 0,
-		"hp": final.player.hp.native_at_scale(0) if final != null else 0}))
+	var facts := {"passed": passed, "warning": _warning, "sequence": _sequence,
+		"x": final.player.at.x if final != null else 0, "hp": final.player.hp.native_at_scale(0) if final != null else 0}
+	if _close_call:
+		facts["speed"] = _encounter.movement_state(SEAT, 1, final.tick + 1).speed if final != null else 0
+		print("C04_CLOSE_CALL ", JSON.stringify(facts))
+	else:
+		facts["low"] = _low
+		facts["committed"] = _committed
+		print("C04_VAULT ", JSON.stringify(facts))
 	get_tree().quit(0 if passed else 1)

@@ -126,9 +126,10 @@ func _prepare_seat(id: StringName, build: Build, revision: StringName) -> bool:
 	if actor.max_hp == null or actor.physical.rating == null or actor.magical.rating == null:
 		return false
 	actor.hp = QuantityLayerLedger.Pool.new(actor.max_hp, QuantityErrorBounds.new())
+	var margin := TUNING.close_call_margin if prep.hero == StarterCombatRules.ACROBAT else 0.0
 	if (not TUNING.prepare_hero(actor, build.preparation) or not _kernel.add_actor(actor)
 			or not _geometry.add_circle(id, 0, build.start, WorldExploration.STARTER_RADIUS, PLAYER_BODY)
-			or not _activity.track_player(id)):
+			or not _activity.track_player(id, margin)):
 		return false
 	var seat := Seat.new()
 	var movement_bonus := float(prep.upgrade_basis_points(&"movement")) / RunPreparation.BASIS_POINTS
@@ -192,7 +193,7 @@ func movement_state(seat: StringName, baseline: int, serial: int) -> MovementSna
 	state.acknowledged = movement_acknowledgement(seat)
 	state.position = member.position
 	state.movement = _party.movement_input(seat)
-	state.speed = _seats[seat].speed
+	state.speed = _movement_speed(_seats[seat], tick + 1)
 	state.radius = _geometry.circle_radius(seat, 0)
 	state.permits_prediction = _party.can_control(seat) and _seats[seat].vault == null
 	return state
@@ -218,6 +219,13 @@ func _resolve_tick(tick: int, accepted: Array[RunIntent], _streams: RunRandom) -
 				outcomes.append({"at": closed.due.tick, "family": hit.family, "owner": hit.origin.owner,
 					"target": hit.target, "damage": hit.dealt_hostile_damage(), "eliminated": hit.eliminated,
 					"pushed": hit.displacement != null})
+	for id: StringName in frame.near_misses:
+		if not _party.can_control(id):
+			continue
+		if not _seats[id].combat.record_close_call(tick):
+			_fault = &"close_call_frontier"
+			return [{"fault": _fault}]
+		outcomes.append({"seat": id, "close_call": true})
 	for id: StringName in _seats:
 		var state := _party.view(id, CombatInstant.at_tick(tick))
 		_floor.observe_seat(id, state.realm if state.alive else &"", state.position)
@@ -230,7 +238,7 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 			_party.apply_input(intent.seat_id, intent.command)
 	var targets: Dictionary[StringName, Array] = {}
 	for id: StringName in _seats:
-		var at := _move_seat(id)
+		var at := _move_seat(id, tick)
 		if at == null:
 			return false
 		targets[id] = _targets(at)
@@ -269,10 +277,14 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 	return true
 
 
-func _move_seat(id: StringName) -> RealmSweep.Point:
+static func _movement_speed(seat: Seat, tick: int) -> float:
+	return seat.speed * seat.combat.movement_multiplier(tick)
+
+
+func _move_seat(id: StringName, tick: int) -> RealmSweep.Point:
 	var seat := _seats[id]
 	if seat.vault == null:
-		return _party.step_movement(id, seat.speed, 1.0 / 60.0)
+		return _party.step_movement(id, _movement_speed(seat, tick), 1.0 / 60.0)
 	if _party.can_control(id) and not seat.vault.advance(_geometry):
 		return null
 	if not _party.can_control(id) or not seat.vault.airborne():

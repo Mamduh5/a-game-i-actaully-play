@@ -64,12 +64,16 @@ class Subject:
 	var maximum: Quantity
 	var at: RealmSweep.Point
 	var airborne: bool
+	var close_call_margin: float
 
 class Strike:
 	var delivery: CombatDelivery
 	var origin: RealmSweep.Point
 	var center: RealmSweep.Point
 	var due: int
+	var watched: StringName
+	var watched_life: int
+	var watched_visit: int
 
 class Threat:
 	var center: RealmSweep.Point
@@ -113,7 +117,7 @@ func decide(kernel: CombatKernel, room: WorldExploration, settled: Dictionary[St
 		else:
 			target = null
 	if target != null and _distance(at, target.at) <= _rules.attack_range:
-		return _commit_strike(kernel, self_pose, target.at, tick)
+		return _commit_strike(kernel, self_pose, target, tick)
 	var destination := target.at if target != null else _last_seen
 	if destination == null or _rules.stride == 0.0:
 		return true
@@ -145,8 +149,8 @@ func threat() -> Threat:
 	return warning
 
 
-func release(geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
-		tick: int, blockers: int, targets: int) -> bool:
+func release(kernel: CombatKernel, geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
+		tick: int, blockers: int, targets: int, near_misses: Dictionary[StringName, bool]) -> bool:
 	if not release_due(tick):
 		return true
 	var held := _attack
@@ -155,7 +159,9 @@ func release(geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
 		var plan := held.delivery.plan_sweep(geometry, held.center, held.center, _rules.attack_radius, targets)
 		if plan == null:
 			return false
+		var watched_contact := false
 		for contact: RealmGeometry.Contact in plan.contacts:
+			watched_contact = watched_contact or contact.entity == held.watched
 			var other: Subject = subjects.get(contact.entity)
 			if (other != null and other.realm == geometry.realm_id and other.hp.sign_value > 0 and _hostile(other.faction)
 					and (not _rules.ground_only or not other.airborne)
@@ -163,16 +169,52 @@ func release(geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
 				if held.delivery.admit(tick, contact, other.life, true) not in [
 						CombatDelivery.Result.ADMITTED, CombatDelivery.Result.CADENCE]:
 					return false
+		if not watched_contact and not held.watched.is_empty():
+			var watched: Subject = subjects.get(held.watched)
+			if _narrow_miss(kernel, geometry, held, watched, tick, blockers):
+				near_misses[held.watched] = true
 	if not held.delivery.finish():
 		return false
 	_attack = null
 	return true
 
 
+func _narrow_miss(kernel: CombatKernel, floor: RealmGeometry, held: Strike, watched: Subject,
+		tick: int, blockers: int) -> bool:
+	if (watched == null or watched.realm != floor.realm_id or watched.life != held.watched_life
+			or watched.hp.sign_value <= 0 or (_rules.ground_only and watched.airborne)):
+		return false
+	var contact := RealmCircleTime.new()
+	var in_band := false
+	for slot: int in floor.circle_slots(watched.id):
+		var at := floor.circle_center(watched.id, slot)
+		var radius := floor.circle_radius(watched.id, slot)
+		var edge := contact.measure(at, at, radius,
+			held.center, held.center, _rules.attack_radius + watched.close_call_margin)
+		if edge.outcome == RealmCircleTime.Result.UNRESOLVED:
+			return false
+		in_band = in_band or edge.outcome == RealmCircleTime.Result.HIT
+	if not in_band or not _unobstructed(floor, held.origin, watched.at, blockers):
+		return false
+	var actor := kernel.actor_snapshot(watched.id)
+	return _threatens(actor, watched, tick) and actor.realm_visit == held.watched_visit
+
+
+func _threatens(actor: CombatantState, target: Subject, tick: int) -> bool:
+	if (actor == null or actor.prevents_hit or (_rules.ground_only and target.airborne)
+			or (actor.revival_protected_until != null and CombatInstant.at_tick(tick).order_against(
+				actor.revival_protected_until) not in [RealmCircleTime.Order.SAME, RealmCircleTime.Order.AFTER])):
+		return false
+	var defense := actor.physical if _rules.damage_kind == CombatAction.Damage.PHYSICAL else actor.magical
+	return not defense.immune and defense.vulnerability.sign_value > 0
+
+
 func state() -> Array:
 	var memory: Array = [] if _last_seen == null else [_pursuit, _last_seen.x, _last_seen.y, _remember_until]
 	var strike: Array = [] if _attack == null else [
 		_attack.due, _attack.origin.x, _attack.origin.y, _attack.center.x, _attack.center.y]
+	if _attack != null and not _attack.watched.is_empty():
+		strike.append_array([_attack.watched, _attack.watched_life, _attack.watched_visit])
 	return [_rules.faction, _activated, _ready_at, memory, strike]
 
 
@@ -203,7 +245,7 @@ func _detect(geometry: RealmGeometry, self_pose: Subject, known: Dictionary[Stri
 	return best
 
 
-func _commit_strike(kernel: CombatKernel, self_pose: Subject, center: RealmSweep.Point, tick: int) -> bool:
+func _commit_strike(kernel: CombatKernel, self_pose: Subject, target: Subject, tick: int) -> bool:
 	if (_rules.windup_ticks > RunAuthority.MAX_TICK - tick
 			or _rules.recovery_ticks > RunAuthority.MAX_TICK - tick - _rules.windup_ticks
 			or _activated == Quantity.INT_MAX):
@@ -227,8 +269,14 @@ func _commit_strike(kernel: CombatKernel, self_pose: Subject, center: RealmSweep
 	_attack = Strike.new()
 	_attack.delivery = delivery
 	_attack.origin = self_pose.at
-	_attack.center = center
+	_attack.center = target.at
 	_attack.due = tick + _rules.windup_ticks
+	if target.close_call_margin > 0.0:
+		var actor := kernel.actor_snapshot(target.id)
+		if _threatens(actor, target, tick):
+			_attack.watched = target.id
+			_attack.watched_life = target.life
+			_attack.watched_visit = actor.realm_visit
 	_ready_at = _attack.due + _rules.recovery_ticks
 	_activated += 1
 	return true

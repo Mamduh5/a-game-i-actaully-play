@@ -23,10 +23,13 @@ func retune(period_ticks: int) -> bool:
 
 ## Count completed periods and retain the remaining exact fraction. The
 ## run decides how to dispatch that many events on its authoritative frontier.
-func advance(elapsed_ticks: int) -> int:
-	if elapsed_ticks < 0:
+func advance(elapsed_ticks: int, rate: Quantity = null) -> int:
+	if elapsed_ticks < 0 or (rate != null and rate.sign_value <= 0):
 		return -1
-	var accrued := QuantityFraction.create(Quantity.from_count(elapsed_ticks), Quantity.from_count(_period_ticks))
+	var elapsed := Quantity.from_count(elapsed_ticks)
+	if rate != null:
+		elapsed = elapsed.multiply(rate)
+	var accrued := QuantityFraction.create(elapsed, Quantity.from_count(_period_ticks))
 	if accrued == null:
 		return -1
 	var next := _progress.plus(accrued)
