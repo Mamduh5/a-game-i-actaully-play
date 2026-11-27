@@ -57,11 +57,15 @@ func _retain_original() -> bool:
 	var binding := ProfileGrant.Binding.new()
 	binding.run = Original
 	binding.rules = "V42.6/R1"
-	binding.catalog = "wp23-fixture"
+	binding.catalog = _catalog_revision()
 	binding.recipient = "bob"
 	binding.issuer = _identity_key if _original_issuer else remote
 	binding.recipient_key = remote if _original_issuer else _identity_key
 	return ProfileGrantSettlement.retain_original_binding(_store, binding, _identity_key).status == Commit.COMMITTED
+
+
+func _catalog_revision() -> String:
+	return "wp23-fixture"
 
 
 func _issue() -> bool:
@@ -93,10 +97,17 @@ func _deliveries() -> Array[PackedByteArray]:
 		return []
 	for row: Dictionary in queued:
 		var item := ProfileGrant.open_authorization(row.body, binding)
-		if item == null or item.occurrence not in ["regional-boss/1", "regional-boss/2"]:
+		var index := _delivery_index(item)
+		if index < 0 or not packets[index].is_empty():
 			return []
-		packets[item.occurrence.right(1).to_int() - 1] = _exchange.delivery(Original, "bob", row.grant_key)
+		packets[index] = _exchange.delivery(Original, "bob", row.grant_key)
 	return [] if packets[0].is_empty() or packets[1].is_empty() else packets
+
+
+func _delivery_index(item: ProfileGrant) -> int:
+	if item == null or item.occurrence not in ["regional-boss/1", "regional-boss/2"]:
+		return -1
+	return item.occurrence.right(1).to_int() - 1
 
 
 func _run_host() -> void:
@@ -201,7 +212,7 @@ func _finish(passed: bool) -> void:
 	var state := {}
 	if not _store.identity().is_empty():
 		var pending := _store.pending_grants().size()
-		var balance: Variant = _store.balance(Currency).native_at_scale(0)
+		var balance: Variant = _store.balance(_currency_account()).native_at_scale(0)
 		var generation: int = _store.checkpoint().get("generation", -1)
 		var expected: Array
 		if _reverse:
@@ -211,10 +222,18 @@ func _finish(passed: bool) -> void:
 			expected = [] if _original_issuer else [Commit.COMMITTED]
 		passed = (passed and _received == expected
 			and pending == (2 if _original_issuer and not _reverse else 0)
-			and balance == (0 if _original_issuer else (40 if _reverse else 17)))
+			and balance == _expected_balance())
 		state = {"reversed": _reverse, "profile": _store.identity(), "balance": balance,
 			"pending": pending, "generation": generation, "received": _received}
 		passed = _store.close() and passed
 	state["passed"] = passed
 	print("WP23_EXCHANGE ", JSON.stringify(state))
 	super._finish(passed)
+
+
+func _currency_account() -> String:
+	return Currency
+
+
+func _expected_balance() -> int:
+	return 0 if _original_issuer else (40 if _reverse else 17)

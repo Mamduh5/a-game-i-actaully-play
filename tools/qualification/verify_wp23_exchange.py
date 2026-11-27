@@ -12,8 +12,7 @@ from verify_wp06_link import ephemeral_port, launch, peer_env, wait_for_host
 from verify_wp06_session import enroll, keygen, receipt, stop
 
 
-def exchange_receipt(log):
-    prefix = "WP23_EXCHANGE "
+def exchange_receipt(log, prefix="WP23_EXCHANGE "):
     lines = log.read_text(encoding="utf-8").splitlines()
     return next(json.loads(line[len(prefix):]) for line in lines if line.startswith(prefix))
 
@@ -64,6 +63,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("exe", type=Path)
     parser.add_argument("evidence", type=Path)
+    parser.add_argument("--earned", action="store_true")
     options = parser.parse_args()
     exe, evidence = options.exe.resolve(strict=True), options.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=False)
@@ -77,7 +77,7 @@ def main():
             session = evidence / label
             session.mkdir()
             report[label] = run_session(exe, session, scratch / label, host, guest, reverse)
-    assert report == {
+    expected = {
         "original": {
             "host": {"reversed": False, "profile": "alice", "balance": 0, "pending": 2,
                      "generation": 3, "received": [], "passed": True},
@@ -90,7 +90,16 @@ def main():
             "guest": {"reversed": True, "profile": "alice", "balance": 0, "pending": 0,
                       "generation": 5, "received": [0, 1, 0], "passed": True},
         },
-    }, report
+    }
+    if options.earned:
+        expected["original"]["host"].update(balance=40, generation=7)
+        expected["reversed"]["guest"].update(balance=40, generation=9)
+    assert report == expected, report
+    if options.earned:
+        sources = exchange_receipt(evidence / "original" / "host.log", "WP23_PEER_EARNINGS ")
+        assert sources == {"kills": ["first", "second"], "guest_damage": False,
+                           "host_balance": 40, "guest_pending_grants": 2}, sources
+        report["sources"] = sources
     body = json.dumps(report, indent=2, sort_keys=True) + "\n"
     (evidence / "receipt.json").write_text(body, encoding="utf-8")
     print(body)
