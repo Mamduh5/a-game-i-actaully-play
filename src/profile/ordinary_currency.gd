@@ -35,6 +35,7 @@ var _now := -1
 var _oldest := -1
 var _fault_since := -1
 var _elapsed_fault := 0
+var _ending := false
 var _pending: Dictionary[String, Earning] = {}
 var _in_flight: Dictionary[String, Batch] = {}
 
@@ -82,7 +83,11 @@ func account() -> String:
 ## The authoritative driver calls before opening another earning group.
 ## Service continues while this fence is raised.
 func can_earn() -> bool:
-	return _poll() and _fault_since < 0
+	return not _ending and _poll() and _fault_since < 0
+
+
+func end_earning() -> void:
+	_ending = true
 
 
 func accrue(occurrence: String, amount: Quantity) -> Eligibility:

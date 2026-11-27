@@ -113,6 +113,36 @@ func test_newer_completion_preserves_original_in_flight_deadline_and_blocks_auth
 	assert_true(store.close())
 
 
+func test_orderly_quit_retries_the_same_receipt_and_seals_all_earning_before_exit() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-orderly-quit")
+	var store := LostResultStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var authority := _authority()
+	var binding := _binding("alice", _issuer)
+	var earnings := OrdinaryCurrency.begin(store, binding, _issuer, Currency)
+	assert_true(authority.attach_ordinary_currency(earnings))
+	assert_eq(earnings.accrue("last-encounter", Quantity.from_count(9)), Add.QUEUED)
+	var operation := earnings.dispatch(true)
+	assert_false(authority.settle_orderly_quit())
+	assert_false(authority.close_tick())
+	assert_eq(authority.next_tick(), 1)
+	assert_eq(earnings.accrue("after-quit", Quantity.from_count(2)), Add.FENCED)
+	assert_false(authority.attach_ordinary_currency(OrdinaryCurrency.begin(store, binding, _issuer, "currency/other")))
+	assert_eq(store.lookup(operation).status, Commit.MISSING)
+	store.keep = true
+	assert_true(authority.settle_orderly_quit())
+	assert_true(authority.settle_orderly_quit())
+	assert_false(authority.can_open_earning_group())
+	assert_eq(store.lookup(operation).status, Commit.COMMITTED)
+	assert_true(store.close())
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(store.balance(Currency).native_at_scale(0), 9)
+	assert_eq(store.checkpoint()["generation"], 1)
+	assert_true(store.close())
+
+
 func test_failed_flush_retains_original_batch_then_reconciles_lost_success() -> void:
 	if not OS.has_feature("windows"):
 		return

@@ -21,6 +21,9 @@ var _random: RunRandom
 var _closed_tick: int
 var _observation: Dictionary = {}
 var _ordinary_currency: Array[OrdinaryCurrency] = []
+var _quitting := false
+var _settled_quit := false
+var _resolving := false
 
 
 func start(setup: RunSetup, local_authority_id: StringName) -> bool:
@@ -39,7 +42,7 @@ func belongs_to(run: StringName, epoch: int) -> bool:
 
 
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
-	if (_identity.is_empty() or earnings == null
+	if (_identity.is_empty() or _quitting or earnings == null
 			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])):
 		return false
 	for existing: OrdinaryCurrency in _ordinary_currency:
@@ -51,6 +54,8 @@ func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
 
 ## Also used by the group owner before opening an earning boundary within a tick.
 func can_open_earning_group() -> bool:
+	if _quitting:
+		return false
 	var permitted := true
 	for earnings: OrdinaryCurrency in _ordinary_currency:
 		if not earnings.can_earn():
@@ -71,6 +76,20 @@ func flush_ordinary_currency(recipient: String = "") -> bool:
 func service_ordinary_currency() -> void:
 	for earnings: OrdinaryCurrency in _ordinary_currency:
 		earnings.service()
+
+
+## Fence every account before flushing the first, so a partial success
+## cannot admit new earnings before the remaining accounts settle.
+func settle_orderly_quit() -> bool:
+	if _identity.is_empty() or _resolving:
+		return false
+	if not _quitting:
+		_quitting = true
+		for earnings: OrdinaryCurrency in _ordinary_currency:
+			earnings.end_earning()
+	if not _settled_quit:
+		_settled_quit = flush_ordinary_currency()
+	return _settled_quit
 
 
 ## Apply the accepted interact at its closed boundary. Revoke any input
@@ -97,7 +116,7 @@ func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, de
 
 ## The binding is supplied by the adapter. The intent alone cannot nominate its sender.
 func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
-	if _identity.is_empty() or intent == null or _closed_tick >= MAX_TICK:
+	if _identity.is_empty() or _quitting or intent == null or _closed_tick >= MAX_TICK:
 		return Admission.INACTIVE
 	if intent.run_id != _identity["run"]:
 		return Admission.WRONG_RUN
@@ -160,9 +179,11 @@ func close_tick() -> bool:
 	for intent: RunIntent in accepted:
 		receipts.append(intent.receipt())
 	var tick := next_tick()
+	_resolving = true
 	var outcomes := _resolve_tick(tick, accepted, _random)
 	_closed_tick = tick
 	_publish(receipts, conflicts, overflowed, outcomes)
+	_resolving = false
 	return true
 
 
