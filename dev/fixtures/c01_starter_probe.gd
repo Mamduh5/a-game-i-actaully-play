@@ -415,10 +415,15 @@ func _ready() -> void:
 	_capture_dir = args[1] if args.size() > 1 and DisplayServer.get_name() != "headless" else ""
 	_reduced = args.size() > 2 and args[2] == "reduced"
 	Input.use_accumulated_input = false
-	_router.world_from_viewport = func(point: Vector2) -> RealmSweep.Point: return RealmSweep.Point.new(point.x, point.y)
 	add_child(_router)
 	add_child(_view)
 	_view.z_index = 1
+	if _case == "daggers":
+		_view.scale = Vector2.ONE * 4.0
+		_view.position = Vector2(640, 400) - Vector2(350, 381) * _view.scale
+	_router.world_from_viewport = func(point: Vector2) -> RealmSweep.Point:
+		var world := _view.to_local(point)
+		return RealmSweep.Point.new(world.x, world.y)
 	add_child(_hud)
 	_hud.position = Vector2(55, 48)
 	_hud.add_theme_font_size_override("font_size", 24)
@@ -535,7 +540,7 @@ func _drive_visible_inputs(tick: int) -> void:
 		for pressed: bool in [true, false]:
 			var move := InputEventMouseButton.new()
 			move.button_index = MOUSE_BUTTON_RIGHT
-			move.position = Vector2(target_x, 380)
+			move.position = _view.to_global(Vector2(target_x, 380))
 			move.pressed = pressed
 			get_viewport().push_input(move, true)
 	if _case == "sword" and tick in [1, 31]:
@@ -563,6 +568,7 @@ func _draw() -> void:
 	var player := _rules.geometry.circle_center(Player, 0)
 	if player == null:
 		return
+	draw_set_transform(_view.position, 0.0, _view.scale)
 	if _case == "spear-blocked":
 		draw_line(SPEAR_WALL_TOP, SPEAR_WALL_BOTTOM, Color("#bdafa3"), 6, true)
 	elif _case == "daggers":
@@ -579,6 +585,8 @@ func _draw() -> void:
 		var living := _rules.kernel.actor_snapshot(target.id).is_alive()
 		draw_circle(location, 12, Color("#df9290") if living else Color("#4b4c57"), true, -1.0, true)
 		draw_arc(location, 12, 0, TAU, 24, Color("#774d59") if living else Color("#69727e"), 1.5, true)
+		if _case == "daggers":
+			continue
 		var above := (_case in ["wake", "rupture"] and target.id == &"near") or (_case == "mines" and target.id == &"left")
 		var label_offset := Vector2(-22, -23) if above else Vector2(-22, 34)
 		draw_string(ThemeDB.fallback_font, location + label_offset, String(target.id),
