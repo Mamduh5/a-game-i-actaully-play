@@ -48,3 +48,22 @@ func test_stationary_anchor_and_obstructed_pulse_keep_original_cadence() -> void
 			assert_eq(hit.components[0].hp_removed.native_at_scale(0), 8)
 		assert_eq(tether.endpoints()[1].x, 13.0)
 	assert_eq(ticks, [16, 46])
+
+
+func test_a_single_reconnection_preserves_lifetime_and_refuses_a_second_replacement() -> void:
+	var arena := Arena.new(&"W01")
+	for target: Array in [[&"first", 20], [&"lost", 80], [&"next", 100], [&"spare", 110]]:
+		assert_true(arena.add(target[0], target[1], 0, 200))
+	var tether := ArcaneTether.create(&"hero", PowerRanks._earn(arena, 2, &"P14"), arena.kernel, arena.geometry, 1, 2)
+	var pulse_ticks: Array[int] = []
+	for tick: int in range(1, 93):
+		if tick == 10 or tick == 25:
+			assert_true(arena.swing_from(&"hero", &"lost" if tick == 10 else &"next", 300, tick))
+		assert_true(tether.advance(tick, arena.candidates))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			if hit.family == &"P14" and hit.target == &"first":
+				pulse_ticks.append(tick)
+		if tick == 12:
+			assert_eq(tether.endpoints()[1].x, 100.0)
+	assert_eq(pulse_ticks, [16])
+	assert_true(tether.endpoints().is_empty())
