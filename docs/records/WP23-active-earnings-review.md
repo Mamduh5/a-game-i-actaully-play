@@ -1,6 +1,6 @@
 # WP23 independent review: active encounter storage wait and gameplay earnings (3f47dab / b5418b6)
 
-- **Reviewer / verdict:** Antigravity/Gemini — **CHECKPOINT APPROVED** on `dev` commits `3f47dab31f10858eb48b208f729cb71872b88687` (active encounter storage wait, base `beee675`, handoff `3424cef`) and `b5418b6600b0aa358770ff34832c2d6e4c1d4c68` (gameplay ordinary-currency earnings producer, base `debe8ff`, handoff in [WP23.md](WP23.md#gameplay-earnings-review-handoff)), verified together at clean archive `b5418b6`.
+- **Reviewer / verdict:** Antigravity/Gemini — **CHECKPOINT APPROVED** on `dev` commits `3f47dab1cce4fe6bc408706bd7744b748587c2a5` (active encounter storage wait, base `beee675`, handoff `3424cef`) and `b5418b6cffdf3e929bdfae866044dab64bbbde96` (gameplay ordinary-currency earnings producer, base `debe8ff`, handoff in [WP23.md](WP23.md#gameplay-earnings-review-handoff)), verified together at clean archive `b5418b6`.
 - **Scope boundary:** Written as a dedicated review record to avoid colliding with concurrent uncommitted writer work in `docs/records/WP23.md`. Later commit `7478c84` (native solo entry, no review handoff) and uncommitted peer-exchange fixture edits are **outside this review** and remain unreviewed. Package `WP23` remains **`IN PROGRESS`** (playable run assembly, victory entitlements and guest reconciliation remain open; `WP24` and `WP26` stay gated).
 
 ## Independent active encounter storage wait review (3f47dab)
