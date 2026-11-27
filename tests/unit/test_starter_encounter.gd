@@ -203,6 +203,40 @@ func test_twin_daggers_cadence_and_hands_reach_guest_replica_while_hero_moves() 
 	assert_eq(sides, [-5.0, 5.0])
 
 
+func test_arcane_focus_moves_with_its_owner_in_the_scoped_encounter_view() -> void:
+	var encounter := _encounter(62.0, &"H01", &"W09")
+	assert_not_null(encounter)
+	var replica := GuestReplica.new()
+	for tick: int in range(1, 32):
+		if tick in [2, 17]:
+			var axis := 1 if tick == 2 else -1
+			assert_eq(_submit(encounter, tick, PlayerCommand.new(PlayerCommand.MOVE_AXES, 0, axis)),
+				RunAuthority.Admission.QUEUED)
+		assert_true(encounter.close_tick())
+		if tick not in [1, 16, 31]:
+			continue
+		var source := encounter.view_for(SEAT)
+		var state := encounter.movement_state(SEAT, 1, 2)
+		if tick == 1:
+			assert_true(replica.install_scope(REALM, state))
+		var body := RecipientView.pack_encounter(source, state, REALM, encounter.party_statuses(), null)
+		assert_eq(replica.receive_frame(_view_frame(body, ReplicationMessage.Kind.VIEW_STATE)), GuestReplica.Acceptance.APPLIED)
+		var view := replica.encounter_view(SEAT, tick)
+		assert_not_null(view)
+		if view == null:
+			return
+		assert_almost_eq(view.player.at.y, 153.0 if tick == 16 else 128.0, 0.000001)
+		assert_eq(view.others[0].hp.native_at_scale(0), 88 if tick == 31 else 94)
+		assert_eq(view.cues.size(), 1)
+		if view.cues.size() == 1:
+			var beam := view.cues[0]
+			assert_eq(beam.id, &"W09")
+			assert_eq(beam.impact, tick)
+			assert_eq(beam.ends, 61)
+			assert_eq([beam.heading.x, beam.heading.y], [1.0, 0.0])
+			assert_eq(beam.position.y, view.player.at.y)
+
+
 func test_live_defeat_waits_for_currency_and_closing_marker_then_publishes_once() -> void:
 	if not OS.has_feature("windows"):
 		return

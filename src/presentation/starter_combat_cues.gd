@@ -8,6 +8,7 @@ const ARROW := Color("#fff0b7")
 const SIGIL := Color("#a9c1ff")
 const SIPHON := Color("#73d9c3")
 const DAGGERS := Color("#d9e5f6")
+const FOCUS := Color("#c0baff")
 
 var _cues: Array[StarterCombat.Cue]
 var _tick: int
@@ -35,6 +36,11 @@ func _draw() -> void:
 			&"W03": _circle(center, cue.reach, SIGIL, _tick >= cue.impact)
 			&"W04": _thrust(center, cue)
 			&"W06": _thrust(center, cue, DAGGERS)
+			&"W09":
+				_thrust(center, cue, FOCUS)
+				var end := center + Vector2(cue.heading.x, cue.heading.y) * cue.reach
+				var width := 4.0 if _tick - cue.impact <= 2 else 1.5
+				draw_line(center, end, FOCUS, width, true)
 			StarterCombatRules.TIME_FRACTURE: _circle(center, cue.reach, Color("#8bd9ed"), true)
 			StarterCombatRules.TEMPORAL_ECHO: _circle(center, cue.reach, Color("#f2d5ff"), false)
 			StarterCombatRules.CLOSE_CALL: draw_arc(center, cue.reach, 0.0, TAU, 48, SIPHON, 2.0, true)

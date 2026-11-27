@@ -2,7 +2,7 @@ class_name StarterWeapon
 extends Resource
 ## Authored native delivery values for the available main weapons.
 
-enum Delivery { CLEAVE, ARROW, SIGIL, THRUST, DAGGERS }
+enum Delivery { CLEAVE, ARROW, SIGIL, THRUST, DAGGERS, BEAM }
 
 @export var id: StringName
 @export var delivery: Delivery
@@ -15,6 +15,9 @@ enum Delivery { CLEAVE, ARROW, SIGIL, THRUST, DAGGERS }
 @export var area_radius: float
 @export var thrust_width: float
 @export var hand_offset: float
+@export var beam_width: float
+@export var beam_period: int
+@export var beam_duration: int
 
 
 func matches(catalog: DefinitionCatalog) -> bool:
@@ -22,7 +25,7 @@ func matches(catalog: DefinitionCatalog) -> bool:
 	if (entry == null or entry.kind != CatalogEntry.Kind.WEAPON or entry.source_family != id
 			or damage <= 0 or cooldown_ticks <= 0 or not is_finite(reach) or reach <= 0.0):
 		return false
-	var unlocked := delivery in [Delivery.THRUST, Delivery.DAGGERS]
+	var unlocked := delivery in [Delivery.THRUST, Delivery.DAGGERS, Delivery.BEAM]
 	var eligibility := CatalogEntry.Eligibility.OWNERSHIP if unlocked else CatalogEntry.Eligibility.STARTER
 	if entry.eligibility != eligibility:
 		return false
@@ -36,4 +39,7 @@ func matches(catalog: DefinitionCatalog) -> bool:
 			if delivery == Delivery.THRUST:
 				return id == &"W04"
 			return id == &"W06" and is_finite(hand_offset) and hand_offset > 0.0 and hand_offset < thrust_width * 0.5
+		Delivery.BEAM:
+			return (id == &"W09" and is_finite(beam_width) and beam_width > 0.0 and beam_width < reach
+				and beam_period > 0 and beam_duration >= beam_period)
 	return false

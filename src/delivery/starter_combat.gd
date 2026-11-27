@@ -28,6 +28,14 @@ class Sigil:
 	var delivery: CombatDelivery
 	var cue: Cue
 
+class Beam:
+	var delivery: CombatDelivery
+	var heading: RealmSweep.Point
+	var source_life: int
+	var next_pulse: int
+	var last_pulse: int
+	var expires: int
+
 class GravityField:
 	var delivery: CombatDelivery
 	var cue: Cue
@@ -57,6 +65,7 @@ var _blockers: int
 var _last_tick := -1
 var _arrows: Array[Arrow] = []
 var _sigils: Array[Sigil] = []
+var _beams: Array[Beam] = []
 var _fracture: Cue
 var _gravity: GravityField
 var _effects: Array[Cue] = []
@@ -129,9 +138,9 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 	if id.is_empty():
 		return Attempt.NO_TARGET
 	var aim := _geometry.circle_center(id, 0)
-	var action := _action(source, tick, 0, _weapon.id, _weapon.damage,
-		_weapon.cooldown_ticks, CombatAction.Damage.MAGICAL if _weapon.delivery == StarterWeapon.Delivery.SIGIL
-		else CombatAction.Damage.PHYSICAL)
+	var magical := _weapon.delivery in [StarterWeapon.Delivery.SIGIL, StarterWeapon.Delivery.BEAM]
+	var action := _action(source, tick, 0, _weapon.id, _weapon.damage, _weapon.cooldown_ticks,
+		CombatAction.Damage.MAGICAL if magical else CombatAction.Damage.PHYSICAL)
 	if _weapon_rate != null:
 		action.cooldown = &""
 		action.cooldown_ticks = 0
@@ -169,7 +178,8 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 			action.wake_duration = _rules.wake_duration
 			action.wake_damage = _rules.wake_damage
 		var force := _force_strength(_rules.force_distance)
-		if _weapon.delivery in [StarterWeapon.Delivery.ARROW, StarterWeapon.Delivery.THRUST, StarterWeapon.Delivery.DAGGERS]:
+		if _weapon.delivery in [StarterWeapon.Delivery.ARROW, StarterWeapon.Delivery.THRUST,
+				StarterWeapon.Delivery.DAGGERS, StarterWeapon.Delivery.BEAM]:
 			action.displacement = RealmSweep.Point.new(heading.x * force, heading.y * force)
 		else:
 			action.push_center = aim if _weapon.delivery == StarterWeapon.Delivery.SIGIL else start
@@ -180,6 +190,7 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		StarterWeapon.Delivery.ARROW: result = _launch_arrow(action, start, heading)
 		StarterWeapon.Delivery.SIGIL: result = _place_sigil(action, tick, start, aim)
 		StarterWeapon.Delivery.THRUST, StarterWeapon.Delivery.DAGGERS: result = _thrust(action, tick, start, heading)
+		StarterWeapon.Delivery.BEAM: result = _begin_beam(action, tick, heading)
 	if result == Attempt.COMMITTED:
 		targeting.commit_attack_target(id)
 		if _weapon_rate != null:
@@ -562,6 +573,8 @@ func advance(tick: int) -> bool:
 		else:
 			surviving.append(arrow)
 	_arrows = surviving
+	if not _advance_beams(tick):
+		return false
 	for index: int in range(_effects.size() - 1, -1, -1):
 		if _effects[index].ends <= tick:
 			_effects.remove_at(index)
@@ -586,6 +599,10 @@ func cues() -> Array[Cue]:
 		visible.append(_copy_cue(effect))
 	for sigil: Sigil in _sigils:
 		visible.append(_copy_cue(sigil.cue))
+	for beam: Beam in _beams:
+		var cue := _beam_cue(beam)
+		if cue != null:
+			visible.append(cue)
 	for arrow: Arrow in _arrows:
 		var cue := _ring(&"W02", PlayerControlState.copy_point(arrow.position), 0.0, _last_tick, _last_tick + 1)
 		cue.heading = PlayerControlState.copy_point(arrow.heading)
@@ -646,6 +663,71 @@ func _launch_arrow(action: CombatAction, center: RealmSweep.Point, heading: Real
 	arrow.remaining = _weapon.reach
 	_arrows.append(arrow)
 	return Attempt.COMMITTED
+
+
+func _begin_beam(action: CombatAction, tick: int, heading: RealmSweep.Point) -> Attempt:
+	if tick > RunAuthority.MAX_TICK - _weapon.beam_duration:
+		return Attempt.REJECTED
+	var delivery := CombatDelivery.activate(_kernel, action, _geometry.realm_id, _weapon.beam_period)
+	if delivery == null:
+		return Attempt.REJECTED
+	var beam := Beam.new()
+	beam.delivery = delivery
+	beam.heading = heading
+	beam.source_life = action.source_life
+	beam.next_pulse = tick
+	beam.expires = tick + _weapon.beam_duration
+	_beams.append(beam)
+	return Attempt.COMMITTED
+
+
+func _advance_beams(tick: int) -> bool:
+	if _beams.is_empty():
+		return true
+	var source := _kernel.actor_vitals(_actor)
+	var center := _geometry.circle_center(_actor, 0)
+	var surviving: Array[Beam] = []
+	for beam: Beam in _beams:
+		if (tick >= beam.expires or source == null or source.realm != _geometry.realm_id
+				or source.life != beam.source_life or center == null):
+			if not beam.delivery.finish():
+				return false
+			continue
+		if tick == beam.next_pulse:
+			var radius := _weapon.beam_width * 0.5
+			var first := _offset(center, beam.heading, radius)
+			var last := _offset(center, beam.heading, _weapon.reach - radius)
+			var path := _geometry.certify_capsule_snapshot(_geometry.realm_id, first, last, radius, _targets, _blockers, _actor)
+			if path == null or not _admit_all(beam.delivery, path.contacts, tick):
+				return false
+			beam.last_pulse = tick
+			beam.next_pulse = tick + mini(_weapon.beam_period, beam.expires - tick)
+		surviving.append(beam)
+	_beams = surviving
+	return true
+
+
+## Between pulses the visible ray still follows the settled owner and walls.
+func _beam_cue(beam: Beam) -> Cue:
+	var center := _geometry.circle_center(_actor, 0)
+	if center == null:
+		return null
+	var radius := _weapon.beam_width * 0.5
+	var first := _offset(center, beam.heading, radius)
+	var last := _offset(center, beam.heading, _weapon.reach - radius)
+	var path := _geometry.certify_frozen_path(_geometry.realm_id, first, last, radius, _blockers, _actor)
+	if not _certified(path):
+		return null
+	var fraction := 1.0
+	for blocker: RealmGeometry.Contact in path.contacts:
+		fraction = minf(fraction, blocker.proof.earliest)
+	if fraction <= 0.0:
+		return null
+	var reach := lerpf(_weapon.beam_width, _weapon.reach, fraction)
+	var cue := _ring(_weapon.id, center, reach, beam.last_pulse, beam.expires)
+	cue.heading = PlayerControlState.copy_point(beam.heading)
+	cue.radius = radius
+	return cue
 
 
 func _thrust(action: CombatAction, tick: int, center: RealmSweep.Point, heading: RealmSweep.Point) -> Attempt:

@@ -660,6 +660,8 @@ Retraction respects mass/resistance/obstacles and does not permanently attach en
 
 Naturally penetrates compatible creatures, while solid obstacles/compatible shields obstruct. Per-target contact intervals govern repeated damage, not frames. Exiting/reentering cannot reset that interval. Beam activation rate, lifetime and tick interval are separate; generic attack speed does not inherently speed its ticks. No innate elemental status, force or defense penetration. **Discovery - Focused Energy:** restore the Silent Observatory's focusing mechanism.
 
+**C06 provisional beam timing and geometry under OWNER-T04 and O27.** Sample a settled 24-unit-wide forward capsule with its leading edge 300 units from the owner. A compatible obstruction wins a tie along the ray. Pay once on activation, then sample at activation and 15, 30 and 45 ticks later within the 60-tick lifetime. Each pulse uses the owner's current pose and the paid heading. Contact cadence and lifetime belong to each paid activation when faster recovery allows overlap. A committed ray continues from the owner's body in its realm while a teammate keeps the run active. Leaving the realm or losing that original life footprint ends the local ray. Adjust the authored beam timing after owner playtesting. [C06 record](records/C06.md#arcane-focus-writer-claim)
+
 ### 7.2 Weapon access, enhancement and transformation
 
 All six discoveries precede permanent-currency ownership unless an explicit direct-unlock exception is authored. They must be achievable without their own unlock and without mandatory challenge modifiers. Discoveries survive defeat; newly unlocked weapons become selectable next run.

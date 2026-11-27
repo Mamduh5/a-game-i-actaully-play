@@ -538,10 +538,11 @@ func _append_visible(output: Array[RealmSweep.Point], from: RealmSweep.Point, po
 
 
 func _visible_direction(from: RealmSweep.Point, cue: StarterCombat.Cue) -> bool:
-	if cue.id not in [StarterCombatRules.HARMONIC_BURST, &"R02.lightning", &"RP02.blood_wake", &"RP03.storm_relay"]:
+	if cue.id not in [&"W09", StarterCombatRules.HARMONIC_BURST, &"R02.lightning", &"RP02.blood_wake", &"RP03.storm_relay"]:
 		return true
-	var end := RealmSweep.Point.new(cue.position.x + cue.heading.x * cue.reach,
-		cue.position.y + cue.heading.y * cue.reach)
+	var reach := cue.reach - cue.radius if cue.id == &"W09" else cue.reach
+	var end := RealmSweep.Point.new(cue.position.x + cue.heading.x * reach,
+		cue.position.y + cue.heading.y * reach)
 	return _visible(from, end)
 
 

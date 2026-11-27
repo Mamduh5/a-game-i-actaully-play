@@ -531,6 +531,118 @@ func test_authored_weapons_are_distinct_and_usable_with_a_different_starter_hero
 	assert_false(duplicate.is_valid_for(invalid.catalog))
 
 
+func test_arcane_focus_translates_one_fixed_heading_on_four_magical_pulses() -> void:
+	var owns: Dictionary[StringName, bool] = {&"W09": true}
+	var arena := Arena.new(&"W09", &"H01", false, &"", &"", owns)
+	assert_false(&"W09" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.WEAPON, {}))
+	assert_true(&"W09" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.WEAPON, owns))
+	assert_true(arena.add(&"aim", 60, 0, 100))
+	assert_true(arena.add(&"compound", 90, 0, 100))
+	assert_true(arena.geometry.add_circle(&"compound", 1, RealmSweep.Point.new(100, 1), 3.0, HOSTILE))
+	assert_true(arena.add(&"edge", 120, 15, 100))
+	assert_true(arena.add(&"outside", 120, 15.125, 100))
+	assert_true(arena.add(&"ally", 44, 0, 100, FRIEND))
+	assert_true(arena.add(&"translated", 85, 45, 100))
+	assert_true(arena.add(&"behind", 200, 0, 100))
+	assert_true(arena.wall(165, -20, 70))
+	assert_eq(arena.attack(1, {MANA: Quantity.from_count(11)}), StarterCombat.Attempt.REJECTED)
+	assert_eq(arena.attack(1, {MANA: Quantity.from_count(3)}), Committed)
+	var pulses: Dictionary[StringName, Array] = {}
+	for tick: int in range(1, 62):
+		match tick:
+			10:
+				assert_true(arena.move(HERO, 0, 45))
+			17:
+				assert_true(arena.move(&"translated", 85, 80))
+				assert_true(arena.kernel.set_player_control(HERO, 1, false))
+				assert_eq(arena.attack(tick), StarterCombat.Attempt.REJECTED)
+			18:
+				assert_true(arena.move(&"translated", 85, 45))
+			25:
+				assert_true(arena.move(HERO, 0, 0))
+		assert_true(arena.combat.advance(tick))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			assert_eq(hit.family, &"W09")
+			assert_eq(hit.origin.activation, 1)
+			assert_eq(hit.components[0].kind, CombatAction.Damage.MAGICAL)
+			assert_null(hit.displacement)
+			var contacts: Array = pulses.get_or_add(hit.target, [])
+			contacts.append(tick)
+		if tick in [1, 10, 16, 60]:
+			var cues := arena.combat.cues()
+			assert_eq(cues.size(), 1)
+			if cues.size() == 1:
+				assert_eq(cues[0].heading.x, 1.0)
+				assert_eq(cues[0].heading.y, 0.0)
+				assert_eq(cues[0].position.y, arena.geometry.circle_center(HERO, 0).y)
+				assert_eq(cues[0].radius, 12.0)
+				assert_almost_eq(cues[0].reach, 165.0, 0.000001)
+	assert_eq(pulses, {&"aim": [1, 31, 46], &"compound": [1, 31, 46], &"edge": [1, 31, 46], &"translated": [16]})
+	assert_eq(arena.hp(&"aim").native_at_scale(0), 82)
+	assert_eq(arena.hp(&"compound").native_at_scale(0), 82)
+	assert_eq(arena.hp(&"translated").native_at_scale(0), 94)
+	for id: StringName in [&"outside", &"ally", &"behind"]:
+		assert_eq(arena.hp(id).native_at_scale(0), 100)
+	assert_eq(arena.kernel.actor_snapshot(HERO).resources[MANA].native_at_scale(0), 7)
+	assert_true(arena.combat.cues().is_empty())
+
+
+func test_arcane_focus_recovery_can_overlap_beams_without_accelerating_paid_pulses() -> void:
+	var arena := Arena.new(&"W09", &"H02", false, &"", &"", {&"W09": true}, HERO,
+		{&"automatic_attack_frequency": 2500})
+	assert_true(arena.add(&"front", 75, 0, 150))
+	assert_true(arena.add(&"flank", 0, 80, 150))
+	var activations: Array[int] = []
+	var pulses: Array[Array] = []
+	for tick: int in range(1, 108):
+		if tick == 49:
+			assert_true(arena.move(&"front", 110, 0))
+		if activations.size() < 2 and arena.attack(tick, {MANA: Quantity.from_count(2)}) == Committed:
+			activations.append(tick)
+		assert_true(arena.combat.advance(tick))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			pulses.append([hit.origin.activation, tick, hit.target])
+		if tick == 1:
+			assert_true(arena.combat.record_close_call(tick))
+		if tick == 51:
+			var beams := arena.combat.cues().filter(func(cue: StarterCombat.Cue) -> bool: return cue.id == &"W09")
+			assert_eq(beams.size(), 2)
+			if beams.size() == 2:
+				assert_eq([beams[0].heading.x, beams[0].heading.y], [1.0, 0.0])
+				assert_eq([beams[1].heading.x, beams[1].heading.y], [0.0, 1.0])
+	assert_eq(activations, [1, 51])
+	assert_eq(pulses, [[1, 1, &"front"], [1, 16, &"front"], [1, 31, &"front"], [1, 46, &"front"],
+		[51, 51, &"flank"], [51, 66, &"flank"], [51, 81, &"flank"], [51, 96, &"flank"]])
+	assert_eq(arena.hp(&"front").native_at_scale(0), 126)
+	assert_eq(arena.hp(&"flank").native_at_scale(0), 126)
+	assert_eq(arena.kernel.actor_snapshot(HERO).resources[MANA].native_at_scale(0), 6)
+
+
+func test_arcane_focus_finishes_from_the_same_body_until_the_life_changes() -> void:
+	var arena := Arena.new(&"W09", &"H01", false, &"", &"", {&"W09": true})
+	assert_true(arena.add(&"target", 60, 0, 100))
+	assert_true(arena.add(&"teammate", 40, 50, 100, FRIEND))
+	assert_true(arena.kernel.configure_terminal(&"target", [HERO, &"teammate"]))
+	assert_eq(arena.attack(1), Committed)
+	var pulses: Array[int] = []
+	for tick: int in range(1, 47):
+		if tick == 2:
+			assert_true(arena.swing_from(&"target", HERO, 250, tick))
+		if tick == 3:
+			assert_eq(arena.hp(HERO).sign_value, 0)
+			assert_eq(arena.kernel.terminal, CombatKernel.Terminal.ACTIVE)
+			assert_eq(arena.attack(tick), StarterCombat.Attempt.REJECTED)
+		if tick == 20:
+			assert_true(arena.kernel.revive_player(HERO, 1, CombatInstant.at_tick(tick), Quantity.from_count(50, 2), 1))
+		assert_true(arena.combat.advance(tick))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			if hit.family == &"W09":
+				pulses.append(tick)
+	assert_eq(pulses, [1, 16])
+	assert_true(arena.combat.cues().is_empty())
+	assert_eq(arena.hp(&"target").native_at_scale(0), 88)
+
+
 func test_sword_cleaves_each_intersecting_enemy_while_moving_and_pays_once() -> void:
 	var arena := Arena.new(&"W01")
 	assert_true(arena.add(&"aim", 30, 0, 100))
