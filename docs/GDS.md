@@ -844,6 +844,8 @@ Waiting for charge is not a new minimum activation delay. Each mine uses its own
 
 The Rank 5 behavior explicitly modifies the earlier consistent-damage baseline. It never retroactively amplifies targets already hit. Guiding effects can explicitly change an otherwise fixed trajectory, with geometry still real.
 
+**C03 provisional tuning under OWNER-T04 (§9).** The lance travels 15 units per tick for up to 270 units and can launch every 72 ticks. Its radius increases from two to six units at rank 3. Base magical damage is 12, increasing to 16 at rank 2 and 20 at rank 4. Ascending Pierce adds 25% of base per prior successful penetration on the current spear, up to twice base. These settings allow an off-axis enemy to distinguish Crescent Lance from the narrow projectile. Adjust range, sweep and rank values in SpectralLance and review the amplification calculation in CombatKernel after owner playtesting. [C03 evidence](records/C03.md)
+
 <a id="evolution-e04a"></a>
 **E04A - Sunderline. Recipe: Spectral Lance 5 + Fracture.** Leave a temporary magical damaging fissure along where the spear actually traveled, not an infinite line toward a target. Enemies intersecting it take scheduled eligible damage. Compatible fissure hits can apply Fracture. Preserve piercing, Crescent Lance and compatible Ascending Pierce behavior; exact path-segment snapshot/amplification transfer to the fissure remains source-defined.
 
