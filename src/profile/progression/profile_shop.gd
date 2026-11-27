@@ -5,9 +5,8 @@ extends RefCounted
 
 const COMMON := "currency/common"
 const RARE := "currency/rare"
-const PROTOTYPE_STAT_CAP := 2500
-const UPGRADE_STATS := [&"maximum_hp", &"base_damage", &"physical_defense", &"magical_defense", &"movement",
-	&"automatic_attack_frequency", &"manual_cooldown_recovery"]
+const PROTOTYPE_STAT_CAP := RunPreparation.UPGRADE_CAP_BASIS_POINTS
+const UPGRADE_STATS := RunPreparation.UPGRADE_STATS
 
 class Offer:
 	var id: StringName
@@ -98,10 +97,34 @@ func buy(request: String, id: StringName, rank: int = 0) -> ProfileStore.Receipt
 
 
 func upgrade_basis_points(id: StringName) -> int:
+	return maxi(0, _owned_upgrade_bonus(id)) if _facts.same_profile() else 0
+
+
+## Freeze account benefits alongside the personal equipment and offer pool.
+func prepare(hero: StringName, weapon: StringName, runes: Array[StringName],
+		candidates: Array[StringName]) -> RunPreparation:
+	if not _facts.ready():
+		return null
+	var upgrades: Dictionary[StringName, int] = {}
+	for stat: StringName in UPGRADE_STATS:
+		var benefit := _owned_upgrade_bonus(stat)
+		if benefit < 0:
+			return null
+		if benefit > 0:
+			upgrades[stat] = benefit
+	return RunPreparation.select(_catalog, hero, weapon, runes, candidates, _facts.preparation_unlocks(), upgrades)
+
+
+func _owned_upgrade_bonus(id: StringName) -> int:
 	var total := 0
 	var rank := 1
 	var key := _key(id, rank)
-	while _offers.has(key) and _facts.has_claim(key):
+	while _offers.has(key):
+		var status := _store.lookup_claim(key).status
+		if status == ProfileStore.CommitResult.MISSING:
+			break
+		if status != ProfileStore.CommitResult.COMMITTED:
+			return -1
 		total += _offers[key].basis_points
 		rank += 1
 		key = _key(id, rank)

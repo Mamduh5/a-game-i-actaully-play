@@ -5,6 +5,9 @@ extends RefCounted
 
 const RUNE_SLOTS := 2
 const CANDIDATE_SLOTS := 10
+const UPGRADE_CAP_BASIS_POINTS := 2500
+const UPGRADE_STATS := [&"maximum_hp", &"base_damage", &"physical_defense", &"magical_defense", &"movement",
+	&"automatic_attack_frequency", &"manual_cooldown_recovery"]
 
 var catalog_revision: StringName:
 	get: return _catalog.revision if _catalog != null else &""
@@ -22,11 +25,12 @@ var _runes: Array[StringName] = []
 var _candidates: Array[StringName] = []
 var _eligible_powers: Array[StringName] = []
 var _unlocked: Array[StringName] = []
+var _upgrades: Dictionary[StringName, int] = {}
 
 
 static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: StringName,
 		rune_slots: Array[StringName], candidate_slots: Array[StringName],
-		unlocked: Dictionary[StringName, bool]) -> RunPreparation:
+		unlocked: Dictionary[StringName, bool], upgrades: Dictionary[StringName, int] = {}) -> RunPreparation:
 	if (catalog == null or not catalog.is_valid() or rune_slots.size() != RUNE_SLOTS
 			or candidate_slots.size() != CANDIDATE_SLOTS):
 		return null
@@ -38,6 +42,9 @@ static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: S
 	var eligible_powers := available(catalog, CatalogEntry.Kind.POWER, unlocked)
 	if not _valid_slots(rune_slots, eligible_runes) or not _valid_slots(candidate_slots, eligible_powers):
 		return null
+	for stat: StringName in upgrades:
+		if stat not in UPGRADE_STATS or upgrades[stat] <= 0 or upgrades[stat] > UPGRADE_CAP_BASIS_POINTS:
+			return null
 	var result := RunPreparation.new()
 	result._catalog = catalog
 	result._hero = hero_id
@@ -49,6 +56,9 @@ static func select(catalog: DefinitionCatalog, hero_id: StringName, weapon_id: S
 		if not id.is_empty() and unlocked[id]:
 			result._unlocked.append(id)
 	result._unlocked.sort_custom(func(left: StringName, right: StringName) -> bool: return String(left) < String(right))
+	for stat: StringName in UPGRADE_STATS:
+		if upgrades.has(stat):
+			result._upgrades[stat] = upgrades[stat]
 	return result
 
 
@@ -75,12 +85,19 @@ func eligible_powers() -> Array[StringName]:
 	return _eligible_powers.duplicate()
 
 
+func upgrade_basis_points(stat: StringName) -> int:
+	return _upgrades.get(stat, 0)
+
+
 func checkpoint() -> Array:
-	return [_hero, _weapon, runes(), candidates(), _unlocked.duplicate()]
+	var result := [_hero, _weapon, runes(), candidates(), _unlocked.duplicate()]
+	if not _upgrades.is_empty():
+		result.append(_upgrades.duplicate())
+	return result
 
 
 static func reopen(catalog: DefinitionCatalog, image: Variant) -> RunPreparation:
-	if (not image is Array or image.size() != 5 or not image[0] is StringName or not image[1] is StringName
+	if (not image is Array or image.size() not in [5, 6] or not image[0] is StringName or not image[1] is StringName
 			or not image[2] is Array or not image[3] is Array or not image[4] is Array):
 		return null
 	for slots: Array in [image[2], image[3], image[4]]:
@@ -96,7 +113,16 @@ static func reopen(catalog: DefinitionCatalog, image: Variant) -> RunPreparation
 	rune_slots.assign(image[2])
 	var candidate_slots: Array[StringName] = []
 	candidate_slots.assign(image[3])
-	return select(catalog, image[0], image[1], rune_slots, candidate_slots, unlocked)
+	var upgrades: Dictionary[StringName, int] = {}
+	if image.size() == 6:
+		var saved: Variant = image[5]
+		if not saved is Dictionary or saved.size() > UPGRADE_STATS.size():
+			return null
+		for stat: Variant in saved:
+			if not stat is StringName or not saved[stat] is int:
+				return null
+			upgrades[stat] = saved[stat]
+	return select(catalog, image[0], image[1], rune_slots, candidate_slots, unlocked, upgrades)
 
 
 static func _valid_slots(slots: Array[StringName], eligible: Array[StringName]) -> bool:

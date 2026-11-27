@@ -95,6 +95,57 @@ func test_rank_prerequisite_and_private_balances_hold_under_contending_requests(
 	assert_true(bob.close())
 
 
+func test_preparation_freezes_confirmed_personal_upgrades_and_recovers_the_earlier_run() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var offers := _offers()
+	offers.append(_offer(&"maximum_hp", 1, ProfileShop.COMMON, 3, 250))
+	var shop := ProfileShop.open(_alice, _catalog, "rules-v1", offers)
+	var starter := shop.prepare(&"H01", &"W01", [&"", &""], _empty_candidates())
+	assert_eq(starter.checkpoint().size(), 5)
+	assert_eq(RunPreparation.reopen(_catalog, starter.checkpoint()).upgrade_basis_points(&"movement"), 0)
+	assert_null(shop.prepare(&"H99", &"W01", [&"", &""], _empty_candidates()))
+	assert_eq(_fund(_alice, "upgrade-common", ProfileShop.COMMON, 20), STATUS.COMMITTED)
+	assert_eq(_fund(_alice, "upgrade-rare", ProfileShop.RARE, 2), STATUS.COMMITTED)
+	assert_eq(shop.buy("move-one", &"movement", 1).status, STATUS.COMMITTED)
+	assert_eq(shop.buy("health-one", &"maximum_hp", 1).status, STATUS.COMMITTED)
+	var first := shop.prepare(&"H01", &"W01", [&"", &""], _empty_candidates())
+	assert_eq(first.upgrade_basis_points(&"movement"), 500)
+	assert_eq(first.upgrade_basis_points(&"maximum_hp"), 250)
+	assert_eq(first.upgrade_basis_points(&"magical_defense"), 0)
+	var setup := RunSetup.new()
+	setup.run_id = &"prepared-upgrades"
+	setup.authority_id = &"seat"
+	setup.epoch = 1
+	setup.rules_revision = &"rules-v1"
+	setup.catalog_revision = _catalog.revision
+	setup.challenge_id = &"normal"
+	setup.initial_realms = {&"seat": &"overworld"}
+	var party := PartyProgression.begin(setup, {&"seat": first})
+	var mutation := _mutation("prepared-early")
+	mutation.frontier = party.frontier(0)
+	assert_eq(_alice.commit_confirmed(mutation).status, STATUS.COMMITTED)
+	assert_eq(shop.buy("move-two", &"movement", 2).status, STATUS.COMMITTED)
+	assert_eq(first.upgrade_basis_points(&"movement"), 500)
+	assert_true(_alice.close())
+	assert_eq(_alice.open("alice", _scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var second := shop.prepare(&"H02", &"W02", [&"", &""], _empty_candidates())
+	assert_eq(second.upgrade_basis_points(&"movement"), 1000)
+	assert_eq(second.upgrade_basis_points(&"maximum_hp"), 250)
+	var resumed := PartyProgression.reopen(setup, _catalog, _alice.frontier(String(setup.run_id)))
+	assert_not_null(resumed)
+	assert_eq(resumed.frontier(0).image, mutation.frontier.image)
+	var altered := first.checkpoint()
+	for invalid: Dictionary in [{&"movement": 2501}, {&"movement": 5.5}, {&"power_slots": 100}]:
+		altered[5] = invalid
+		assert_null(RunPreparation.reopen(_catalog, altered))
+	assert_true(_alice.close())
+	assert_eq(_alice.open("bob", _scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_null(shop.prepare(&"H01", &"W01", [&"", &""], _empty_candidates()))
+	var bob := ProfileShop.open(_alice, _catalog, "rules-v1", offers)
+	assert_eq(bob.prepare(&"H02", &"W02", [&"", &""], _empty_candidates()).upgrade_basis_points(&"movement"), 0)
+
+
 func test_signed_discoveries_survive_reopen_and_unlock_only_the_original_recipient() -> void:
 	if not OS.has_feature("windows"):
 		return
