@@ -794,6 +794,8 @@ Razor Momentum is source-specific; Battle Tempo is shared offensive momentum. Bo
 
 Prediction/guidance apply only through explicitly compatible additions. Multi-dart hits and multiple familiars remain one Sketch Familiar source for distinct-source checks.
 
+**C03 provisional tuning under OWNER-T04 (§9).** The base familiar follows a point 16 units to its owner's left at up to three units per tick, pausing when that step crosses a blocker. It has no separate HP pool. Once per 60 ticks it can fire at a known eligible enemy within 240 units. A dart travels 12 units per tick with a one-unit collision radius. Its base physical damage increases from eight to ten at rank 2 and twelve at rank 4. Twin Quill fires three degrees to either side of direct aim. Piercing Quill can reach two distinct enemy lives per dart. These settings expose spread, penetration and cover at starter encounter distances. Adjust in SketchFamiliar after owner playtesting. [C03 evidence](records/C03.md)
+
 <a id="evolution-e02a"></a>
 **E02A - Margin Hunter. Recipe: Sketch Familiar 5 + Sharpsight.** One tactical companion autonomously seeks advantageous off-axis/flanking positions and fires precision volleys using compatible predictive aiming. Physical, non-homing projectiles remain subject to cover and evasion. No automatic teleportation, wall penetration or guaranteed hits. Retain Twin Quill/Piercing Quill where compatible.
 
