@@ -22,6 +22,7 @@ const SQLITE_VERSION := "3.51.0"
 const MAX_PROFILE_ID_LENGTH := 64
 const FILENAME := "profile.db"
 const GENESIS := "0000000000000000000000000000000000000000000000000000000000000000"
+const ORDINARY_SESSION_PREFIX := "ordinary-session/"
 const LEDGER_SCHEMA := [
 	"CREATE TABLE ledger_meta (singleton INTEGER PRIMARY KEY CHECK(singleton=1), generation INTEGER NOT NULL CHECK(generation>=0), anchor TEXT NOT NULL) STRICT",
 	"CREATE TABLE balances (account TEXT PRIMARY KEY, amount BLOB NOT NULL) STRICT",
@@ -100,6 +101,17 @@ func balance(account: String) -> Quantity:
 
 func checkpoint() -> Dictionary:
 	return _checkpoint(_db) if _available() else {}
+
+
+func latest_ordinary_session() -> Receipt:
+	if not _available():
+		return _receipt(CommitResult.UNAVAILABLE, "")
+	# The fixed-width session sequence sorts on the existing operation index.
+	var row: Variant = _select_one(_db, ("SELECT operation FROM receipts WHERE operation>=? AND operation<? "
+		+ "ORDER BY operation DESC LIMIT 1"), [ORDINARY_SESSION_PREFIX, "ordinary-session0"])
+	if row == null:
+		return _receipt(CommitResult.UNAVAILABLE, "")
+	return _receipt(CommitResult.MISSING, "") if row.is_empty() else _lookup(_db, row.operation)
 
 
 func frontier(run_id: String) -> Dictionary:

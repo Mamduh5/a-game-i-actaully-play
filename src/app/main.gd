@@ -3,8 +3,10 @@ extends Control
 
 ## User argument that prints identity and quits with exit code 0 (headless smoke checks).
 const EXIT_AFTER_BOOT_ARG := "--agip-exit-after-boot"
+const ORDINARY_EXPOSURE_TEXT := "Some ordinary earnings from the previous run may be missing.\nThe amount could not be determined."
 
 @onready var _identity_label: Label = %IdentityLabel
+var _profile: ProfileStore
 var _authority: RunAuthority
 var _quit_requested := false
 var _retry_at: int
@@ -20,8 +22,22 @@ func _ready() -> void:
 		get_tree().quit.call_deferred(0)
 
 
+func bind_profile(profile: ProfileStore) -> bool:
+	if not is_node_ready() or _profile != null or _authority != null or _quit_requested:
+		return false
+	var settlement := ProfileOrdinarySession.reopen_status(profile)
+	if settlement == ProfileOrdinarySession.ReopenStatus.UNAVAILABLE:
+		return false
+	_profile = profile
+	if settlement == ProfileOrdinarySession.ReopenStatus.POSSIBLE_EXPOSURE:
+		_identity_label.text += "\n\n" + ORDINARY_EXPOSURE_TEXT
+	return true
+
+
 func bind_run(authority: RunAuthority) -> bool:
 	if authority == null or authority.checkpoint().is_empty() or _authority != null or _quit_requested:
+		return false
+	if _profile != null and not authority.begin_ordinary_session(_profile):
 		return false
 	_authority = authority
 	return true

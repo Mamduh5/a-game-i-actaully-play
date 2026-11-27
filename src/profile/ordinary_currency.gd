@@ -80,6 +80,10 @@ func account() -> String:
 	return _account
 
 
+func issued_by(store: ProfileStore) -> bool:
+	return store != null and store == _store and store.identity() == _issuer_profile
+
+
 ## The authoritative driver calls before opening another earning group.
 ## Service continues while this fence is raised.
 func can_earn() -> bool:

@@ -37,6 +37,7 @@ var _random: RunRandom
 var _closed_tick: int
 var _observation: Dictionary = {}
 var _ordinary_currency: Array[OrdinaryCurrency] = []
+var _ordinary_session: ProfileOrdinarySession
 var _exit := Exit.ACTIVE
 var _exit_settled := false
 var _resolving := false
@@ -60,7 +61,8 @@ func belongs_to(run: StringName, epoch: int) -> bool:
 
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
 	if (_identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null or earnings == null
-			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])):
+			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])
+			or (_ordinary_session != null and not _ordinary_session.tracks(earnings))):
 		return false
 	for existing: OrdinaryCurrency in _ordinary_currency:
 		if existing.recipient() == earnings.recipient() and existing.account() == earnings.account():
@@ -69,9 +71,26 @@ func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
 	return true
 
 
+## The live shell confirms the issuer's activity before opening earning groups.
+func begin_ordinary_session(profile: ProfileStore) -> bool:
+	if _identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null or _resolving or profile == null:
+		return false
+	if _ordinary_session != null:
+		if not _ordinary_session.uses(profile):
+			return false
+	else:
+		for earnings: OrdinaryCurrency in _ordinary_currency:
+			if not earnings.issued_by(profile) or earnings.oldest_eligible_usec() >= 0:
+				return false
+		_ordinary_session = ProfileOrdinarySession.prepare(profile, _identity["run"], _identity["rules"], _identity["catalog"])
+		if _ordinary_session == null:
+			return false
+	return _ordinary_session.open()
+
+
 ## Also used by the group owner before opening an earning boundary within a tick.
 func can_open_earning_group() -> bool:
-	if _exit != Exit.ACTIVE or _gateway != null:
+	if _exit != Exit.ACTIVE or _gateway != null or (_ordinary_session != null and not _ordinary_session.is_open()):
 		return false
 	var permitted := true
 	for earnings: OrdinaryCurrency in _ordinary_currency:
@@ -119,6 +138,8 @@ func _settle_exit(requested: Exit) -> bool:
 			earnings.end_earning()
 	if not _exit_settled:
 		_exit_settled = flush_ordinary_currency()
+		if _exit_settled and _ordinary_session != null:
+			_exit_settled = _ordinary_session.settle()
 	return _exit_settled
 
 

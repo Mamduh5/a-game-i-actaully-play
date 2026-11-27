@@ -183,6 +183,76 @@ func test_host_suspension_keeps_the_last_closed_frontier_until_earnings_are_dura
 	assert_true(store.close())
 
 
+func test_disclosure_marker_fences_start_and_closes_only_after_the_last_confirmed_earning() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-ordinary-disclosure")
+	var store := LostResultStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var authority := _authority()
+	var earnings := OrdinaryCurrency.begin(store, _binding("alice", _issuer), _issuer, Currency)
+	assert_true(authority.attach_ordinary_currency(earnings))
+	assert_false(authority.begin_ordinary_session(store))
+	assert_false(authority.close_tick())
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
+	store.keep = true
+	assert_true(authority.begin_ordinary_session(store))
+	assert_true(authority.begin_ordinary_session(store))
+	assert_eq(store.checkpoint()["generation"], 1)
+	assert_true(authority.close_tick())
+	assert_eq(earnings.accrue("final-enemy", Quantity.from_count(17)), Add.QUEUED)
+	store.keep = false
+	assert_false(authority.settle_orderly_quit())
+	assert_eq(earnings.pending_amount().native_at_scale(0), 17)
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.POSSIBLE_EXPOSURE)
+	store.keep = true
+	assert_true(earnings.flush())
+	store.keep = false
+	assert_false(authority.settle_orderly_quit())
+	assert_eq(store.balance(Currency).native_at_scale(0), 17)
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.POSSIBLE_EXPOSURE)
+	store.keep = true
+	assert_true(authority.settle_orderly_quit())
+	assert_true(authority.settle_orderly_quit())
+	assert_true(store.close())
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
+	assert_eq(store.balance(Currency).native_at_scale(0), 17)
+	assert_eq(store.checkpoint()["generation"], 3)
+	assert_true(store.close())
+
+
+func test_ordinary_disclosure_is_private_and_compares_the_latest_activity_markers() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-ordinary-disclosure-reopen")
+	var root := scratch.get_current_dir()
+	var store := ProfileStore.new()
+	var other := ProfileStore.new()
+	assert_eq(store.open("alice", root), ProfileStore.OpenResult.OPENED)
+	assert_eq(other.open("bob", root), ProfileStore.OpenResult.OPENED)
+	var original := _authority()
+	assert_true(original.begin_ordinary_session(store))
+	assert_false(original.begin_ordinary_session(other))
+	var other_earnings := OrdinaryCurrency.begin(other, _binding("bob", _issuer), _issuer, Currency)
+	assert_false(original.attach_ordinary_currency(other_earnings))
+	assert_true(store.close())
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.UNAVAILABLE)
+	assert_eq(store.open("alice", root), ProfileStore.OpenResult.OPENED)
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.POSSIBLE_EXPOSURE)
+	assert_eq(ProfileOrdinarySession.reopen_status(other), ProfileOrdinarySession.ReopenStatus.CLEAR)
+	var later := _authority()
+	assert_true(later.begin_ordinary_session(store))
+	assert_true(original.settle_orderly_quit())
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.POSSIBLE_EXPOSURE)
+	assert_true(later.settle_orderly_quit())
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
+	assert_eq(store.checkpoint()["generation"], 4)
+	assert_eq(other.checkpoint()["generation"], 0)
+	assert_true(store.close())
+	assert_true(other.close())
+
+
 func test_failed_flush_retains_original_batch_then_reconciles_lost_success() -> void:
 	if not OS.has_feature("windows"):
 		return
