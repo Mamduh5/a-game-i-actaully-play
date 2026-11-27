@@ -524,6 +524,7 @@ func test_committed_realm_effect_settles_after_the_last_viewer_departs() -> void
 	var realm := &"silent_garden"
 	var target := &"resident"
 	var family := &"fixture/delayed-ground-hit"
+	var bleed_family := &"R01.bleed"
 	var reference: Array = []
 	for departs: bool in [false, true]:
 		var route := Route.new(realm)
@@ -554,6 +555,7 @@ func test_committed_realm_effect_settles_after_the_last_viewer_departs() -> void
 		assert_true(activity.introduce_enemy(target, realm, resident, impact))
 		var committed := route.authority.next_tick()
 		var due := committed + 3
+		var bleed_due := committed + 4
 		var action := CombatAction.new()
 		action.source = Guest
 		action.source_life = 1
@@ -571,6 +573,25 @@ func test_committed_realm_effect_settles_after_the_last_viewer_departs() -> void
 		assert_eq(coverage.contacts.size(), 1)
 		assert_eq(delivery.admit(due, coverage.contacts[0], 1, true), CombatDelivery.Result.ADMITTED)
 		assert_true(delivery.finish())
+
+		var immediate := action.copy()
+		immediate.family = &"fixture/bleed-application"
+		immediate.origin.activation = 2
+		immediate.components[0].base = Quantity.from_count(1)
+		var bleed := CombatBleedLedger.Application.new()
+		bleed.offense = CombatAction.Component.new()
+		bleed.offense.base = Quantity.from_count(2)
+		bleed.duration = 5
+		bleed.period = 4
+		bleed.capacity = 1
+		immediate.bleed = bleed
+		var application := CombatDelivery.activate(route.kernel, immediate, realm)
+		assert_not_null(application)
+		assert_eq(application.admit(committed, coverage.contacts[0], 1, true), CombatDelivery.Result.ADMITTED)
+		assert_true(application.finish())
+		assert_true(route.authority.close_tick())
+		assert_eq(route.kernel.actor_snapshot(target).hp.amount.native_at_scale(0), 19)
+
 		if departs:
 			var leave := route.input(Guest, PlayerCommand.INTERACT, exit)
 			assert_true(route.submit(leave))
@@ -580,15 +601,19 @@ func test_committed_realm_effect_settles_after_the_last_viewer_departs() -> void
 		assert_eq(route.inner.view(Guest).visible.is_empty(), departs)
 		assert_true(route.inner.view(Host).visible.is_empty())
 		var posted: Array = []
-		for tick: int in range(committed + 1, due + 1):
+		var expected_hp := {due: 15, bleed_due: 13}
+		for tick: int in range(committed + 2, bleed_due + 1):
 			assert_true(route.authority.close_tick())
 			assert_true(route.authority.closed_party)
 			var state := route.kernel.actor_snapshot(target)
-			assert_eq(state.hp.amount.native_at_scale(0), 16 if tick == due else 20)
+			assert_eq(state.hp.amount.native_at_scale(0), expected_hp.get(tick, 19))
 			for wave: CombatKernel.WaveResult in route.authority.world_frame.combat:
 				for hit: CombatKernel.Hit in wave.hits:
 					posted.append([tick, hit.family, hit.target, hit.origin.owner, hit.origin.provenance])
-		assert_eq(posted, [[due, family, target, Guest, CombatOrigin.Provenance.SEAT]])
+		assert_eq(posted, [
+			[due, family, target, Guest, CombatOrigin.Provenance.SEAT],
+			[bleed_due, bleed_family, target, Guest, CombatOrigin.Provenance.SEAT],
+		])
 		var closed: Array = activity.snapshot().actors[target]
 		if departs:
 			var reenter := route.input(Guest, PlayerCommand.INTERACT, route.handle)
