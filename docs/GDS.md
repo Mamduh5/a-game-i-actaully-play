@@ -821,6 +821,8 @@ Prediction/guidance apply only through explicitly compatible additions. Multi-da
 
 Waiting for charge is not a new minimum activation delay. Each mine uses its own charge at detonation and is consumed once. Source ownership survives legitimate mine-generated reactions.
 
+**C03 provisional tuning under OWNER-T04 (§9, O13).** Place mines every 90 ticks, with up to four active. Each lasts 150 ticks and arms after 12. The trigger radius is 12 units and the blast radius is 36. Base magical damage increases from 16 to 20 at rank 2 and 24 at rank 4. Twin Runes first tries positions 16 units on either side of the owner and checks alternative clear positions if needed. Pressure Charge adds one damage per completed armed tick, capped at twice base. Time Fracture accelerates owned mine arming inside the field. Charge then accumulates with elapsed combat time. These values expose distinct placement and waiting outcomes in a short encounter. Adjust in RunicMines after owner playtesting. [C03 evidence](records/C03.md)
+
 <a id="evolution-e03a"></a>
 **E03A - Runic Web. Recipe: Runic Mine 5 + Death Bloom.** Nearby active mines form visible eligible connections. One triggered mine propagates ignition through connected armed mines, each exploding at its actual location and consuming itself. A network blast can hit nothing if enemies are absent. Death Bloom separately responds to valid kills. Each mine's Pressure Charge is preserved; no mine repeats its own explosion in the same lifecycle.
 
