@@ -505,6 +505,8 @@ Resonance is hero-owned, separate from Architect Structural Resonance, Arcane Te
 
 **C03 provisional tuning under OWNER-T04/O13.** Time Fracture can be placed at a selected point within 180 units along an unobstructed path. The field has radius 48, lasts 90 ticks and has a 240-tick cooldown. Each tick of overlap advances an existing owned Arcane Sigil by one extra tick, up to its single activation. The reduced waiting time leaves the sigil fixed at its committed position. Adjust the Fracture fields in StarterCombatRules after owner playtesting. [C03 evidence](records/C03.md)
 
+**Temporal Echo under OWNER-T04/O14.** Each successful hostile primary weapon contact reserves one repetition centered on the struck shape before displacement, or on the bow projectile at contact. Use 25% of the committed base component with its original type, offense bonuses and penetration. Mitigate once against each enemy actually in the 12-unit footprint at delivery. Schedule 30 steps from the first whole tick at or after contact. Local Time Fracture advances the pending repetition by one additional step per tick of overlap. The timing and radius are adjustable in StarterCombatRules. Owner playtesting is pending. [C03 evidence](records/C03.md)
+
 ### H05. The Gravity Weaver - unlockable
 <a id="catalog-h05"></a>
 
