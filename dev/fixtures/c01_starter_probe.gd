@@ -16,6 +16,7 @@ class Rules extends RunAuthority:
 	var combat: StarterCombat
 	var familiar: SketchFamiliar
 	var mines: RunicMines
+	var lance: SpectralLance
 	var targets: Array[PlayerTargeting.Candidate] = []
 	var scenario: String
 	var trace: Array[Array] = []
@@ -58,9 +59,9 @@ class Rules extends RunAuthority:
 				or not kernel.attach_geometry(geometry, Wall)):
 			return false
 		combat = StarterCombat.create(tuning, catalog, prep, kernel, geometry, Player, Foe, Foe, Wall)
-		if which in ["familiar", "mines"]:
+		if which in ["familiar", "mines", "lance"]:
 			var rewards := RunRewardQueue.begin(prep, RunRandom.new(17), Player)
-			var family := &"P02" if which == "familiar" else &"P03"
+			var family: StringName = {"familiar": &"P02", "mines": &"P03", "lance": &"P04"}[which]
 			for event: int in range(1, 100):
 				if rewards.ranks().get(family, 0) == 5:
 					break
@@ -71,8 +72,10 @@ class Rules extends RunAuthority:
 				return false
 			if which == "familiar":
 				familiar = SketchFamiliar.create(kernel, geometry, Player, rewards, Foe, Wall)
-			else:
+			elif which == "mines":
 				mines = RunicMines.create(Player, rewards, kernel, geometry, Foe, Wall, combat)
+			else:
+				lance = SpectralLance.create(Player, rewards, kernel, geometry, Foe, Wall)
 		var setup := RunSetup.new()
 		setup.run_id = Run
 		setup.authority_id = Player
@@ -85,6 +88,9 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"lance":
+				return (lance != null and _enemy(&"aim", 374, 380, 200)
+					and _enemy(&"edge", 404, 396, 200, false) and _enemy(&"rear", 444, 380, 200))
 			"mines":
 				return mines != null and _enemy(&"left", 304, 380, 200) and _enemy(&"arrival", 420, 380, 200, false)
 			"fracture":
@@ -152,7 +158,7 @@ class Rules extends RunAuthority:
 				axes += int(intent.action == PlayerCommand.MOVE_AXES and intent.command.y < 0.0)
 				controls.apply(intent.command)
 		passed = passed and controls.step(geometry, Player, 0, Wall, 100.0, 1.0 / 60.0) != null
-		if (tick == 8 and scenario not in ["undying", "familiar", "mines"]) or (tick == 68 and scenario == "wake"):
+		if (tick == 8 and scenario not in ["undying", "familiar", "mines", "lance"]) or (tick == 68 and scenario == "wake"):
 			launches += int(combat.try_weapon(tick, targeting, targets) == StarterCombat.Attempt.COMMITTED)
 		if tick == 11 and scenario in ["bow", "bow-miss"]:
 			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(570, 500))
@@ -171,6 +177,10 @@ class Rules extends RunAuthority:
 				RealmSweep.Point.new(387, 389 if tick == 83 else 410))
 		if familiar != null:
 			passed = passed and familiar.advance(tick, targets)
+		if lance != null:
+			if tick == 2:
+				passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(374, 340))
+			passed = passed and lance.advance(tick, targets)
 		if mines != null:
 			if tick == 35:
 				passed = passed and geometry.stage_circle_motion(&"arrival", 0, RealmSweep.Point.new(340, 380))
@@ -233,6 +243,12 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"lance":
+				return (trace.size() == 2 and trace[0].slice(1) == ["P04", "edge", false]
+					and trace[1].slice(1) == ["P04", "rear", false] and trace[0][0] < trace[1][0]
+					and kernel.actor_snapshot(&"aim").hp.amount.native_at_scale(0) == 200
+					and kernel.actor_snapshot(&"edge").hp.amount.native_at_scale(0) == 180
+					and kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0) == 175)
 			"mines":
 				return (trace == [[13, "P03", "left", false], [35, "P03", "arrival", false], [35, "P03", "left", false]]
 					and kernel.actor_snapshot(&"left").hp.amount.native_at_scale(0) == 130
@@ -351,6 +367,10 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "Runic Mine\nLeft HP %d   Arrival HP %d" % [
 			_rules.kernel.actor_snapshot(&"left").hp.amount.native_at_scale(0),
 			_rules.kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0)]
+	elif _case == "lance":
+		_hud.text = "Spectral Lance\nEdge HP %d   Rear HP %d" % [
+			_rules.kernel.actor_snapshot(&"edge").hp.amount.native_at_scale(0),
+			_rules.kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0)]
 	elif _case == "fracture":
 		_hud.text = "The Chronomancer\nTime Fracture"
 	elif _case == "rupture":
@@ -366,7 +386,7 @@ func _physics_process(_delta: float) -> void:
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
 			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23],
-			"mines": [6, 18, 38]}[_case]:
+			"mines": [6, 18, 38], "lance": [3, 10]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -433,6 +453,10 @@ func _draw() -> void:
 		for mine: RealmSweep.Point in _rules.mines.positions():
 			draw_arc(Vector2(mine.x, mine.y), RunicMines.TRIGGER_RADIUS, 0, TAU, 24, Color("#e5c28b"), 2, true)
 			draw_circle(Vector2(mine.x, mine.y), 4, Color("#e5c28b"), true, -1, true)
+	if _rules.lance != null and _rules.lance.position() != null:
+		var tip := _rules.lance.position()
+		var axis := _rules.lance.heading()
+		draw_line(Vector2(tip.x - axis.x * 18, tip.y - axis.y * 18), Vector2(tip.x, tip.y), Color("#d5c6fc"), 5, true)
 	if _rules.familiar != null and _rules.familiar.position() != null:
 		var pet := _rules.familiar.position()
 		draw_circle(Vector2(pet.x, pet.y), 6.0, Color("#e1d6bf"), true, -1.0, true)

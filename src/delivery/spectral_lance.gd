@@ -42,6 +42,10 @@ func position() -> RealmSweep.Point:
 	return PlayerControlState.copy_point(_position) if _delivery != null else null
 
 
+func heading() -> RealmSweep.Point:
+	return PlayerControlState.copy_point(_heading) if _delivery != null else null
+
+
 func advance(tick: int, candidates: Array[PlayerTargeting.Candidate]) -> bool:
 	if tick <= 0 or tick > RunAuthority.MAX_TICK - PERIOD or (_last_tick >= 0 and tick != _last_tick + 1):
 		return false
