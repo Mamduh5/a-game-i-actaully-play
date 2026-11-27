@@ -47,6 +47,7 @@ func test_stationary_anchor_and_obstructed_pulse_keep_original_cadence() -> void
 			assert_eq(hit.target, &"first")
 			assert_eq(hit.components[0].hp_removed.native_at_scale(0), 8)
 		assert_eq(tether.endpoints()[1].x, 13.0)
+		assert_eq(tether.visible_segment().size(), 0 if tick >= 31 and tick < 46 else 2)
 	assert_eq(ticks, [16, 46])
 
 
