@@ -35,6 +35,7 @@ var _crossed := false
 var _lost := false
 var _reanimated := false
 var _maximum_changed := false
+var _clock_boundary := 0
 var _skip_rejected := false
 var _opened_without_view := false
 
@@ -45,6 +46,11 @@ func _ready() -> void:
 		_mode = args[0]
 	if args.size() >= 2:
 		_capture = args[1]
+	if args.size() >= 3:
+		if args[2] not in ["1500", "1620"]:
+			_finish(false)
+			return
+		_clock_boundary = args[2].to_int()
 	get_window().title = "WP18 offscreen simulation fixture"
 	RenderingServer.set_default_clear_color(Color("222f35"))
 	if (_mode not in ["full", "switch", "headless", "dense"] or not _setup()
@@ -133,7 +139,13 @@ func _physics_process(_delta: float) -> void:
 	if _tick == 4:
 		_reanimated = (_world.reanimate(Fallen, 1, Quantity.from_count(5, 1), 3)
 			and not _world.reanimate(Fallen, 1, Quantity.from_count(5, 1), 3))
-	if _tick == 10:
+	if _clock_boundary > 0 and _tick in [9, 10]:
+		# Two controlled whole-second samples straddle the named global boundary.
+		if not _sample_absent_maximum(_clock_boundary + _tick - 10):
+			_finish(false)
+			return
+		_maximum_changed = _tick == 10
+	elif _tick == 10:
 		var previous := _kernel.actor_snapshot(&"prowler")
 		_maximum_changed = (_kernel.change_max_hp(previous.id, previous.life, Quantity.from_count(60))
 			and _kernel.actor_snapshot(previous.id).hp.amount.compare(previous.hp.amount) == 0)
@@ -183,6 +195,22 @@ func _physics_process(_delta: float) -> void:
 		_finish(_detected and _crossed and _lost and _reanimated and _maximum_changed
 			and _skip_rejected and _opened_without_view and _kills == expected
 			and _state.defeated_lives[Fallen] == 2 and _state.rng[&"world-spawn/unvisited"][1] == 1)
+
+
+func _sample_absent_maximum(seconds: int) -> bool:
+	var actor := _kernel.actor_snapshot(&"prowler")
+	var factor := QuantityFormula.world_time_factor(Quantity.from_count(seconds), true)
+	var scaled := factor.times(QuantityFraction.from_amount(Quantity.from_count(30)))
+	var bounds := scaled.outward(6)
+	if bounds.is_empty() or not _kernel.change_max_hp(actor.id, actor.life, bounds[0]):
+		return false
+	var updated := _kernel.actor_snapshot(actor.id)
+	if updated.hp.amount.compare(actor.hp.amount) != 0 or updated.max_hp.compare(bounds[0]) != 0:
+		return false
+	if seconds == _clock_boundary:
+		var expected := Quantity.from_count(126) if seconds == 1500 else Quantity.from_count(1764, 1)
+		return updated.max_hp.compare(expected) == 0
+	return true
 
 
 func _finish(passed: bool) -> void:
