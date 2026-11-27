@@ -52,6 +52,38 @@ func test_prepared_offense_changes_placement_period_and_base_with_same_arming_an
 		assert_eq(damage, [31, 30] if upgraded else [25, 24])
 
 
+func test_prepared_twin_mines_fill_the_slot_freed_on_the_previous_tick() -> void:
+	for detonate: bool in [false, true]:
+		var arena := Arena.new(&"W01")
+		assert_true(arena.add(&"foe", 190, 30, 200))
+		var rewards := FamiliarTest._earn(arena, 5, &"P03", {&"automatic_attack_frequency": 2500})
+		var mines := RunicMines.create(HERO, rewards, arena.kernel, arena.geometry, 1, 2)
+		var damage_ticks: Array[int] = []
+		for tick: int in range(1, 225):
+			if tick in [72, 144]:
+				assert_true(arena.move(HERO, 60 if tick == 72 else 110, 0))
+			if tick == 216:
+				assert_true(arena.move(HERO, 155, 0))
+			if detonate and tick in [144, 145]:
+				assert_true(arena.move(&"foe", -16 if tick == 144 else 190, 0 if tick == 144 else 30))
+			assert_true(mines.advance(tick))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				damage_ticks.append(tick)
+				assert_eq(hit.origin.activation, 1)
+				assert_eq(hit.components[0].hp_removed.native_at_scale(0), 48)
+			var positions := mines.positions()
+			assert_lte(positions.size(), 4)
+			var x_coordinates := positions.map(func(position: RealmSweep.Point) -> float: return position.x)
+			match tick:
+				73: assert_eq(x_coordinates, [-16.0, 16.0, 44.0, 76.0])
+				144: assert_eq(x_coordinates, [16.0, 44.0, 76.0] if detonate else [-16.0, 16.0, 44.0, 76.0])
+				145: assert_eq(x_coordinates, [16.0, 44.0, 76.0, 94.0] if detonate else [-16.0, 16.0, 44.0, 76.0])
+				152: assert_eq(x_coordinates, [44.0, 76.0, 94.0] if detonate else [44.0, 76.0])
+				217: assert_eq(x_coordinates, [44.0, 76.0, 94.0, 139.0] if detonate else [44.0, 76.0, 139.0, 171.0])
+				224: assert_eq(x_coordinates, [94.0, 139.0] if detonate else [139.0, 171.0])
+		assert_eq(damage_ticks, [144] if detonate else [])
+
+
 func test_crossing_triggers_at_exact_subtick_and_blast_samples_every_other_trajectory_there() -> void:
 	var arena := Arena.new(&"W01")
 	assert_true(arena.add(&"entrant", -30, 0, 100))

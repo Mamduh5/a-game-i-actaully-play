@@ -60,25 +60,29 @@ func positions() -> Array[RealmSweep.Point]:
 func advance(tick: int) -> bool:
 	if tick <= 0 or tick > RunAuthority.MAX_TICK - LIFETIME or (_last_tick >= 0 and tick != _last_tick + 1):
 		return false
-	var source := _kernel.actor_snapshot(_owner)
-	if (tick >= _next_cycle and source != null and source.is_alive() and source.accepts_new_actions
-			and source.realm == _geometry.realm_id and _rewards.active_form(FAMILY) == FAMILY):
-		if not _place_cycle(source, tick, _rewards.ranks()[FAMILY]):
-			return false
-		_next_cycle = tick + _placement_period
 	var now := CombatInstant.at_tick(tick)
 	for index: int in range(_mines.size() - 1, -1, -1):
 		var mine := _mines[index]
-		if tick > mine.placed and _combat != null and _combat.compresses_at(_owner, _geometry.realm_id, tick, mine.center):
-			mine.charge.compress_arming(tick)
-		if mine.charge.armed_at(now) and not _check_trigger(mine, tick):
-			return false
+		# The exact expiry tick can still admit a trigger. Only an older
+		# deadline or an already settled detonation frees this slot now.
 		if tick > mine.placed + LIFETIME:
 			mine.charge.expire(now)
 		if mine.charge.end_reason != CombatMineCharge.End.LIVE:
 			if not mine.delivery.finish():
 				return false
 			_mines.remove_at(index)
+	var source := _kernel.actor_snapshot(_owner)
+	if (tick >= _next_cycle and source != null and source.is_alive() and source.accepts_new_actions
+			and source.realm == _geometry.realm_id and _rewards.active_form(FAMILY) == FAMILY):
+		if not _place_cycle(source, tick, _rewards.ranks()[FAMILY]):
+			return false
+		_next_cycle = tick + _placement_period
+	for index: int in range(_mines.size() - 1, -1, -1):
+		var mine := _mines[index]
+		if tick > mine.placed and _combat != null and _combat.compresses_at(_owner, _geometry.realm_id, tick, mine.center):
+			mine.charge.compress_arming(tick)
+		if mine.charge.armed_at(now) and not _check_trigger(mine, tick):
+			return false
 	_last_tick = tick
 	return true
 
@@ -128,8 +132,6 @@ func _place_cycle(source: CombatantState, tick: int, rank: int) -> bool:
 
 
 func _check_trigger(mine: Mine, tick: int) -> bool:
-	if tick > mine.placed + LIFETIME:
-		return true
 	var sweep := mine.delivery.plan_sweep(_geometry, mine.center, mine.center, TRIGGER_RADIUS, _targets)
 	if sweep == null:
 		return false
