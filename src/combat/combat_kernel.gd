@@ -8,6 +8,12 @@ enum BarrierEnd { EXPIRED, REPLACED, CLAMPED, DECAYED, REMOVED }
 enum BarrierAdjustment { CAP, DECAY, REMOVE }
 enum ActivationOutcome { PAID, LETHAL, REJECTED, SUPPRESSED }
 
+class ActorVitals:
+	var realm: StringName
+	var life: int
+	var hp: Quantity
+	var maximum: Quantity
+
 class LayerReceipt:
 	var id: StringName
 	var generation: int
@@ -257,6 +263,19 @@ func add_actor(actor: CombatantState) -> bool:
 func actor_snapshot(id: StringName) -> CombatantState:
 	var actor: CombatantState = _actors.get(id)
 	return actor.copy() if actor != null else null
+
+
+## Sample the published life and health for spatial decisions and readback.
+func actor_vitals(id: StringName) -> ActorVitals:
+	var actor: CombatantState = _actors.get(id)
+	if actor == null:
+		return null
+	var result := ActorVitals.new()
+	result.realm = actor.realm
+	result.life = actor.life
+	result.hp = actor.hp.amount
+	result.maximum = actor.max_hp
+	return result
 
 
 ## Absolute HP changes at the closed run boundary. No hit or recovery is emitted.

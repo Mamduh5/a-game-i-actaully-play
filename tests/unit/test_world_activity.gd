@@ -74,6 +74,23 @@ class Room:
 			and delivery.finish())
 
 
+func test_world_health_samples_are_detached_and_refresh_after_cap_change() -> void:
+	var room := Room.new()
+	assert_true(room.enter())
+	var old := room.kernel.actor_vitals(Hero)
+	assert_null(room.kernel.actor_vitals(&"missing"))
+	assert_eq(old.realm, Realm)
+	assert_eq(old.life, 1)
+	assert_true(room.kernel.change_max_hp(Hero, old.life, Quantity.from_count(30)))
+	assert_eq(old.maximum.native_at_scale(0), 20)
+	old.hp = Quantity.from_count(1)
+	old.realm = &"elsewhere"
+	var observed: Array = room.world.snapshot()["actors"][Hero]
+	assert_eq(observed[0], Realm)
+	assert_eq(observed[2], "20")
+	assert_eq(observed[8], ["30", 0])
+
+
 func test_first_entry_to_idle_realm_matches_early_registration_during_remote_combat() -> void:
 	var reference: Array = []
 	for defer_registration: bool in [false, true]:

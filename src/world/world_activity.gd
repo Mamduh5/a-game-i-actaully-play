@@ -285,7 +285,7 @@ func _subjects() -> Dictionary[StringName, WorldEnemy.Subject]:
 	var ids := _enemies.keys()
 	ids.append_array(_players.keys())
 	for id: StringName in _sorted(ids):
-		var actor := _kernel.actor_snapshot(id)
+		var actor := _kernel.actor_vitals(id)
 		if actor == null or not _realms.has(actor.realm):
 			continue
 		var at := _realms[actor.realm].geometry().circle_center(id, 0)
@@ -296,8 +296,8 @@ func _subjects() -> Dictionary[StringName, WorldEnemy.Subject]:
 		subject.realm = actor.realm
 		subject.at = at
 		subject.life = actor.life
-		subject.hp = actor.hp.amount
-		subject.maximum = actor.max_hp
+		subject.hp = actor.hp
+		subject.maximum = actor.maximum
 		subject.faction = _enemies[id].faction() if _enemies.has(id) else WorldEnemy.PARTY
 		result[id] = subject
 	return result
