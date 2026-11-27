@@ -507,6 +507,8 @@ Resonance is hero-owned, separate from Architect Structural Resonance, Arcane Te
 
 **Temporal Echo under OWNER-T04/O14.** Each successful hostile primary weapon contact reserves one repetition centered on the struck shape before displacement, or on the bow projectile at contact. Use 25% of the committed base component with its original type, offense bonuses and penetration. Mitigate once against each enemy actually in the 12-unit footprint at delivery. Schedule 30 steps from the first whole tick at or after contact. Local Time Fracture advances the pending repetition by one additional step per tick of overlap. The timing and radius are adjustable in StarterCombatRules. Owner playtesting is pending. [C03 evidence](records/C03.md)
 
+**Owned Bleed under O13.** For each whole step the target's center stays in the field, advance both the caster's next pending Bleed tick and its expiry by one extra step if both deadlines are still in a later logical tick. Keep fractional phases, stack snapshots and the existing number of scheduled ticks. A legitimate new application can still refresh remaining lifetime under R01. [C03 evidence](records/C03.md)
+
 ### H05. The Gravity Weaver - unlockable
 <a id="catalog-h05"></a>
 
@@ -1053,6 +1055,8 @@ An invalid endpoint may be replaced by a nearby eligible enemy or valid stationa
 | 3 - Elastic Conduit | Increase maximum link length and width within authored bounds. |
 | 4 | Further compatible scaling. |
 | 5 - Resonant Current | Consecutive successful contact intervals against the same enemy increase link damage to that enemy, capped; losing continuous contact resets its amplification. |
+
+**C03 provisional tuning under OWNER-T04 (§9).** A personal tether lasts 90 ticks, pulses every 15 and can start again after 120. Search within 240 units for the first endpoint. The second can be within 100 units of the first, increasing to 150 at rank 3. Full width increases from four to twelve. A lone enemy can link to a stationary anchor 32 units away. Allow one replacement during the original lifetime. Base magical damage is eight, rising to twelve at rank 2 and sixteen at rank 4. Resonant Current adds 25% per consecutive successful interval for that target life, up to twice base. A missed interval starts its next contact at base. Adjust the values in ArcaneTether and the per-target calculation in CombatKernel after owner playtesting. [C03 evidence](records/C03.md)
 
 <a id="evolution-e14a"></a>
 **E14A - Triune Circuit. Recipe: Arcane Tether 5 + Spatial Reach.** Three endpoints form pairwise links; stationary anchors fill missing enemies. The enclosed interior does not inherently damage. Links share applicable per-target intervals, avoiding damage multiplied merely by multiple overlapping links. All original reconnection/lifetime restrictions remain.
