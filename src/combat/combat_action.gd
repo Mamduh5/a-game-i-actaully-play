@@ -120,6 +120,9 @@ var lightning_targets: int
 var lightning_damage: Quantity
 var storm_relay: bool
 var rupture_per_stack: int
+var echo_delay: int
+var echo_radius: float
+var echo_targets: int
 var wake_targets: int
 var wake_radius: float
 var wake_period: int
@@ -149,6 +152,8 @@ func is_valid() -> bool:
 			or (lightning_damage != null and lightning_damage.sign_value <= 0)
 			or (storm_relay and lightning_damage == null)
 			or rupture_per_stack < 0
+			or echo_delay < 0 or echo_targets < 0 or not is_finite(echo_radius) or echo_radius < 0.0
+			or (echo_delay > 0) != (echo_targets > 0) or (echo_delay > 0) != (echo_radius > 0.0)
 			or wake_targets < 0 or (wake_targets > 0 and (not is_finite(wake_radius) or wake_radius <= 0.0
 				or wake_period <= 0 or wake_duration < wake_period or wake_damage <= 0))
 			or (bleed != null and not bleed.is_valid())
@@ -197,6 +202,9 @@ func copy() -> CombatAction:
 	result.lightning_damage = lightning_damage
 	result.storm_relay = storm_relay
 	result.rupture_per_stack = rupture_per_stack
+	result.echo_delay = echo_delay
+	result.echo_radius = echo_radius
+	result.echo_targets = echo_targets
 	result.wake_targets = wake_targets
 	result.wake_radius = wake_radius
 	result.wake_period = wake_period

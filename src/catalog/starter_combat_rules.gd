@@ -3,11 +3,14 @@ extends Resource
 
 const CHRONOMANCER := &"H04"
 const TIME_FRACTURE := &"H04.time_fracture"
+const TEMPORAL_ECHO := &"H04.temporal_echo"
 
 @export var fracture_reach: float = 180.0
 @export var fracture_radius: float = 48.0
 @export var fracture_duration: int = 90
 @export var fracture_cooldown: int = 240
+@export var echo_delay: int = 30
+@export var echo_radius: float = 12.0
 ## Stable C01 tuning and source IDs. Running combatants keep detached values.
 
 const UNDYING := &"H01"
@@ -50,6 +53,7 @@ func is_valid_for(catalog: DefinitionCatalog) -> bool:
 			or not is_finite(fracture_reach) or fracture_reach <= 0.0
 			or not is_finite(fracture_radius) or fracture_radius <= 0.0
 			or fracture_duration <= 0 or fracture_cooldown < fracture_duration
+			or echo_delay <= 0 or not is_finite(echo_radius) or echo_radius <= 0.0
 			or not is_finite(harmonic_reach) or harmonic_reach <= 0.0 or harmonic_damage <= 0 or harmonic_cooldown <= 0
 			or not is_finite(force_distance) or force_distance <= 0.0
 			or not is_finite(lightning_reach) or lightning_reach <= 0.0 or lightning_damage <= 0

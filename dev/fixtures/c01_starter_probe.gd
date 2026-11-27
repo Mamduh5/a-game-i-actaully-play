@@ -221,7 +221,9 @@ class Rules extends RunAuthority:
 			return false
 		match scenario:
 			"fracture":
-				return (launches == 1 and manual == 1 and trace == [[22, "W03", "arrival", false]]
+				return (launches == 1 and manual == 1 and trace == [[22, "W03", "arrival", false],
+					[37, "H04.temporal_echo", "arrival", false]]
+					and kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0) == 70
 					and kernel.actor_snapshot(&"aim").hp.amount.native_at_scale(0) == 100)
 			"familiar":
 				var dart_hits := 0

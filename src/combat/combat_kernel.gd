@@ -112,6 +112,7 @@ class Commitment:
 	var payment_pending: bool
 
 class Impact:
+	var contact_position: RealmSweep.Point
 	var pre_parent_bleed: CombatBleedLedger.Prestate
 	var arc_start: RealmSweep.Point
 	var arc_end: RealmSweep.Point
@@ -156,6 +157,7 @@ class ReactionClaim:
 	var shape: int
 
 class Group:
+	var echoes: Array[Echo] = []
 	var wakes: Array[Wake] = []
 	var bleeds: Dictionary[StringName, CombatBleedLedger] = {}
 	var root: CombatRootQueue.Wave
@@ -168,6 +170,16 @@ class Group:
 	var revisions: Dictionary[StringName, int] = {}
 	var activation_outcomes: Dictionary[String, ActivationOutcome] = {}
 	var receipt: WaveResult
+
+class Echo:
+	var realm: StringName
+	var center: RealmSweep.Point
+	var action: CombatAction
+	var origin: CombatOrigin
+	var radius: float
+	var targets: int
+	var due: CombatInstant
+	var last_advanced: int
 
 class Wake:
 	var realm: StringName
@@ -188,6 +200,7 @@ class Wake:
 		return result
 
 var _wakes: Array[Wake] = []
+var _echoes: Array[Echo] = []
 var _actors: Dictionary[StringName, CombatantState] = {}
 var _bleeds: Dictionary[StringName, CombatBleedLedger] = {}
 var _actions: Dictionary[String, Commitment] = {}
@@ -468,7 +481,7 @@ func finish_delivery(key: String) -> bool:
 
 
 func admit_contact(key: String, part: int, realm: StringName, start_tick: int, contact: RealmGeometry.Contact,
-		target_life: int, hostile: bool) -> CombatRootQueue.Result:
+		target_life: int, hostile: bool, position: RealmSweep.Point = null) -> CombatRootQueue.Result:
 	var held: Commitment = _actions.get(key)
 	if (not _accepting() or held == null or part <= 0 or held.realm != realm
 			or contact == null or contact.shape < 0):
@@ -489,6 +502,7 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 			or due.order_against(held.action.origin.committed_at) != RealmCircleTime.Order.SAME):
 		return CombatRootQueue.Result.INVALID
 	var impact := Impact.new()
+	impact.contact_position = PlayerControlState.copy_point(position) if position != null else null
 	impact.action = held.action
 	impact.origin = held.action.origin.copy()
 	impact.origin.delivery_part = part
@@ -508,7 +522,7 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 
 
 func pending_count() -> int:
-	return _queue.pending_count() + _bleeds.size() + _wakes.size()
+	return _queue.pending_count() + _bleeds.size() + _wakes.size() + _echoes.size()
 
 
 ## The fixed-step owner can drain older sub-tick impacts before it admits
@@ -522,9 +536,11 @@ func next_due() -> CombatInstant:
 
 func _next_wave() -> CombatRootQueue.Wave:
 	var roots := _queue.earliest_wave()
-	if (_bleeds.is_empty() and _wakes.is_empty()) or (roots == null and _queue.pending_count() > 0):
+	if (_bleeds.is_empty() and _wakes.is_empty() and _echoes.is_empty()) or (roots == null and _queue.pending_count() > 0):
 		return roots
 	var times: Array[CombatInstant] = []
+	for echo: Echo in _echoes:
+		times.append(echo.due)
 	if roots != null:
 		times.append(roots.due)
 	for ledger: CombatBleedLedger in _bleeds.values():
@@ -617,6 +633,7 @@ func _open_group(through: CombatInstant) -> WaveResult:
 		_group.bleeds[id] = _bleeds[id].copy()
 	for wake: Wake in _wakes:
 		_group.wakes.append(wake.copy())
+	_group.echoes = _echoes.duplicate()
 	if not _expire_barriers(_group, false):
 		return _interrupt(&"barrier_time")
 	for realm: StringName in _geometry:
@@ -650,6 +667,8 @@ func _open_group(through: CombatInstant) -> WaveResult:
 		return _interrupt(&"bleed_cadence")
 	if not _advance_wakes(_group):
 		return _interrupt(&"wake_geometry_or_cadence")
+	if not _deliver_echoes(_group):
+		return _interrupt(&"echo_geometry")
 	return null
 
 
@@ -729,6 +748,85 @@ func _advance_wakes(group: Group) -> bool:
 			return false
 		if wake.cadence.end_reason == CombatDeliverySchedule.End.NATURAL:
 			group.wakes.remove_at(index)
+	return true
+
+
+## One extra logical step per tick of overlap. A retry cannot move the same
+## pending repetition twice, and reaching the current boundary fires it there.
+func compress_echoes(owner: StringName, realm: StringName, tick: int, center: RealmSweep.Point, radius: float) -> bool:
+	if not _accepting() or center == null or not is_finite(radius) or radius <= 0.0:
+		return false
+	for echo: Echo in _echoes:
+		if echo.origin.owner != owner or echo.realm != realm or echo.last_advanced >= tick or echo.due.tick <= tick:
+			continue
+		if (echo.center.x - center.x) ** 2 + (echo.center.y - center.y) ** 2 <= radius ** 2:
+			echo.due = CombatInstant.at_tick(echo.due.tick - 1)
+			echo.last_advanced = tick
+	return true
+
+
+func _schedule_echo(group: Group, posting: Posting) -> bool:
+	var parent := posting.impact.action
+	var hit := posting.hit
+	if parent.echo_delay == 0 or not hit.hostile:
+		return true
+	var realm := group.actors[hit.target].realm
+	var geometry: RealmGeometry = group.geometry.get(realm, _geometry.get(realm))
+	var center := posting.impact.contact_position
+	if center == null and geometry != null:
+		center = geometry.circle_center(hit.target, hit.shape)
+	var at := group.receipt.due
+	var start := at.tick + int(at.order_against(CombatInstant.at_tick(at.tick)) == RealmCircleTime.Order.AFTER)
+	if center == null or start > RunAuthority.MAX_TICK - parent.echo_delay:
+		return false
+	var echo := Echo.new()
+	echo.realm = realm
+	echo.center = PlayerControlState.copy_point(center)
+	echo.origin = hit.origin.copy()
+	echo.targets = parent.echo_targets
+	echo.radius = parent.echo_radius
+	echo.due = CombatInstant.at_tick(start + parent.echo_delay)
+	echo.last_advanced = start
+	echo.action = CombatAction.new()
+	echo.action.source = hit.source
+	echo.action.source_life = hit.source_life
+	echo.action.family = StarterCombatRules.TEMPORAL_ECHO
+	for original: CombatAction.Component in parent.components:
+		var part := original.copy()
+		part.base = original.base.multiply(Quantity.from_count(25, 2))
+		if part.base == null:
+			return false
+		echo.action.components.append(part)
+	group.echoes.append(echo)
+	return true
+
+
+func _deliver_echoes(group: Group) -> bool:
+	for index: int in range(group.echoes.size() - 1, -1, -1):
+		var echo := group.echoes[index]
+		if echo.due.order_against(group.receipt.due) != RealmCircleTime.Order.SAME:
+			continue
+		var contacts := _geometry[echo.realm].certify_circle_snapshot(echo.realm, echo.center, echo.radius, echo.targets)
+		if contacts == null or not contacts.unresolved.is_empty():
+			return false
+		var seen: Dictionary[StringName, bool] = {}
+		for contact: RealmGeometry.Contact in contacts.contacts:
+			var target: CombatantState = group.actors.get(contact.entity)
+			if target == null or not target.is_alive() or target.realm != echo.realm or seen.has(target.id):
+				continue
+			seen[target.id] = true
+			var impact := Impact.new()
+			impact.action = echo.action
+			impact.origin = echo.origin
+			impact.root_occurrence = echo.origin.occurrence_key()
+			impact.reaction = echo.action.family
+			impact.target = target.id
+			impact.target_life = target.life
+			impact.target_visit = target.realm_visit
+			impact.shape = contact.shape
+			impact.hostile = true
+			group.pending.append(impact)
+		group.echoes.remove_at(index)
 	return true
 
 
@@ -828,6 +926,8 @@ func _resolve_wave(group: Group) -> StringName:
 			group.bleeds.erase(hit.target)
 	_apply_statuses(group, postings)
 	for posting: Posting in postings:
+		if not _schedule_echo(group, posting):
+			return &"echo_schedule"
 		var application := posting.impact.action.bleed
 		var hit := posting.hit
 		if application == null or not hit.hostile or not group.actors[hit.target].is_alive():
@@ -868,6 +968,7 @@ func _publish_group() -> WaveResult:
 	_actors = group.actors
 	_bleeds = group.bleeds
 	_wakes = group.wakes
+	_echoes = group.echoes
 	for origin: CombatOrigin in group.root.origins:
 		_impacts.erase(origin.occurrence_key())
 	for key: String in group.activation_outcomes:
@@ -889,6 +990,7 @@ func _publish_group() -> WaveResult:
 func _retire_combat_work() -> void:
 	_bleeds.clear()
 	_wakes.clear()
+	_echoes.clear()
 	_queue = CombatRootQueue.new()
 	_impacts.clear()
 	_actions.clear()
@@ -1315,7 +1417,8 @@ static func _reaction_order(first: ReactionClaim, second: ReactionClaim) -> Real
 static func _reaction_matches(rule: CombatFollowUp, posting: Posting, alive: bool, defending: bool) -> bool:
 	if not defending:
 		match rule.cause:
-			CombatFollowUp.Cause.PAID_HIT: return alive and posting.hit.family not in [&"R01.bleed", &"RP02.blood_wake"]
+			CombatFollowUp.Cause.PAID_HIT: return alive and posting.hit.family not in [
+				&"R01.bleed", &"RP02.blood_wake", StarterCombatRules.TEMPORAL_ECHO]
 			CombatFollowUp.Cause.KILL: return posting.hit.eliminated
 			CombatFollowUp.Cause.SOLID_IMPACT:
 				return posting.hit.displacement != null and not posting.hit.displacement.stopped_by.is_empty()

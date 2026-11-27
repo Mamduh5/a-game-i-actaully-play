@@ -114,7 +114,7 @@ func plan_sweep(geometry: RealmGeometry, start: RealmSweep.Point, finish: RealmS
 
 
 func admit(start_tick: int, contact: RealmGeometry.Contact, target_life: int, hostile: bool,
-		phase: int = 0) -> Result:
+		phase: int = 0, position: RealmSweep.Point = null) -> Result:
 	if _commitment.is_empty():
 		return Result.CLOSED
 	if contact == null or contact.entity.is_empty() or target_life <= 0 or phase < 0 or _next_part == Quantity.INT_MAX:
@@ -137,7 +137,7 @@ func admit(start_tick: int, contact: RealmGeometry.Contact, target_life: int, ho
 			match ready.order_against(due):
 				RealmCircleTime.Order.AFTER: return Result.CADENCE
 				RealmCircleTime.Order.UNRESOLVED: return Result.UNRESOLVED
-	match _kernel.admit_contact(_commitment, _next_part, _realm, start_tick, contact, target_life, hostile):
+	match _kernel.admit_contact(_commitment, _next_part, _realm, start_tick, contact, target_life, hostile, position):
 		CombatRootQueue.Result.ACCEPTED:
 			_next_part += 1
 			_last_contact[key] = due

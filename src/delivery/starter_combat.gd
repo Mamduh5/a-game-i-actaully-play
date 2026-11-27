@@ -98,6 +98,10 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		else CombatAction.Damage.PHYSICAL)
 	action.components[0].categories = bonuses
 	action.activation_costs = costs
+	if _hero == StarterCombatRules.CHRONOMANCER:
+		action.echo_delay = _rules.echo_delay
+		action.echo_radius = _rules.echo_radius
+		action.echo_targets = _hostiles
 	if _bleed_equipped:
 		action.bleed = _rules.bleed_application(bonuses)
 	if _lightning_equipped:
@@ -286,6 +290,8 @@ func advance(tick: int) -> bool:
 		return false
 	if _fracture != null and _fracture.ends <= tick:
 		_fracture = null
+	if _fracture != null and not _kernel.compress_echoes(_actor, _geometry.realm_id, tick, _fracture.position, _fracture.reach):
+		return false
 	for index: int in range(_sigils.size() - 1, -1, -1):
 		var sigil := _sigils[index]
 		if (_fracture != null and tick > sigil.placed and sigil.cue.impact > tick
@@ -315,7 +321,8 @@ func advance(tick: int) -> bool:
 			var actor := _living_target(contact.entity)
 			if actor == null:
 				continue
-			if arrow.delivery.admit(tick, contact, actor.life, (contact.category & _hostiles) != 0) != CombatDelivery.Result.ADMITTED:
+			var at := _offset(arrow.position, arrow.heading, step * contact.time)
+			if arrow.delivery.admit(tick, contact, actor.life, (contact.category & _hostiles) != 0, 0, at) != CombatDelivery.Result.ADMITTED:
 				return false
 			hit = true
 			break

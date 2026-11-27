@@ -158,10 +158,37 @@ func test_fracture_compresses_only_the_owners_sigil_inside_the_selected_field() 
 			assert_true(arena.combat.advance(tick))
 			assert_true(partner.advance(tick))
 			for hit: CombatKernel.Hit in arena.settle(tick):
+				if hit.family != &"W03":
+					continue
 				assert_false(impacts.has(hit.origin.owner))
 				impacts[hit.origin.owner] = tick
 		assert_eq(impacts.get(HERO, -1), 13 if inside else 25)
 		assert_eq(impacts.get(&"partner", -1), 25)
+
+
+func test_temporal_echo_rechecks_the_impact_area_after_owner_death_and_mitigates_once() -> void:
+	for enters: bool in [false, true]:
+		var arena := Arena.new(&"W01", &"H04", false, &"", &"", {&"H04": true})
+		assert_true(arena.add(&"aim", 30, 0, 100))
+		assert_true(arena.add(&"arrival", 150, 0, 100, HOSTILE, false))
+		var defense := CombatantState.Defense.new()
+		defense.vulnerability = Quantity.from_count(2)
+		assert_true(arena.kernel.set_defense(&"aim", 1, CombatAction.Damage.PHYSICAL, defense))
+		assert_eq(arena.attack(1), Committed)
+		arena.settle(1)
+		assert_eq(arena.hp(&"aim").native_at_scale(0), 60)
+		assert_true(arena.move(&"aim", 80, 0))
+		assert_true(arena.swing_from(&"aim", HERO, 250, 2))
+		arena.settle(2)
+		if enters:
+			assert_true(arena.move(&"arrival", 34, 0))
+		var hits := arena.settle(31)
+		assert_eq(hits.size(), 1 if enters else 0)
+		if hits.size() == 1:
+			assert_eq(hits[0].family, StarterCombatRules.TEMPORAL_ECHO)
+			assert_eq(hits[0].origin.owner, HERO)
+		assert_eq(arena.hp(&"arrival").native_at_scale(0), 95 if enters else 100)
+		assert_null(arena.kernel.next_due())
 
 
 func test_zero_charge_harmonic_burst_links_one_reached_hostile_and_commits_an_empty_cast() -> void:
