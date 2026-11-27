@@ -8,6 +8,7 @@ enum Admission {
 	WRONG_TICK, STALE_SEQUENCE, UNSUPPORTED_ACTION, DUPLICATE, CONFLICT, QUEUE_FULL,
 }
 enum Exit { ACTIVE, QUIT, SUSPEND }
+enum GatewayResult { REFUSED, SETTLEMENT_WAIT, ENTERED }
 
 const CHECKPOINT_VERSION := 1
 const MAX_OPEN_INTENTS_PER_SEAT := 64
@@ -22,7 +23,14 @@ class SeatInputs:
 	var reliable := InputStream.new()
 	var overflowed := false
 
+class PendingGateway:
+	var party: RunParty
+	var progression: PartyProgression
+	var transfer: CombatKernel.ArenaTransfer
+	var entrant: StringName
+
 var _identity: Dictionary = {}
+var _epoch: int
 var _realms: Dictionary[StringName, StringName] = {}
 var _inputs: Dictionary[StringName, SeatInputs] = {}
 var _random: RunRandom
@@ -32,6 +40,7 @@ var _ordinary_currency: Array[OrdinaryCurrency] = []
 var _exit := Exit.ACTIVE
 var _exit_settled := false
 var _resolving := false
+var _gateway: PendingGateway
 
 
 func start(setup: RunSetup, local_authority_id: StringName) -> bool:
@@ -46,11 +55,11 @@ func next_tick() -> int:
 
 
 func belongs_to(run: StringName, epoch: int) -> bool:
-	return not _identity.is_empty() and _identity["run"] == run and _identity["epoch"] == epoch
+	return not _identity.is_empty() and _identity["run"] == run and _epoch == epoch
 
 
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
-	if (_identity.is_empty() or _exit != Exit.ACTIVE or earnings == null
+	if (_identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null or earnings == null
 			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])):
 		return false
 	for existing: OrdinaryCurrency in _ordinary_currency:
@@ -62,7 +71,7 @@ func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
 
 ## Also used by the group owner before opening an earning boundary within a tick.
 func can_open_earning_group() -> bool:
-	if _exit != Exit.ACTIVE:
+	if _exit != Exit.ACTIVE or _gateway != null:
 		return false
 	var permitted := true
 	for earnings: OrdinaryCurrency in _ordinary_currency:
@@ -93,7 +102,7 @@ func settle_orderly_quit() -> bool:
 ## Supply the closed authority component after all ordinary earnings settle.
 ## WP24 owns the full recovery image and the durable suspension acknowledgement.
 func prepare_orderly_suspension() -> Dictionary:
-	if _identity.get("role") != RunSetup.Role.HOST or not _settle_exit(Exit.SUSPEND):
+	if _gateway != null or _identity.get("role") != RunSetup.Role.HOST or not _settle_exit(Exit.SUSPEND):
 		return {}
 	return _closed_checkpoint()
 
@@ -117,24 +126,77 @@ func _settle_exit(requested: Exit) -> bool:
 ## already queued for this seat's old realm and keep the shared clock.
 func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, destination: RealmGeometry,
 		at: RealmSweep.Point) -> bool:
-	if (_exit != Exit.ACTIVE or intent == null or party == null or source == null or destination == null
-			or intent.action != PlayerCommand.INTERACT or intent.tick != _closed_tick
-			or not belongs_to(intent.run_id, intent.epoch) or not party.belongs_to(intent.run_id, intent.epoch)
-			or source.realm_id != intent.realm_id or _realms.get(intent.seat_id) != source.realm_id
-			or intent.receipt() not in _observation["accepted"]):
+	if not _accepted_interaction(intent, party) or source == null or destination == null or source.realm_id != intent.realm_id:
 		return false
 	var seat := intent.seat_id
 	if not party.transfer_living(seat, _closed_tick, source, destination, at):
 		return false
+	_retire_scope(seat)
+	_realms[seat] = destination.realm_id
+	_observation["outcomes"].append({"seat": seat, "realm_entered": destination.realm_id})
+	return true
+
+
+## The gateway owner has already verified the handle against settled geometry.
+func request_gateway(intent: RunIntent, party: RunParty, arena: RealmGeometry,
+		arrivals: Dictionary[StringName, RealmSweep.Point], progression: PartyProgression) -> GatewayResult:
+	if (not _accepted_interaction(intent, party) or _epoch != _identity["epoch"] or _epoch == Quantity.INT_MAX
+			or _closed_tick < RunParty.COLLAPSE_TICK or intent.realm_id != WorldTopology.OVERWORLD
+			or not _progression_can_cross(progression)):
+		return GatewayResult.REFUSED
+	var transfer := party.stage_gateway(intent.seat_id, _closed_tick, arena, arrivals)
+	if transfer == null:
+		return GatewayResult.REFUSED
+	_gateway = PendingGateway.new()
+	_gateway.party = party
+	_gateway.progression = progression
+	_gateway.transfer = transfer
+	_gateway.entrant = intent.seat_id
+	return retry_gateway()
+
+
+## A settled prefix never changes the old tick or clears its commands.
+## Only the completed transition publishes the new epoch and all seat scopes.
+func retry_gateway() -> GatewayResult:
+	if _gateway == null or _exit != Exit.ACTIVE or _resolving:
+		return GatewayResult.REFUSED
+	_resolving = true
+	var settled := flush_ordinary_currency()
+	_resolving = false
+	if not settled:
+		return GatewayResult.SETTLEMENT_WAIT
+	var attempt := _gateway
+	_gateway = null
+	if not _progression_can_cross(attempt.progression) or not attempt.party.enter_gateway(attempt.transfer, _epoch + 1):
+		return GatewayResult.REFUSED
+	attempt.progression.enter_gateway(_closed_tick)
+	_epoch += 1
+	for seat: StringName in _realms:
+		_retire_scope(seat)
+		_realms[seat] = RunSetup.FINAL_REALM
+	_observation["world_epoch"] = _epoch
+	_observation["outcomes"].append({"seat": attempt.entrant, "gateway_entered": RunSetup.FINAL_REALM})
+	return GatewayResult.ENTERED
+
+
+func _progression_can_cross(progression: PartyProgression) -> bool:
+	return progression != null and progression.can_cross_gateway(_identity, _epoch, _closed_tick)
+
+
+func _accepted_interaction(intent: RunIntent, party: RunParty) -> bool:
+	return (_exit == Exit.ACTIVE and _gateway == null and not _resolving and intent != null and party != null
+		and intent.action == PlayerCommand.INTERACT and intent.tick == _closed_tick
+		and belongs_to(intent.run_id, intent.epoch) and party.belongs_to(intent.run_id, intent.epoch)
+		and _realms.get(intent.seat_id) == intent.realm_id and intent.receipt() in _observation["accepted"])
+
+
+func _retire_scope(seat: StringName) -> void:
 	var inputs := _inputs[seat]
 	for sequence: int in inputs.primary.pending:
 		inputs.primary.through = maxi(inputs.primary.through, sequence)
 	inputs.primary.pending.clear()
 	inputs.reliable = InputStream.new()
 	inputs.overflowed = false
-	_realms[seat] = destination.realm_id
-	_observation["outcomes"].append({"seat": seat, "realm_entered": destination.realm_id})
-	return true
 
 
 ## The trusted adapter retires the reliable stream when its binding ends.
@@ -146,11 +208,11 @@ func retire_reliable_interactions(run: StringName, epoch: int, seat: StringName,
 
 ## The binding is supplied by the adapter. The intent alone cannot nominate its sender.
 func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
-	if _identity.is_empty() or _exit != Exit.ACTIVE or intent == null or _closed_tick >= MAX_TICK:
+	if _identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null or intent == null or _closed_tick >= MAX_TICK:
 		return Admission.INACTIVE
 	if intent.run_id != _identity["run"]:
 		return Admission.WRONG_RUN
-	if intent.epoch != _identity["epoch"]:
+	if intent.epoch != _epoch:
 		return Admission.WRONG_EPOCH
 	if bound_seat != intent.seat_id or not _realms.has(bound_seat):
 		return Admission.WRONG_SEAT
@@ -232,7 +294,7 @@ func closed_result() -> Dictionary:
 
 ## The last closed admission/RNG frontier. Pending intents are never checkpointed.
 func checkpoint() -> Dictionary:
-	if _identity.is_empty() or _exit != Exit.ACTIVE:
+	if _identity.is_empty() or _exit != Exit.ACTIVE or _gateway != null:
 		return {}
 	return _closed_checkpoint()
 
@@ -251,6 +313,8 @@ func _closed_checkpoint() -> Dictionary:
 	}
 	if _realms != _identity["initial_realms"]:
 		saved["current_realms"] = _realms.duplicate()
+	if _epoch != _identity["epoch"]:
+		saved["world_epoch"] = _epoch
 	return saved
 
 
@@ -267,6 +331,9 @@ func restore(setup: RunSetup, local_authority_id: StringName, saved: Dictionary)
 		return false
 	var sequences: Dictionary = saved["sequences"]
 	var realms: Variant = saved.get("current_realms", setup.initial_realms)
+	var epoch: Variant = saved.get("world_epoch", setup.epoch)
+	if not epoch is int or epoch < setup.epoch or epoch - setup.epoch > 1:
+		return false
 	if sequences.size() != setup.initial_realms.size():
 		return false
 	if (not realms is Dictionary or realms.size() != setup.initial_realms.size()
@@ -278,18 +345,25 @@ func restore(setup: RunSetup, local_authority_id: StringName, saved: Dictionary)
 		if (not sequence is int or sequence < 0 or (tick == 0 and sequence != 0)
 				or not realm is StringName or realm.is_empty()):
 			return false
+		if epoch != setup.epoch and (tick < RunParty.COLLAPSE_TICK or realm != RunSetup.FINAL_REALM):
+			return false
+		if epoch == setup.epoch and realm == RunSetup.FINAL_REALM and setup.initial_realms[seat] != realm:
+			return false
 	var random := RunRandom.new(setup.seed)
 	if not saved.get("random") is Dictionary or not random.restore(saved["random"]):
 		return false
 	if tick == 0 and not saved["random"].is_empty():
 		return false
 	_install(setup, random, tick, sequences)
+	_epoch = epoch
 	_realms.assign(realms)
+	_publish([], [], [], [])
 	return true
 
 
 func _install(setup: RunSetup, random: RunRandom, tick: int, sequences: Dictionary) -> void:
 	_identity = setup.identity()
+	_epoch = setup.epoch
 	_realms.assign(_identity["initial_realms"])
 	_random = random
 	_closed_tick = tick
@@ -313,6 +387,8 @@ func _publish(
 		"overflowed": overflowed,
 		"outcomes": outcomes.duplicate(true),
 	}
+	if _epoch != _identity["epoch"]:
+		_observation["world_epoch"] = _epoch
 
 
 ## Rules supply supported semantic actions and resolve a whole canonical batch.

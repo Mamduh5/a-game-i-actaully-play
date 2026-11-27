@@ -43,7 +43,7 @@ class Route:
 	func _init(realm: StringName) -> void:
 		inner = WorldExploration.create(WorldTopology.generate_optional(Seed, realm), [Host, Guest])
 
-	func begin() -> bool:
+	func begin(catalog: StringName = &"starter") -> bool:
 		setup.run_id = &"passage-test"
 		setup.authority_id = Host
 		setup.initial_realms = {Host: Source, Guest: Source}
@@ -51,7 +51,7 @@ class Route:
 		setup.seed = Seed
 		setup.role = RunSetup.Role.HOST
 		setup.rules_revision = &"V42.6/R1"
-		setup.catalog_revision = &"starter"
+		setup.catalog_revision = catalog
 		setup.challenge_id = &"normal"
 		var realms: Dictionary[StringName, RealmGeometry] = {
 			Source: outer.geometry(), inner.geometry().realm_id: inner.geometry(),

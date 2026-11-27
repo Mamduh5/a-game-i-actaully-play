@@ -14,6 +14,25 @@ class ActorVitals:
 	var hp: Quantity
 	var maximum: Quantity
 
+class ArenaArrival:
+	var actor: StringName
+	var life: int
+	var alive: bool
+	var source: RealmGeometry
+	var at: RealmSweep.Point
+
+class ArenaTransfer:
+	var _arena: RealmGeometry
+	var _arena_draft: RealmGeometry
+	var _blockers: int
+	var _boundary: CombatInstant
+	var _revisions: Dictionary[RealmGeometry, int] = {}
+	var _departures: Dictionary[RealmGeometry, RealmGeometry] = {}
+	var _players: Dictionary[StringName, CombatantState] = {}
+
+	func destination() -> RealmGeometry:
+		return _arena
+
 class LayerReceipt:
 	var id: StringName
 	var generation: int
@@ -246,6 +265,8 @@ var _fault_wave: int
 var _group: Group
 var _geometry: Dictionary[StringName, RealmGeometry] = {}
 var _blocker_masks: Dictionary[StringName, int] = {}
+var _arena: RealmGeometry
+var _retired_actors: Dictionary[StringName, bool] = {}
 var _creator: StringName
 var _eligible: Array[StringName] = []
 var _terminal: Terminal
@@ -254,7 +275,8 @@ var _magical_mitigation := Quantity.from_count(100)
 
 
 func add_actor(actor: CombatantState) -> bool:
-	if not _accepting() or actor == null or not actor.is_valid() or _actors.has(actor.id):
+	if (not _accepting() or actor == null or not actor.is_valid() or _actors.has(actor.id)
+			or (_arena != null and (actor.realm != _arena.realm_id or _retired_actors.has(actor.id)))):
 		return false
 	_actors[actor.id] = actor.copy()
 	return true
@@ -363,6 +385,96 @@ func transfer_player(id: StringName, life: int, from: RealmGeometry, destination
 	return true
 
 
+## Draft all arrivals before changing either side of the gateway.
+func stage_arena(now: CombatInstant, arena: RealmGeometry, blockers: int,
+		arrivals: Array[ArenaArrival]) -> ArenaTransfer:
+	if (not _accepting() or _arena != null or _closed == null or now == null
+			or _closed.order_against(now) != RealmCircleTime.Order.SAME
+			or arena == null or arena.realm_id != RunSetup.FINAL_REALM or _geometry.has(arena.realm_id)
+			or blockers <= 0 or arrivals.is_empty() or arrivals.size() > RunSetup.MAX_SEATS):
+		return null
+	var transfer := ArenaTransfer.new()
+	transfer._arena = arena
+	transfer._arena_draft = arena.fork()
+	transfer._revisions[arena] = arena.revision
+	transfer._blockers = blockers
+	transfer._boundary = now
+	for move: ArenaArrival in arrivals:
+		if move == null or move.source == null or move.at == null or transfer._players.has(move.actor):
+			return null
+		var actor: CombatantState = _actors.get(move.actor)
+		var source := move.source
+		if (not _is_player_life(actor, move.life) or actor.is_alive() != move.alive
+				or actor.realm_visit == Quantity.INT_MAX or actor.realm != source.realm_id
+				or _geometry.get(source.realm_id) != source):
+			return null
+		if not transfer._departures.has(source):
+			transfer._revisions[source] = source.revision
+			transfer._departures[source] = source.fork()
+		var departure := transfer._departures[source]
+		if not _draft_arena_body(move.actor, source, departure, transfer._arena_draft, move.at, blockers):
+			return null
+		transfer._players[move.actor] = actor
+	return transfer
+
+
+static func _draft_arena_body(id: StringName, source: RealmGeometry, departure: RealmGeometry,
+		arrival: RealmGeometry, at: RealmSweep.Point, blockers: int) -> bool:
+	var anchor := source.circle_center(id, 0)
+	if anchor == null:
+		return false
+	for slot: int in source.circle_slots(id):
+		var start := source.circle_center(id, slot)
+		var finish := RealmSweep.Point.new(at.x + (start.x - anchor.x), at.y + (start.y - anchor.y))
+		var radius := source.circle_radius(id, slot)
+		var clear := arrival.certify_circle_snapshot(arrival.realm_id, finish, radius, blockers, id)
+		if (clear == null or not clear.contacts.is_empty() or not clear.unresolved.is_empty()
+				or not departure.remove_mutable(id, slot)
+				or not arrival.add_circle(id, slot, finish, radius, source.circle_category(id, slot))):
+			return false
+	return true
+
+
+## Retire old spatial work without resolving hits or expiry reactions.
+## Character-owned health, cooldowns and attached status clocks carry over.
+func enter_arena(transfer: ArenaTransfer, now: CombatInstant) -> bool:
+	if (transfer == null or now == null or not _accepting() or _arena != null or _closed == null
+			or transfer._boundary == null or transfer._players.is_empty()
+			or _closed.order_against(now) != RealmCircleTime.Order.SAME
+			or transfer._boundary.order_against(now) != RealmCircleTime.Order.SAME):
+		return false
+	for floor: RealmGeometry in transfer._revisions:
+		if floor.revision != transfer._revisions[floor]:
+			return false
+	for id: StringName in transfer._players:
+		if _actors.get(id) != transfer._players[id]:
+			return false
+	var carried: Dictionary[StringName, CombatBleedLedger] = {}
+	for id: StringName in transfer._players:
+		if _bleeds.has(id):
+			carried[id] = _bleeds[id]
+	for source: RealmGeometry in transfer._departures:
+		source.adopt(transfer._departures[source])
+	_arena = transfer._arena
+	_arena.adopt(transfer._arena_draft)
+	for id: StringName in _actors:
+		if not transfer._players.has(id):
+			_retired_actors[id] = true
+	_actors = transfer._players.duplicate()
+	for actor: CombatantState in _actors.values():
+		actor.realm = _arena.realm_id
+		actor.realm_visit += 1
+	_geometry = {_arena.realm_id: _arena}
+	_blocker_masks = {_arena.realm_id: transfer._blockers}
+	_retire_combat_work()
+	_bleeds = carried
+	return true
+
+
+func arena_started() -> bool:
+	return _arena != null
+
+
 static func _is_player_life(actor: CombatantState, life: int) -> bool:
 	return (actor != null and actor.life == life and actor.provenance == CombatOrigin.Provenance.SEAT
 		and actor.controller.is_empty())
@@ -423,7 +535,7 @@ func set_defense(id: StringName, life: int, kind: CombatAction.Damage, defense: 
 
 
 func attach_geometry(geometry: RealmGeometry, blocker_mask: int) -> bool:
-	if not _accepting() or geometry == null or geometry.realm_id.is_empty() or blocker_mask <= 0:
+	if not _accepting() or _arena != null or geometry == null or geometry.realm_id.is_empty() or blocker_mask <= 0:
 		return false
 	_geometry[geometry.realm_id] = geometry
 	_blocker_masks[geometry.realm_id] = blocker_mask

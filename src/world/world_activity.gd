@@ -56,7 +56,7 @@ func register_realm(exploration: WorldExploration) -> bool:
 
 
 func track_player(id: StringName) -> bool:
-	if _kernel == null or _enemies.has(id) or _players.has(id) or _frame != null:
+	if _kernel == null or _kernel.arena_started() or _enemies.has(id) or _players.has(id) or _frame != null:
 		return false
 	var actor := _kernel.actor_snapshot(id)
 	if actor == null or actor.provenance != CombatOrigin.Provenance.SEAT or not actor.controller.is_empty():
@@ -75,7 +75,7 @@ func introduce_enemy(id: StringName, realm: StringName, rules: WorldEnemy.Rules,
 ## An authorized resurrection names the specific closed corpse. Retain
 ## faction, stable spawn identity and any old paid delivery.
 func reanimate(id: StringName, life: int, fraction: Quantity, recovery_ticks: int) -> bool:
-	if (_frame != null or not _fault.is_empty() or _tick == 0 or not _enemies.has(id)
+	if (_kernel == null or _kernel.arena_started() or _frame != null or not _fault.is_empty() or _tick == 0 or not _enemies.has(id)
 			or _defeated_lives.get(id, 0) != life or recovery_ticks <= 0
 			or recovery_ticks > RunAuthority.MAX_TICK - _tick):
 		return false
@@ -86,7 +86,8 @@ func reanimate(id: StringName, life: int, fraction: Quantity, recovery_ticks: in
 
 
 func schedule_spawn(site: SpawnSite) -> bool:
-	if (site == null or site.id.is_empty() or _sites.has(site.id) or not _realms.has(site.realm)
+	if (_kernel == null or _kernel.arena_started() or site == null or site.id.is_empty()
+			or _sites.has(site.id) or not _realms.has(site.realm)
 			or site.first_tick <= _tick or site.first_tick > RunAuthority.MAX_TICK or site.period <= 0
 			or site.limit <= 0 or site.rules == null or not site.rules.is_valid() or site.positions.is_empty()
 			or _frame != null or not _fault.is_empty()):
@@ -112,7 +113,7 @@ func schedule_spawn(site: SpawnSite) -> bool:
 ## A caller retains its open input cursor across a storage wait. Resume with
 ## the same tick to avoid redoing decisions, releases and spawn opportunities.
 func advance(tick: int, authority: RunAuthority = null) -> Frame:
-	if (_kernel == null or not _fault.is_empty() or tick != _tick + 1 or tick > RunAuthority.MAX_TICK
+	if (_kernel == null or _kernel.arena_started() or not _fault.is_empty() or tick != _tick + 1 or tick > RunAuthority.MAX_TICK
 			or _terminal != CombatKernel.Terminal.ACTIVE
 			or (authority != null and not authority.can_open_earning_group())):
 		return null
@@ -208,7 +209,7 @@ func fault() -> StringName:
 
 ## Host evidence image. A peer must receive a realm-filtered projection.
 func snapshot() -> Dictionary:
-	if _frame != null or not _fault.is_empty():
+	if _kernel == null or _kernel.arena_started() or _frame != null or not _fault.is_empty():
 		return {}
 	var actors: Dictionary[StringName, Array] = {}
 	for subject: WorldEnemy.Subject in _subjects().values():
@@ -249,7 +250,7 @@ func _spawn_due(tick: int) -> void:
 
 
 func _spawn(id: StringName, realm: StringName, rules: WorldEnemy.Rules, at: RealmSweep.Point) -> bool:
-	if (_kernel == null or id.is_empty() or _kernel.actor_snapshot(id) != null or rules == null
+	if (_kernel == null or _kernel.arena_started() or id.is_empty() or _kernel.actor_snapshot(id) != null or rules == null
 			or not rules.is_valid() or not _realms.has(realm) or _realms[realm].module_at(at).is_empty()):
 		return false
 	var geometry := _realms[realm].geometry()

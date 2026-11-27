@@ -4,6 +4,7 @@ extends RefCounted
 ## before that tick's input and combat.
 
 const LOGICAL_HZ := 60
+const COLLAPSE_TICK := 25 * 60 * LOGICAL_HZ
 const GUEST_GRACE := 60 * LOGICAL_HZ
 const RESCUE_REACH := 32.0
 const RESCUE_PROGRESS := 120 * 4
@@ -114,6 +115,14 @@ func belongs_to(run: StringName, epoch: int) -> bool:
 	return run == _run and epoch > 0 and epoch == _epoch
 
 
+func has_realm(realm: StringName) -> bool:
+	return _realms.has(realm)
+
+
+func owns_geometry(geometry: RealmGeometry) -> bool:
+	return geometry != null and _realms.get(geometry.realm_id) == geometry
+
+
 func attach_currency_authority(authority: RunAuthority) -> bool:
 	if (_currency_authority != null or authority == null or _tick != 0
 			or _terminal != CombatKernel.Terminal.ACTIVE or not authority.belongs_to(_run, _epoch)):
@@ -170,6 +179,41 @@ func transfer_living(seat: StringName, tick: int, source: RealmGeometry, destina
 	member.realm = destination.realm_id
 	member.controls = PlayerControlState.new()
 	_stop_aiding(member, RescueInterruption.MOVED_AWAY)
+	return true
+
+
+func stage_gateway(seat: StringName, tick: int, arena: RealmGeometry,
+		arrivals: Dictionary[StringName, RealmSweep.Point]) -> CombatKernel.ArenaTransfer:
+	if tick != _tick or not can_control(seat) or arena == null or _realms.has(arena.realm_id):
+		return null
+	if arrivals.size() != _members.size():
+		return null
+	var moves: Array[CombatKernel.ArenaArrival] = []
+	for id: StringName in _members:
+		var member := _members[id]
+		var move := CombatKernel.ArenaArrival.new()
+		move.actor = member.actor
+		move.life = member.life
+		move.alive = member.body == null
+		move.source = _realms[member.realm]
+		move.at = arrivals.get(id)
+		moves.append(move)
+	return _kernel.stage_arena(CombatInstant.at_tick(tick), arena, _blockers, moves)
+
+
+func enter_gateway(transfer: CombatKernel.ArenaTransfer, epoch: int) -> bool:
+	if (epoch <= _epoch or epoch - _epoch != 1 or _terminal != CombatKernel.Terminal.ACTIVE
+			or not _kernel.enter_arena(transfer, CombatInstant.at_tick(_tick))):
+		return false
+	_epoch = epoch
+	var arena := transfer.destination()
+	_realms = {arena.realm_id: arena}
+	for member: Member in _members.values():
+		member.realm = arena.realm_id
+		member.controls = PlayerControlState.new()
+		_stop_aiding(member, RescueInterruption.MOVED_AWAY)
+		if member.body != null:
+			member.body.position = arena.circle_center(member.actor, 0)
 	return true
 
 

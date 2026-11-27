@@ -20,7 +20,7 @@ def passage_facts(path):
     raise RuntimeError(f"Missing passage receipt in {path.name}")
 
 
-def run_peers(exe, evidence, secrets, fingerprint):
+def run_peers(exe, evidence, secrets, fingerprint, gateway):
     host, guest = secrets / "host", secrets / "guest"
     port = ephemeral_port()
     offered, ready = host / "offered", host / "ready"
@@ -43,16 +43,22 @@ def run_peers(exe, evidence, secrets, fingerprint):
             stop(child)
     host_facts, guest_facts = map(passage_facts, (host_log, guest_log))
     host_session, guest_session = map(receipt, (host_log, guest_log))
+    if gateway:
+        expected_host = {"arena_movement_ack": 2, "body_wait_preserved": True, "gated_before_rebaseline": True,
+                         "generation": 1, "settled": 17, "stale_refused": True}
+        expected_guest = {"arena_epoch": 3, "arena_movement_ack": 2, "arrival_tick": 90000,
+                          "party": {"guest": "living", "host": "down"}, "visible": ["guest", "host"]}
+    else:
+        expected_host = {"crossed_tick": 1, "source_moved_one_unit": True, "stale_refused": True,
+                         "guest_realm": "silent_garden", "host_realm": "overworld", "movement_ack": 2}
+        expected_guest = {"arrival_realm": "silent_garden", "visible": ["guest"],
+                          "party": {"guest": "living", "host": "living"},
+                          "arrival_cell_seen": True, "movement_ack": 2}
     passed = (exits == [0, 0] and host_session["passed"] and guest_session["passed"]
               and host_session["admitted"] == 1 and host_session["departures"] == 1
               and host_session["lost"] == host_session["rejected"] == 0
               and all(item["host_drain_site"] for item in host_session["diagnostics"])
-              and not guest_session["diagnostics"]
-              and host_facts == {"crossed_tick": 1, "source_moved_one_unit": True, "stale_refused": True,
-                                 "guest_realm": "silent_garden", "host_realm": "overworld", "movement_ack": 2}
-              and guest_facts == {"arrival_realm": "silent_garden", "visible": ["guest"],
-                                  "party": {"guest": "living", "host": "living"},
-                                  "arrival_cell_seen": True, "movement_ack": 2})
+              and not guest_session["diagnostics"] and host_facts == expected_host and guest_facts == expected_guest)
     return {"passed": passed, "exits": exits, "host": host_facts, "guest": guest_facts,
             "native_sessions": [host_session, guest_session]}
 
@@ -61,6 +67,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("exe", type=Path)
     parser.add_argument("evidence", type=Path)
+    parser.add_argument("--gateway", action="store_true")
     options = parser.parse_args()
     exe, evidence = options.exe.resolve(strict=True), options.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
@@ -70,7 +77,7 @@ def main():
             keygen(exe, secrets / role, evidence, role)
         shutil.copyfile(secrets / "guest" / "guest.pub", secrets / "host" / "guest.pub")
         fingerprint = enroll(exe, secrets, evidence)
-        result = run_peers(exe, evidence, secrets, fingerprint)
+        result = run_peers(exe, evidence, secrets, fingerprint, options.gateway)
     body = json.dumps(result, indent=2, sort_keys=True)
     (evidence / "receipt.json").write_text(body + "\n", encoding="utf-8")
     print(body)

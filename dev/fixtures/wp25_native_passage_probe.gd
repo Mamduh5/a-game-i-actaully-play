@@ -32,6 +32,8 @@ class PassageAuthority extends RunAuthority:
 
 var _authority := PassageAuthority.new()
 var _bridge := HostMovementBridge.new(_authority)
+var _kernel: CombatKernel
+var _setup: RunSetup
 var _passages: RunRealmPassages
 var _party: RunParty
 var _rooms: Dictionary[StringName, WorldExploration] = {}
@@ -39,6 +41,7 @@ var _movement := GuestMovement.new()
 var _replica := GuestReplica.new()
 var _connection: int
 var _baseline := 1
+var _world_epoch := EPOCH
 var _published: int
 var _received_click := false
 var _received_motion := false
@@ -55,11 +58,11 @@ func _ready() -> void:
 func _start_run() -> bool:
 	_rooms[OUTSIDE] = WorldExploration.create(WorldTopology.generate(SEED), [HOST, GUEST])
 	_rooms[GARDEN] = WorldExploration.create(WorldTopology.generate_optional(SEED, GARDEN), [HOST, GUEST])
-	var kernel := CombatKernel.new()
+	_kernel = CombatKernel.new()
 	var floors: Dictionary[StringName, RealmGeometry] = {}
 	for id: StringName in _rooms:
 		floors[id] = _rooms[id].geometry()
-		if not kernel.attach_geometry(floors[id], WorldExploration.BLOCKER):
+		if not _kernel.attach_geometry(floors[id], WorldExploration.BLOCKER):
 			return false
 	var handle := _rooms[OUTSIDE].module_center(WorldTopology.ANCHORS[0])
 	for seat: StringName in [HOST, GUEST]:
@@ -71,7 +74,7 @@ func _start_run() -> bool:
 		player.max_hp = Quantity.from_count(20)
 		player.hp = QuantityLayerLedger.Pool.new(player.max_hp, QuantityErrorBounds.new())
 		var position := RealmSweep.Point.new(handle.x - 24.0, handle.y) if seat == HOST else handle
-		if not kernel.add_actor(player) or not floors[OUTSIDE].add_circle(seat, 0, position, RADIUS, 2):
+		if not _kernel.add_actor(player) or not floors[OUTSIDE].add_circle(seat, 0, position, RADIUS, 2):
 			return false
 		_rooms[OUTSIDE].observe_seat(seat, OUTSIDE, position)
 	var setup := RunSetup.new()
@@ -81,14 +84,19 @@ func _start_run() -> bool:
 	setup.epoch = EPOCH
 	setup.seed = SEED
 	setup.rules_revision = &"V42.6/R1"
-	setup.catalog_revision = &"starter"
+	setup.catalog_revision = _catalog_revision()
 	setup.challenge_id = &"normal"
 	setup.initial_realms = {HOST: OUTSIDE, GUEST: OUTSIDE}
-	_party = RunParty.begin(setup, HOST, kernel, floors, {HOST: HOST, GUEST: GUEST}, WorldExploration.BLOCKER)
+	_setup = setup
+	_party = RunParty.begin(setup, HOST, _kernel, floors, {HOST: HOST, GUEST: GUEST}, WorldExploration.BLOCKER)
 	_authority.party = _party
 	_passages = RunRealmPassages.new(_authority, _party)
 	return (_party != null and _authority.start(setup, HOST)
 		and _passages.register_optional(&"garden", _rooms[OUTSIDE], handle, _rooms[GARDEN], 36.0, 10.0))
+
+
+func _catalog_revision() -> StringName:
+	return &"starter"
 
 
 func _run_host() -> void:
@@ -117,7 +125,11 @@ func _run_host() -> void:
 		print("WP06_SESSION_PHASE host-draining")
 		_session.request_close()
 	if _closing and not _session.is_open():
-		_finish(_authority.next_tick() == 3 and _facts.get("stale_refused", false))
+		_finish(_host_verdict())
+
+
+func _host_verdict() -> bool:
+	return _authority.next_tick() == 3 and _facts.get("stale_refused", false)
 
 
 func _queue_command(command: NativeSessionHost.Command) -> bool:
@@ -163,7 +175,7 @@ func _publish_scope() -> bool:
 	var baseline := MovementBaseline.new()
 	baseline.realm = _party.view(GUEST, now).realm
 	baseline.state = state
-	if not _bridge.bind(1, _connection, EPOCH, RUN, EPOCH, baseline.realm, GUEST, _baseline):
+	if not _bridge.bind(1, _connection, EPOCH, RUN, _world_epoch, baseline.realm, GUEST, _baseline):
 		return false
 	var scope := RecipientView.Scope.new()
 	scope.seat = GUEST
@@ -177,14 +189,14 @@ func _publish_scope() -> bool:
 		actor.realm = view.realm
 		actor.position = view.position
 		actors.append(actor)
-	var view_bytes := RecipientView.pack(scope, EPOCH, _baseline, state.tick, 1, "0", _party.status_ids(),
-		actors, [], _rooms[scope.realm])
+	var view_bytes := RecipientView.pack(scope, _world_epoch, _baseline, state.tick, 1, "0", _party.status_ids(),
+		actors, [], _rooms.get(scope.realm))
 	return _send(Kinds.BASELINE, baseline.pack()) and _send(Kinds.VIEW, view_bytes)
 
 
 func _snapshot() -> MovementSnapshot:
 	var result := MovementSnapshot.new()
-	result.epoch = EPOCH
+	result.epoch = _world_epoch
 	result.baseline = _baseline
 	result.tick = _authority.next_tick() - 1
 	result.serial = result.tick + 1
@@ -219,6 +231,10 @@ func _accept(peer: ENetPacketPeer, frame: NativeSessionFrame) -> bool:
 	var scope := _movement.confirmed_scope()
 	if wire.kind == Kinds.BASELINE:
 		return _replica.install_scope(scope.realm, scope.state)
+	return _finish_guest_move(peer, scope)
+
+
+func _finish_guest_move(peer: ENetPacketPeer, scope: GuestMovement.Scope) -> bool:
 	if scope.realm != GARDEN or scope.state.acknowledged != 2 or scope.state.tick != 2:
 		return false
 	_facts["movement_ack"] = scope.state.acknowledged

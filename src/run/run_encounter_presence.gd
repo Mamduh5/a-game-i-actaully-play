@@ -38,7 +38,7 @@ static func start(party: RunParty, occurrence: StringName, realm: StringName, ce
 ## Also sample after movement and before a lethal group can change a fresh
 ## arrival into a body at the closing instant.
 func observe(now: CombatInstant) -> bool:
-	if (_settled or now == null or (_latest != null and _latest.order_against(now)
+	if (_settled or now == null or not _party.has_realm(_realm) or (_latest != null and _latest.order_against(now)
 			not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME])):
 		return false
 	var seen := _seen.duplicate()
@@ -74,4 +74,4 @@ func recipients() -> Array[StringName]:
 
 
 func settlement_tick(run: StringName, epoch: int) -> int:
-	return _latest.tick if _settled and _party.belongs_to(run, epoch) else -1
+	return _latest.tick if _settled and _party.has_realm(_realm) and _party.belongs_to(run, epoch) else -1

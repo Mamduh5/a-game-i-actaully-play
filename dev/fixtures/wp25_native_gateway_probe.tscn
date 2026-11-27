@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://dev/fixtures/wp25_native_gateway_probe.gd" id="1"]
+
+[node name="WP25NativeGatewayProbe" type="Node"]
+script = ExtResource("1")

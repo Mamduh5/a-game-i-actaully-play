@@ -6,7 +6,7 @@ extends RefCounted
 enum Phase { DORMANT, ACTIVE, COMPLETED }
 enum Observation { INVALID, RETAINED, RESET }
 
-const COLLAPSE_TICK := 25 * 60 * RunParty.LOGICAL_HZ
+const COLLAPSE_TICK := RunParty.COLLAPSE_TICK
 
 var _party: RunParty
 var _realm: StringName
@@ -75,7 +75,7 @@ func observe(now: CombatInstant) -> Observation:
 
 
 func _at_party_boundary(now: CombatInstant) -> bool:
-	return (_party != null and now != null
+	return (_party != null and _party.has_realm(_realm) and now != null
 		and now.order_against(CombatInstant.at_tick(_party.closed_tick)) == RealmCircleTime.Order.SAME)
 
 

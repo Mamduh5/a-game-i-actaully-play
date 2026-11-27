@@ -178,6 +178,13 @@ func circle_center(entity: StringName, slot: int) -> RealmSweep.Point:
 	return RealmSweep.Point.new(shape.center.x, shape.center.y)
 
 
+func circle_slots(entity: StringName) -> Array[int]:
+	var slots: Array[int] = []
+	slots.assign(_circle_slots.get(entity, []))
+	slots.sort()
+	return slots
+
+
 func circle_radius(entity: StringName, slot: int) -> float:
 	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
 	return shape.radius if shape != null and shape.center != null else -1.0

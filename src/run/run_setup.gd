@@ -5,6 +5,7 @@ extends RefCounted
 enum Role { SOLO, HOST }
 
 const MAX_SEATS := 4 # GDS PR07 prototype envelope.
+const FINAL_REALM := &"unfinished_canvas"
 
 var role: Role = Role.SOLO
 var run_id: StringName

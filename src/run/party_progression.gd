@@ -22,6 +22,8 @@ var _awarded: Dictionary[StringName, Quantity] = {}
 var _blessings: Dictionary[StringName, Array] = {}
 var _preparation: Dictionary[StringName, Array] = {}
 var _identity: Dictionary = {}
+var _epoch: int
+var _gateway_tick: int
 var _random: RunRandom
 var _last_award_tick: int
 
@@ -32,6 +34,7 @@ static func begin(setup: RunSetup, preparations: Dictionary[StringName, RunPrepa
 		return null
 	var party := PartyProgression.new()
 	party._identity = setup.identity()
+	party._epoch = setup.epoch
 	party._random = RunRandom.new(setup.seed)
 	for seat: StringName in party._identity["initial_realms"]:
 		var preparation: RunPreparation = preparations.get(seat)
@@ -50,6 +53,16 @@ func carried_xp() -> Quantity:
 	return _xp
 
 
+func can_cross_gateway(identity: Dictionary, epoch: int, tick: int) -> bool:
+	return _gateway_tick == 0 and epoch == _epoch and _identity == identity and tick >= _last_award_tick
+
+
+## The authority calls this as part of the closed, validated gateway commit.
+func enter_gateway(tick: int) -> void:
+	_epoch += 1
+	_gateway_tick = tick
+
+
 func grant_xp(entitlement: StringName, amount: Quantity, tick: int) -> Award:
 	if (_queues.is_empty() or entitlement.is_empty() or amount == null or amount.sign_value <= 0
 			or tick < 0 or tick > RunAuthority.MAX_TICK):
@@ -57,7 +70,7 @@ func grant_xp(entitlement: StringName, amount: Quantity, tick: int) -> Award:
 	var prior: Quantity = _awarded.get(entitlement)
 	if prior != null:
 		return Award.DUPLICATE if prior.compare(amount) == 0 else Award.CONFLICT
-	if tick < _last_award_tick:
+	if tick < maxi(_last_award_tick, _gateway_tick):
 		return Award.INVALID
 	var carry := _xp.add(amount)
 	if carry == null:
@@ -130,7 +143,7 @@ func settle_blessing(store: ProfileStore, presence: RunEncounterPresence, blessi
 	if (store == null or presence == null or _identity.is_empty()
 			or not ProfileMutation.valid_id(String(blessing)) or not ProfileMutation.valid_id(String(presence.id))):
 		return invalid
-	var settled_at := presence.settlement_tick(_identity["run"], _identity["epoch"])
+	var settled_at := presence.settlement_tick(_identity["run"], _epoch)
 	if settled_at < 0 or closed_tick < settled_at or closed_tick > RunAuthority.MAX_TICK:
 		return invalid
 	var seats := presence.recipients()
@@ -177,7 +190,7 @@ func frontier(closed_tick: int) -> ProfileMutation.Frontier:
 
 
 func _make_frontier(closed_tick: int, blessings: Dictionary[StringName, Array]) -> ProfileMutation.Frontier:
-	if _identity.is_empty() or closed_tick < _last_award_tick or closed_tick > RunAuthority.MAX_TICK:
+	if _identity.is_empty() or closed_tick < maxi(_last_award_tick, _gateway_tick) or closed_tick > RunAuthority.MAX_TICK:
 		return null
 	for record: Array in blessings.values():
 		if record[2] > closed_tick:
@@ -194,12 +207,14 @@ func _make_frontier(closed_tick: int, blessings: Dictionary[StringName, Array]) 
 		"xp": QuantityCodec.encode(_xp), "awarded": awards, "random": _random.checkpoint(), "queues": queues}
 	if not blessings.is_empty():
 		snapshot["blessings"] = blessings
+	if _gateway_tick > 0:
+		snapshot["gateway_tick"] = _gateway_tick
 	var image := var_to_bytes(snapshot)
 	if image.is_empty() or image.size() > ProfileMutation.MAX_BYTES:
 		return null
 	var result := ProfileMutation.Frontier.new()
 	result.run = String(_identity["run"])
-	result.epoch = _identity["epoch"]
+	result.epoch = _epoch
 	result.tick = closed_tick
 	result.image = image
 	return result
@@ -207,13 +222,18 @@ func _make_frontier(closed_tick: int, blessings: Dictionary[StringName, Array]) 
 
 static func reopen(setup: RunSetup, catalog: DefinitionCatalog, saved: Dictionary) -> PartyProgression:
 	var bytes: Variant = saved.get("image")
+	var epoch: Variant = saved.get("epoch")
 	if (setup == null or catalog == null or catalog.revision != setup.catalog_revision
-			or saved.get("epoch") != setup.epoch or not saved.get("tick") is int
+			or not epoch is int or epoch < setup.epoch or epoch - setup.epoch > 1 or not saved.get("tick") is int
 			or not bytes is PackedByteArray or bytes.is_empty() or bytes.size() > ProfileMutation.MAX_BYTES):
 		return null
 	var image: Variant = bytes_to_var(bytes)
 	if (not image is Dictionary or not image.get("preparation") is Dictionary
 			or image["preparation"].size() != setup.initial_realms.size()):
+		return null
+	var gateway_tick: Variant = image.get("gateway_tick", 0)
+	if (not gateway_tick is int or (epoch == setup.epoch and gateway_tick != 0)
+			or (epoch != setup.epoch and (gateway_tick < RunParty.COLLAPSE_TICK or gateway_tick > saved["tick"]))):
 		return null
 	var preparations: Dictionary[StringName, RunPreparation] = {}
 	for seat: StringName in setup.initial_realms:
@@ -224,6 +244,8 @@ static func reopen(setup: RunSetup, catalog: DefinitionCatalog, saved: Dictionar
 	var party := begin(setup, preparations)
 	if party == null or not party._restore(image, saved["tick"]):
 		return null
+	party._epoch = epoch
+	party._gateway_tick = gateway_tick
 	return party
 
 
