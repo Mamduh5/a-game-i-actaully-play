@@ -44,10 +44,7 @@ func _draw() -> void:
 				var side := Vector2(cue.heading.x, cue.heading.y).orthogonal() * cue.radius
 				if not _reduce_fill:
 					draw_line(center, end, Color(ink, 0.32), cue.radius * 2.0, true)
-				draw_line(center + side, end + side, ink, 1.5, true)
-				draw_line(center - side, end - side, ink, 1.5, true)
-				draw_arc(center, cue.radius, side.angle(), side.angle() + PI, 12, ink, 1.5, true)
-				draw_arc(end, cue.radius, side.angle() - PI, side.angle(), 12, ink, 1.5, true)
+				_capsule_outline(center, end, side, ink, 1.5)
 			StarterCombatRules.SIPHON: _circle(center, cue.reach, SIPHON, true)
 			StarterCombatRules.HARMONIC_BURST, &"R02.lightning", &"RP03.storm_relay":
 				var end := center + Vector2(cue.heading.x, cue.heading.y) * cue.reach
@@ -77,10 +74,17 @@ func _thrust(center: Vector2, cue: StarterCombat.Cue) -> void:
 	var side := axis.orthogonal() * cue.radius
 	if not _reduce_fill and cue.reach > cue.radius * 2.0:
 		draw_colored_polygon(PackedVector2Array([start - side, end - side, end + side, start + side]), Color(SWORD, 0.24))
-	draw_line(start - side, end - side, SWORD, 2.0, true)
-	draw_line(start + side, end + side, SWORD, 2.0, true)
-	draw_arc(end, cue.radius, side.angle() - PI, side.angle(), 16, SWORD, 2.0, true)
-	draw_arc(start, cue.radius, side.angle(), side.angle() + PI, 16, SWORD, 2.0, true)
+	_capsule_outline(start, end, side, SWORD, 2.0)
+
+
+func _capsule_outline(start: Vector2, end: Vector2, side: Vector2, ink: Color, width: float) -> void:
+	var angle := side.angle()
+	var radius := side.length()
+	if start != end:
+		draw_line(start - side, end - side, ink, width, true)
+		draw_line(start + side, end + side, ink, width, true)
+	draw_arc(start, radius, angle - PI, angle, 16, ink, width, true)
+	draw_arc(end, radius, angle, angle + PI, 16, ink, width, true)
 
 
 func _circle(center: Vector2, radius: float, ink: Color, active: bool) -> void:
