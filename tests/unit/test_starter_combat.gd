@@ -218,6 +218,37 @@ func test_temporal_echo_from_arrow_preserves_contact_point_and_one_typed_damage_
 	assert_null(arena.kernel.next_due())
 
 
+func test_fracture_compresses_only_owned_bleed_while_target_is_in_field_without_adding_ticks() -> void:
+	var arena := Arena.new(&"W01", &"H04", false, &"R01", &"", {&"H04": true})
+	assert_true(arena.add(&"target", 30, 0, 500))
+	assert_true(arena.add(&"partner", 0, 4, 100, FRIEND))
+	var slots: Array[StringName] = []
+	slots.resize(RunPreparation.CANDIDATE_SLOTS)
+	slots.fill(&"")
+	var prep := RunPreparation.select(arena.catalog, &"H01", &"W01", [&"R01", &""], slots, {})
+	var partner := StarterCombat.create(arena.rules, arena.catalog, prep, arena.kernel, arena.geometry,
+		&"partner", HOSTILE, HOSTILE, BLOCKER)
+	var mine: Array[int] = []
+	var theirs: Array[int] = []
+	for tick: int in range(1, 183):
+		if tick == 1:
+			assert_eq(arena.attack(tick), Committed)
+			assert_eq(partner.try_weapon(tick, PlayerTargeting.new(), arena.candidates), Committed)
+			assert_eq(arena.combat.try_manual(tick, RealmSweep.Point.new(30, 0)), Committed)
+		if tick == 32:
+			assert_true(arena.move(&"target", 100, 0))
+		assert_true(arena.combat.advance(tick))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			if hit.family == &"R01.bleed":
+				if hit.origin.owner == HERO:
+					mine.append(tick)
+				else:
+					theirs.append(tick)
+	assert_eq(mine, [31, 91, 151])
+	assert_eq(theirs, [61, 121, 181])
+	assert_null(arena.kernel.next_due())
+
+
 func test_zero_charge_harmonic_burst_links_one_reached_hostile_and_commits_an_empty_cast() -> void:
 	var arena := Arena.new(&"W02", &"H03")
 	assert_true(arena.add(&"blocked", 16, 0, 100))

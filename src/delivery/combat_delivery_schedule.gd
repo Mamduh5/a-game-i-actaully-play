@@ -17,6 +17,7 @@ var _start: CombatInstant
 var _expiry: CombatInstant
 var _latest: CombatInstant
 var _ordinal := 1
+var _last_compression := -1
 var _end: End
 
 var end_reason: End:
@@ -38,6 +39,7 @@ func copy() -> CombatDeliverySchedule:
 	result._expiry = _expiry
 	result._latest = _latest
 	result._ordinal = _ordinal
+	result._last_compression = _last_compression
 	result._end = _end
 	return result
 
@@ -61,6 +63,19 @@ func active_at(now: CombatInstant) -> bool:
 	return (_end == End.ACTIVE and now != null
 		and _start.order_against(now) in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME]
 		and now.order_against(_expiry) in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME])
+
+
+## Translate the remaining cadence and expiry together by one whole step,
+## retaining certified fractional phases and the number of eligible ticks.
+func compress_step(tick: int) -> void:
+	if _end != End.ACTIVE or tick <= _start.tick or tick <= _last_compression:
+		return
+	_last_compression = tick
+	if _expiry.tick <= tick or (_next_tick != null and _next_tick.tick <= tick):
+		return
+	_expiry = CombatInstant.at_contact(_expiry.tick - 1, _expiry.proof_snapshot())
+	if _next_tick != null:
+		_next_tick = CombatInstant.at_contact(_next_tick.tick - 1, _next_tick.proof_snapshot())
 
 
 ## A normal refresh extends the current lifetime and preserves tick phase.

@@ -296,7 +296,7 @@ func advance(tick: int) -> bool:
 		return false
 	if _fracture != null and _fracture.ends <= tick:
 		_fracture = null
-	if _fracture != null and not _kernel.compress_echoes(_actor, _geometry.realm_id, tick, _fracture.position, _fracture.reach):
+	if _fracture != null and not _kernel.compress_schedules(_actor, _geometry.realm_id, tick, _fracture.position, _fracture.reach):
 		return false
 	for index: int in range(_sigils.size() - 1, -1, -1):
 		var sigil := _sigils[index]

@@ -86,6 +86,12 @@ func owners() -> Array[String]:
 	return _owners.keys()
 
 
+func compress_owner(provenance: CombatOrigin.Provenance, owner: StringName, tick: int) -> void:
+	var entry: Owner = _owners.get("%d/%s" % [provenance, owner])
+	if entry != null:
+		entry.cadence.compress_step(tick)
+
+
 func stack_count() -> int:
 	var count := 0
 	for entry: Owner in _owners.values():
