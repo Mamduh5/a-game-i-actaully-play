@@ -153,8 +153,8 @@ func advance(tick: int, authority: RunAuthority = null, play: Callable = Callabl
 				return null
 			if _enemies[id].release_due(tick):
 				due.append(id)
-		if not due.is_empty():
-			likeness = _subjects()
+		# Decisions only move bodies and commit strikes. Release reads the
+		# latest poses from geometry and keeps the original life sample.
 		for id: StringName in due:
 			var place: WorldEnemy.Subject = likeness.get(id)
 			if place == null or not _enemies[id].release(_kernel, _realms[place.realm].geometry(),

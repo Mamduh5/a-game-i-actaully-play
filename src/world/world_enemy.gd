@@ -165,7 +165,7 @@ func release(kernel: CombatKernel, geometry: RealmGeometry, subjects: Dictionary
 			var other: Subject = subjects.get(contact.entity)
 			if (other != null and other.realm == geometry.realm_id and other.hp.sign_value > 0 and _hostile(other.faction)
 					and (not _rules.ground_only or not other.airborne)
-					and _unobstructed(geometry, held.origin, other.at, _cover_for(other, blockers))):
+					and _release_visible(geometry, held, other, blockers)):
 				if held.delivery.admit(tick, contact, other.life, true) not in [
 						CombatDelivery.Result.ADMITTED, CombatDelivery.Result.CADENCE]:
 					return false
@@ -194,10 +194,18 @@ func _narrow_miss(kernel: CombatKernel, floor: RealmGeometry, held: Strike, watc
 		if edge.outcome == RealmCircleTime.Result.UNRESOLVED:
 			return false
 		in_band = in_band or edge.outcome == RealmCircleTime.Result.HIT
-	if not in_band or not _unobstructed(floor, held.origin, watched.at, _cover_for(watched, blockers)):
+	if not in_band or not _release_visible(floor, held, watched, blockers):
 		return false
 	var actor := kernel.actor_snapshot(watched.id)
 	return _threatens(actor, watched, tick) and actor.realm_visit == held.watched_visit
+
+
+## Release already certified the aim point against the full blocker mask.
+## A different pose needs its own proof after every enemy has moved.
+static func _release_visible(floor: RealmGeometry, held: Strike, subject: Subject, blockers: int) -> bool:
+	var at := floor.circle_center(subject.id, 0)
+	return at != null and ((at.x == held.center.x and at.y == held.center.y)
+		or _unobstructed(floor, held.origin, at, _cover_for(subject, blockers)))
 
 
 static func _cover_for(subject: Subject, blockers: int) -> int:

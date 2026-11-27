@@ -91,6 +91,49 @@ func test_world_health_samples_are_detached_and_refresh_after_cap_change() -> vo
 	assert_eq(observed[8], ["30", 0])
 
 
+func test_due_strike_checks_cover_after_the_targets_world_movement() -> void:
+	for moves_into_cover: bool in [false, true]:
+		var room := Room.new()
+		assert_true(room.enter())
+		var floor := room.exploration.geometry()
+		assert_true(floor.commit_circle_pose(Hero, 0, room.point(-55, -55)))
+		var wall := RealmOutline.Edge.new()
+		wall.first = room.point(20, 5)
+		wall.last = room.point(20, 22)
+		assert_true(floor.add_segment(&"stone_screen", 0, wall, WorldExploration.BLOCKER, false))
+		var striker := WorldEnemy.Rules.new()
+		striker.faction = &"strikers"
+		striker.foes = [&"prey"]
+		striker.family = &"fixture/held_strike"
+		striker.hp = Quantity.from_count(10)
+		striker.damage = Quantity.from_count(4)
+		striker.radius = 4.0
+		striker.sight = 120.0
+		striker.attack_range = 64.0
+		striker.attack_radius = 19.0
+		striker.windup_ticks = 1
+		striker.recovery_ticks = 2
+		var aim := striker.copy()
+		aim.faction = &"prey"
+		aim.foes = []
+		var walker := aim.copy()
+		walker.foes = [&"marker"]
+		walker.attack_range = 1.0
+		walker.stride = 15.0
+		var marker := aim.copy()
+		marker.faction = &"marker"
+		assert_true(room.world.introduce_enemy(&"striker", Realm, striker, room.point(0, 0)))
+		assert_true(room.world.introduce_enemy(&"aim", Realm, aim, room.point(40, 0)))
+		assert_true(room.world.introduce_enemy(&"walker", Realm, walker, room.point(44, -15 if moves_into_cover else 30)))
+		assert_true(room.world.introduce_enemy(&"marker", Realm, marker, room.point(44, 60 if moves_into_cover else -40)))
+		assert_not_null(room.world.advance(1))
+		assert_eq(floor.circle_center(&"walker", 0).y, room.center.y + (0.0 if moves_into_cover else 15.0))
+		assert_not_null(room.world.advance(2))
+		assert_eq(floor.circle_center(&"walker", 0).y, room.center.y + (15.0 if moves_into_cover else 0.0))
+		assert_eq(room.kernel.actor_vitals(&"aim").hp.native_at_scale(0), 6)
+		assert_eq(room.kernel.actor_vitals(&"walker").hp.native_at_scale(0), 10 if moves_into_cover else 6)
+
+
 func test_first_entry_to_idle_realm_matches_early_registration_during_remote_combat() -> void:
 	var reference: Array = []
 	for defer_registration: bool in [false, true]:
