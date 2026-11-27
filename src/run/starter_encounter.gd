@@ -21,6 +21,7 @@ class Seat:
 	var selected: StringName
 	var combat: StarterCombat
 	var speed: float
+	var vault: VaultTravel
 	var familiar: SketchFamiliar
 	var mines: RunicMines
 	var lance: SpectralLance
@@ -135,6 +136,7 @@ func _prepare_seat(id: StringName, build: Build, revision: StringName) -> bool:
 	seat.weapon = TUNING.weapon_for(build.preparation.weapon)
 	match build.preparation.hero:
 		StarterCombatRules.UNDYING: seat.manual = StarterCombatRules.SIPHON
+		StarterCombatRules.ACROBAT: seat.manual = StarterCombatRules.VAULT
 		StarterCombatRules.CONDUCTOR: seat.manual = StarterCombatRules.HARMONIC_BURST
 		StarterCombatRules.CHRONOMANCER: seat.manual = StarterCombatRules.TIME_FRACTURE
 		_: return false
@@ -192,7 +194,7 @@ func movement_state(seat: StringName, baseline: int, serial: int) -> MovementSna
 	state.movement = _party.movement_input(seat)
 	state.speed = _seats[seat].speed
 	state.radius = _geometry.circle_radius(seat, 0)
-	state.permits_prediction = _party.can_control(seat)
+	state.permits_prediction = _party.can_control(seat) and _seats[seat].vault == null
 	return state
 
 
@@ -228,7 +230,7 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 			_party.apply_input(intent.seat_id, intent.command)
 	var targets: Dictionary[StringName, Array] = {}
 	for id: StringName in _seats:
-		var at := _party.step_movement(id, _seats[id].speed, 1.0 / 60.0)
+		var at := _move_seat(id)
 		if at == null:
 			return false
 		targets[id] = _targets(at)
@@ -242,7 +244,7 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 		var pointer := RealmSweep.Point.new(command.x, command.y)
 		match intent.action:
 			PlayerCommand.MANUAL:
-				var result := seat.combat.try_manual(tick, pointer)
+				var result := _try_manual(id, tick, pointer)
 				if result == StarterCombat.Attempt.FAULT:
 					return false
 				outcomes.append({"seat": id, "manual": result == StarterCombat.Attempt.COMMITTED})
@@ -252,6 +254,8 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 				_party.apply_input(id, command)
 	for id: StringName in _seats:
 		var seat := _seats[id]
+		if seat.vault != null and not _activity.mark_airborne(id):
+			return false
 		if _party.can_control(id):
 			var weapon := seat.combat.try_weapon(tick, seat.targeting, targets[id])
 			if weapon == StarterCombat.Attempt.FAULT:
@@ -263,6 +267,32 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 				or not seat.tether.advance(tick, targets[id])):
 			return false
 	return true
+
+
+func _move_seat(id: StringName) -> RealmSweep.Point:
+	var seat := _seats[id]
+	if seat.vault == null:
+		return _party.step_movement(id, seat.speed, 1.0 / 60.0)
+	if _party.can_control(id) and not seat.vault.advance(_geometry):
+		return null
+	if not _party.can_control(id) or not seat.vault.airborne():
+		seat.vault = null
+	return _geometry.circle_center(id, 0)
+
+
+func _try_manual(id: StringName, tick: int, pointer: RealmSweep.Point) -> StarterCombat.Attempt:
+	var seat := _seats[id]
+	if seat.manual != StarterCombatRules.VAULT:
+		return seat.combat.try_manual(tick, pointer)
+	if seat.vault != null or not _kernel.actor_snapshot(id).cooldown_ready(seat.manual, CombatInstant.at_tick(tick)):
+		return StarterCombat.Attempt.REJECTED
+	var pending := VaultTravel.plan(_geometry, id, pointer, TUNING.vault_distance, TUNING.vault_steps)
+	if pending == null:
+		return StarterCombat.Attempt.REJECTED
+	var attempt := seat.combat.commit_vault(tick)
+	if attempt == StarterCombat.Attempt.COMMITTED:
+		seat.vault = pending
+	return attempt
 
 
 func _observe_wave(closed: CombatKernel.WaveResult) -> bool:
@@ -303,7 +333,8 @@ func view_for(id: StringName) -> View:
 	view.tick = _party.closed_tick
 	view.player = _fighter(id, false)
 	view.defeated = _party.defeated
-	view.manual_ready = _party.can_control(id) and actor.cooldown_ready(seat.manual, CombatInstant.at_tick(view.tick + 1))
+	view.manual_ready = (_party.can_control(id) and seat.vault == null
+		and actor.cooldown_ready(seat.manual, CombatInstant.at_tick(view.tick + 1)))
 	view.barrier = Quantity.from_count(0)
 	for barrier: CombatantState.Barrier in actor.barriers:
 		view.barrier = view.barrier.add(barrier.pool.amount)

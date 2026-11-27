@@ -3,7 +3,9 @@ extends RefCounted
 ## Shared fog and mutable module state within one realm.
 
 const EXPLORATION_CELL := 32
-const BLOCKER := 1
+const SEALED_BLOCKER := 1
+const VAULTABLE_BLOCKER := 1 << 12
+const BLOCKER := SEALED_BLOCKER | VAULTABLE_BLOCKER
 const STARTER_RADIUS := 14.0
 
 class SolidMotion:
@@ -42,7 +44,7 @@ static func create(layout: WorldTopology, seats: Array[StringName]) -> WorldExpl
 	var result := WorldExploration.new()
 	result._layout = layout
 	result._seats = seats.duplicate()
-	result._geometry = layout.realize(BLOCKER)
+	result._geometry = layout.realize(SEALED_BLOCKER)
 	return result if layout.has_clearance(result._geometry, BLOCKER, STARTER_RADIUS) else null
 
 
@@ -130,7 +132,8 @@ func can_escape_warning(warning: WorldPressureHazard.Warning, actor: StringName,
 
 ## A gameplay placement owns its footprint; ordinary actor shapes do not
 ## participate unless included in the realm's navigation blocker mask.
-func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float, durability: Quantity = null) -> bool:
+func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float, durability: Quantity = null,
+		vaultable: bool = false) -> bool:
 	if (id.is_empty() or _route_solids.has(id) or center == null or not is_finite(radius) or radius <= 0.0
 			or not is_finite(center.x) or not is_finite(center.y)
 			or absf(center.x) > 1000000.0 or absf(center.y) > 1000000.0
@@ -144,7 +147,8 @@ func place_route_solid(id: StringName, center: RealmSweep.Point, radius: float, 
 		return false
 	var footprint := RealmBounds.from_sweep(center.x, center.y, center.x, center.y, radius)
 	var draft := _geometry.fork()
-	if not draft.add_circle(id, 0, center, radius, BLOCKER) or not _routes.settle(_geometry, draft, footprint):
+	var category := VAULTABLE_BLOCKER if vaultable else SEALED_BLOCKER
+	if not draft.add_circle(id, 0, center, radius, category) or not _routes.settle(_geometry, draft, footprint):
 		return false
 	_route_solids[id] = radius
 	if durability != null:

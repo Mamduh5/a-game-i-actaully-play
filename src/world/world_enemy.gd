@@ -22,6 +22,7 @@ class Rules:
 	var recovery_ticks: int
 	var pursuit_ticks: int
 	var hunter: bool
+	var ground_only: bool
 
 	func is_valid() -> bool:
 		return (not faction.is_empty() and faction != PARTY and not family.is_empty()
@@ -51,6 +52,7 @@ class Rules:
 		captured.recovery_ticks = recovery_ticks
 		captured.pursuit_ticks = pursuit_ticks
 		captured.hunter = hunter
+		captured.ground_only = ground_only
 		return captured
 
 class Subject:
@@ -61,6 +63,7 @@ class Subject:
 	var hp: Quantity
 	var maximum: Quantity
 	var at: RealmSweep.Point
+	var airborne: bool
 
 class Strike:
 	var delivery: CombatDelivery
@@ -155,6 +158,7 @@ func release(geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
 		for contact: RealmGeometry.Contact in plan.contacts:
 			var other: Subject = subjects.get(contact.entity)
 			if (other != null and other.realm == geometry.realm_id and other.hp.sign_value > 0 and _hostile(other.faction)
+					and (not _rules.ground_only or not other.airborne)
 					and _unobstructed(geometry, held.origin, other.at, blockers)):
 				if held.delivery.admit(tick, contact, other.life, true) not in [
 						CombatDelivery.Result.ADMITTED, CombatDelivery.Result.CADENCE]:

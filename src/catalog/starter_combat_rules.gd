@@ -16,6 +16,8 @@ const TEMPORAL_ECHO := &"H04.temporal_echo"
 const UNDYING := &"H01"
 const HARVEST := &"H01.life_harvest"
 const SIPHON := &"H01.siphon_pulse"
+const ACROBAT := &"H02"
+const VAULT := &"H02.vault"
 const CONDUCTOR := &"H03"
 const HARMONIC_BURST := &"H03.harmonic_burst"
 
@@ -30,6 +32,9 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 @export var siphon_lifetime: int = 240
 @export var siphon_decay_interval: int = 12
 @export var siphon_cooldown: int = 600
+@export var vault_distance: float = 64.0
+@export var vault_steps: int = 14
+@export var vault_cooldown: int = 240
 @export var harmonic_reach: float = 96.0
 @export var harmonic_damage: int = 18
 @export var harmonic_cooldown: int = 240
@@ -55,6 +60,7 @@ func is_valid_for(catalog: DefinitionCatalog) -> bool:
 			or fracture_duration <= 0 or fracture_cooldown < fracture_duration
 			or echo_delay <= 0 or not is_finite(echo_radius) or echo_radius <= 0.0
 			or not is_finite(harmonic_reach) or harmonic_reach <= 0.0 or harmonic_damage <= 0 or harmonic_cooldown <= 0
+			or not is_finite(vault_distance) or vault_distance <= 0.0 or vault_steps <= 0 or vault_cooldown < vault_steps
 			or not is_finite(force_distance) or force_distance <= 0.0
 			or not is_finite(lightning_reach) or lightning_reach <= 0.0 or lightning_damage <= 0
 			or bleed_damage <= 0 or bleed_capacity <= 0 or bleed_period <= 0 or bleed_duration < bleed_period or rupture_per_stack <= 0

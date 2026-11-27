@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://dev/fixtures/c04_vault_probe.gd" id="1"]
+
+[node name="VaultProbe" type="Node2D"]
+script = ExtResource("1")

@@ -24,6 +24,7 @@ class Frame:
 	var spawns: Array[Array] = []
 	var combat: Array[CombatKernel.WaveResult] = []
 	var terminal: CombatKernel.Terminal
+	var airborne: Dictionary[StringName, bool] = {}
 
 var _kernel: CombatKernel
 var _random: RunRandom
@@ -219,6 +220,14 @@ func fault() -> StringName:
 	return _fault
 
 
+## The player movement owner marks height during the open movement phase.
+func mark_airborne(id: StringName) -> bool:
+	if _frame == null or _decisions_opened or not _players.has(id):
+		return false
+	_frame.airborne[id] = true
+	return true
+
+
 func threats(realm: StringName) -> Array[WorldEnemy.Threat]:
 	var result: Array[WorldEnemy.Threat] = []
 	for id: StringName in _sorted(_enemies.keys()):
@@ -322,6 +331,7 @@ func _subjects() -> Dictionary[StringName, WorldEnemy.Subject]:
 		subject.life = actor.life
 		subject.hp = actor.hp
 		subject.maximum = actor.maximum
+		subject.airborne = _frame != null and _frame.airborne.has(id)
 		subject.faction = _enemies[id].faction() if _enemies.has(id) else WorldEnemy.PARTY
 		result[id] = subject
 	return result

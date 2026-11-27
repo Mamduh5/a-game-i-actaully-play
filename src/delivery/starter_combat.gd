@@ -74,6 +74,7 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	result._weapon.cooldown_ticks = _rate_period(weapon.cooldown_ticks, frequency)
 	var recovery := preparation.upgrade_basis_points(&"manual_cooldown_recovery")
 	result._rules.siphon_cooldown = _rate_period(rules.siphon_cooldown, recovery)
+	result._rules.vault_cooldown = _rate_period(rules.vault_cooldown, recovery)
 	result._rules.harmonic_cooldown = _rate_period(rules.harmonic_cooldown, recovery)
 	result._rules.fracture_cooldown = _rate_period(rules.fracture_cooldown, recovery)
 	result._hero = preparation.hero
@@ -198,6 +199,17 @@ func try_manual(tick: int, selected: RealmSweep.Point = null) -> Attempt:
 	if result == Attempt.COMMITTED:
 		_effects.append(_ring(StarterCombatRules.SIPHON, center, _rules.siphon_radius, tick, tick + 10))
 	return result
+
+
+## The movement owner certifies the Vault route before paying this commitment.
+func commit_vault(tick: int) -> Attempt:
+	if _hero != StarterCombatRules.ACROBAT or not _open_tick(tick):
+		return Attempt.REJECTED
+	var source := _kernel.actor_snapshot(_actor)
+	if source == null or not source.is_alive() or not source.accepts_new_actions:
+		return Attempt.REJECTED
+	var action := _action(source, tick, 1, StarterCombatRules.VAULT, 0, _rules.vault_cooldown, CombatAction.Damage.PHYSICAL)
+	return _instant_delivery(action, tick, [])
 
 
 func _place_fracture(tick: int, source: CombatantState, center: RealmSweep.Point, selected: RealmSweep.Point) -> Attempt:
