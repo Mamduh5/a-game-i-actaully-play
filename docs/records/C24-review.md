@@ -70,3 +70,9 @@ Codex overlaid the approved C24 object scope from `85a87064deeec57a1092835879a94
 | `rendered/collapse-5.png` | `4cef26181aff1a3c734d81eefc17b9ac582cc85dc04d0f141d5b86dc5e507f01` |
 | `rendered/collapse-33.png` | `3b21703ed84dcd11965c941358bac0724db393e3bc6b16b51175292f996b8c12` |
 | `rendered/collapse-40.png` | `35144d64d5358c5583fce5797cc737015694125e1cf28c9f17236a6dea99d84a` |
+
+## Current-dev composition for the Fallen Pillar
+
+Codex merged the inspected `dev` compatibility baseline `2dd4548e69231e4edaa6816f59bbef4a23a6e6fa` into the existing isolated `work/c24` worktree at `2161706e51cfa9e4406e24761ebd69e77cff3d9e`. The prior C24-only diff retained its scope and independent review targets. The exact composition passed **383/383 GUT with 16,609 assertions**, the 251-file Windows Player audit and boot, and both native collapse arms. The warning remains at tick 2 and the first neutral contact remains at tick 38. The rendered capture hashes match the earlier collapse evidence.
+
+The branch record at `fbf0455be1da78cddd128b85d8aee9b3bf023b12:docs/records/C24.md` holds the eight checked hashes under `.qa-evidence/C24/2161706/` and the next writer scope. Continue the elongated Fallen Pillar on that composition. The existing `RealmGeometry.displace_body()` can translate its member circles together. Verify the actual contacting member for impact provenance, clear space beside the footprint, critical routes throughout the sweep, and the shape after reopening. Creature damage/control consumers, finite contents and final integration remain open. C25 and C26 stay gated.
