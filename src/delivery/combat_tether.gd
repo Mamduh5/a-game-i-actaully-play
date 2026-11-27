@@ -36,6 +36,19 @@ var _reach: float
 var _endpoint_revision: int
 
 
+func endpoint_position(index: int, geometry: RealmGeometry) -> RealmSweep.Point:
+	return _position(_ends[index], _kernel, geometry) if index >= 0 and index < _ends.size() and geometry.realm_id == _realm else null
+
+
+func next_due() -> CombatInstant:
+	var event := _clock.next_event()
+	return event.instant if event != null else null
+
+
+func anchored(index: int) -> bool:
+	return index >= 0 and index < _ends.size() and _ends[index].anchor != null
+
+
 static func activate(kernel: CombatKernel, action: CombatAction, geometry: RealmGeometry, first: Endpoint,
 		last: Endpoint, duration: int, period: int, max_reach: float, reconnections: int) -> CombatTether:
 	if (kernel == null or action == null or action.origin == null or geometry == null or reconnections < 0
@@ -91,12 +104,18 @@ func due_through(geometry: RealmGeometry, through: CombatInstant, width: float, 
 	var last := _position(_ends[1], _kernel, geometry)
 	if not _valid_link(first, last, _reach):
 		return pulse
-	var sweep := _delivery.plan_sweep(geometry, first, last, width * 0.5, targets, blockers)
-	if sweep == null:
+	if blockers > 0:
+		var obstruction := geometry.certify_frozen_path(_realm, first, last, width * 0.5, blockers)
+		if obstruction == null or not obstruction.unresolved.is_empty():
+			return null
+		if not obstruction.contacts.is_empty():
+			pulse.blocker = obstruction.contacts[0]
+			return pulse
+	var crossed := geometry.certify_frozen_path(_realm, first, last, width * 0.5, targets)
+	if crossed == null or not crossed.unresolved.is_empty():
 		return null
-	pulse.blocker = sweep.blocker
-	if pulse.blocker == null:
-		pulse.contacts = sweep.contacts
+	crossed.contacts.sort_custom(RealmGeometry._compare_shape_ids)
+	pulse.contacts = crossed.contacts
 	return pulse
 
 

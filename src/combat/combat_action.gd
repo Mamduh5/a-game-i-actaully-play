@@ -122,6 +122,7 @@ var storm_relay: bool
 var rupture_per_stack: int
 var echo_delay: int
 var ascending_pierce: bool
+var resonant_interval: int
 var echo_radius: float
 var echo_targets: int
 var wake_targets: int
@@ -153,6 +154,7 @@ func is_valid() -> bool:
 			or (lightning_damage != null and lightning_damage.sign_value <= 0)
 			or (storm_relay and lightning_damage == null)
 			or rupture_per_stack < 0
+			or resonant_interval < 0
 			or echo_delay < 0 or echo_targets < 0 or not is_finite(echo_radius) or echo_radius < 0.0
 			or (echo_delay > 0) != (echo_targets > 0) or (echo_delay > 0) != (echo_radius > 0.0)
 			or wake_targets < 0 or (wake_targets > 0 and (not is_finite(wake_radius) or wake_radius <= 0.0
@@ -205,6 +207,7 @@ func copy() -> CombatAction:
 	result.rupture_per_stack = rupture_per_stack
 	result.echo_delay = echo_delay
 	result.ascending_pierce = ascending_pierce
+	result.resonant_interval = resonant_interval
 	result.echo_radius = echo_radius
 	result.echo_targets = echo_targets
 	result.wake_targets = wake_targets

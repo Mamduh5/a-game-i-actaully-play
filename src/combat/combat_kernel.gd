@@ -107,6 +107,7 @@ class WaveResult:
 
 class Commitment:
 	var penetrations: int
+	var currents: Dictionary[StringName, Array] = {}
 	var armed_mine: CombatMineCharge
 	var mine_center: RealmSweep.Point
 	var mine_trigger_radius: float
@@ -119,6 +120,7 @@ class Commitment:
 
 class Impact:
 	var lance: Commitment
+	var tether: Commitment
 	var contact_position: RealmSweep.Point
 	var pre_parent_bleed: CombatBleedLedger.Prestate
 	var arc_start: RealmSweep.Point
@@ -173,6 +175,7 @@ class ReactionClaim:
 
 class Group:
 	var penetrations: Dictionary[Commitment, int] = {}
+	var currents: Dictionary[Commitment, Dictionary] = {}
 	var detonations: Array[CombatMineCharge] = []
 	var echoes: Array[Echo] = []
 	var wakes: Array[Wake] = []
@@ -620,6 +623,8 @@ func admit_contact(key: String, part: int, realm: StringName, start_tick: int, c
 	impact.action = held.action
 	if held.action.ascending_pierce:
 		impact.lance = held
+	if held.action.resonant_interval > 0:
+		impact.tether = held
 	impact.origin = held.action.origin.copy()
 	impact.origin.delivery_part = part
 	impact.root_occurrence = impact.origin.occurrence_key()
@@ -1038,6 +1043,13 @@ func _resolve_wave(group: Group) -> StringName:
 			var count := 0
 			if impact.lance != null:
 				count = group.penetrations.get(impact.lance, impact.lance.penetrations)
+			if impact.tether != null:
+				if not group.currents.has(impact.tether):
+					group.currents[impact.tether] = impact.tether.currents.duplicate()
+				var prior: Array = group.currents[impact.tether].get(id, [])
+				if (not prior.is_empty() and prior[0] == before.life and prior[1] == before.realm_visit
+						and group.receipt.due.tick - int(prior[2]) == impact.action.resonant_interval):
+					count = mini(int(prior[3]) + 1, 4)
 			var hit := _draft_hit(impact, before, after, group.receipt.due, count)
 			if hit == null:
 				return &"numeric_posting"
@@ -1047,6 +1059,8 @@ func _resolve_wave(group: Group) -> StringName:
 			if hit.accepted:
 				if impact.lance != null:
 					group.penetrations[impact.lance] = mini(count + 1, 4)
+				if impact.tether != null:
+					group.currents[impact.tether][id] = [before.life, before.realm_visit, group.receipt.due.tick, count]
 				var posting := Posting.new()
 				if group.bleeds.has(id):
 					posting.before_bleed = group.bleeds[id].capture(group.receipt.due)
@@ -1113,6 +1127,8 @@ func _publish_group() -> WaveResult:
 	_echoes = group.echoes
 	for lance: Commitment in group.penetrations:
 		lance.penetrations = group.penetrations[lance]
+	for tether: Commitment in group.currents:
+		tether.currents.assign(group.currents[tether])
 	for origin: CombatOrigin in group.root.origins:
 		_impacts.erase(origin.occurrence_key())
 		_mine_entries.erase(origin.occurrence_key())

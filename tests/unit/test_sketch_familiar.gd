@@ -10,7 +10,8 @@ static func _earn(arena: Arena, rank: int, family: StringName = FAMILY) -> RunRe
 	slots.resize(RunPreparation.CANDIDATE_SLOTS)
 	slots.fill(&"")
 	slots[0] = family
-	var prep := RunPreparation.select(arena.catalog, &"H01", &"W01", [&"", &""], slots, {})
+	var access: Dictionary[StringName, bool] = {family: true}
+	var prep := RunPreparation.select(arena.catalog, &"H01", &"W01", [&"", &""], slots, access)
 	var rewards := RunRewardQueue.begin(prep, RunRandom.new(17), HERO)
 	for tick: int in range(1, 100):
 		if rewards.ranks().get(family, 0) == rank:
