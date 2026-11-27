@@ -98,6 +98,42 @@ func test_rebind_rejects_old_realm_click_and_enforces_authenticated_generation()
 	assert_null(bridge.read_interaction(rebound))
 
 
+func test_reliable_combat_points_preserve_scope_and_keep_legacy_interaction_bytes() -> void:
+	var guest := GuestMovement.new()
+	var bridge := HostMovementBridge.new()
+	assert_true(bridge.bind(2, 7, 4, RUN, 5, OUTSIDE, SEAT, 8))
+	assert_eq(guest.install_baseline(OUTSIDE, _snapshot(8), []), GuestMovement.Acceptance.APPLIED)
+	var click := PlayerCommand.new(PlayerCommand.INTERACT, 10.5, -22.75)
+	var legacy := RealmInteractionFrame.pack(5, 8, click)
+	assert_eq(legacy.size(), 33)
+	assert_eq(legacy[0], 1)
+	assert_eq(legacy.decode_s64(1), 5)
+	assert_eq(legacy.decode_s64(9), 8)
+	assert_eq(legacy.decode_double(17), 10.5)
+	assert_eq(legacy.decode_double(25), -22.75)
+	for kind: StringName in [PlayerCommand.MANUAL, PlayerCommand.TARGET]:
+		var input := PlayerCommand.new(kind, -12.25, 20.5)
+		var payload := guest.interaction_packet(input)
+		var received := _receipt(NativeSessionFrame.Kind.RELIABLE, payload, 4, 1)
+		var bound := bridge.read_interaction(received)
+		assert_not_null(bound)
+		assert_eq(bound.seat, SEAT)
+		assert_true(bound.command.matches(input))
+		assert_eq(guest.pending_count(), 0)
+		assert_null(bridge.read_interaction(_receipt(NativeSessionFrame.Kind.SEQUENCED, payload, 4, 1)))
+		assert_null(bridge.read_interaction(_receipt(NativeSessionFrame.Kind.RELIABLE, payload, 3, 2)))
+		var body := RealmInteractionFrame.pack(5, 8, input)
+		assert_eq(body[0], 2)
+		body[1] = 2
+		assert_null(RealmInteractionFrame.read(body))
+		body = RealmInteractionFrame.pack(5, 8, input)
+		body.encode_double(18, NAN)
+		assert_null(RealmInteractionFrame.read(body))
+		if kind == PlayerCommand.TARGET:
+			assert_true(bridge.bind(2, 7, 4, RUN, 6, INSIDE, SEAT, 1))
+			assert_null(bridge.read_interaction(received))
+
+
 static func _snapshot(baseline: int) -> MovementSnapshot:
 	var state := MovementSnapshot.new()
 	state.epoch = 5

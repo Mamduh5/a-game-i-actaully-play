@@ -98,8 +98,8 @@ func submit_interaction(received: NativeSessionHost.Command) -> RunAuthority.Adm
 	return _interaction_authority.submit(clicked.seat, intent)
 
 
-## Pass only a scoped reliable click to the authoritative interaction owner.
-## Its native sequence belongs to the reliable stream.
+## Pass only a scoped world command to the authoritative owner. Its native
+## sequence belongs to the reliable stream.
 func read_interaction(received: NativeSessionHost.Command) -> BoundInteraction:
 	var scope := _bound_scope(received)
 	if scope == null:

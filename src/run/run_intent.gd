@@ -49,7 +49,7 @@ func receipt() -> Dictionary:
 
 
 func valid_payload() -> bool:
-	if reliable and action != PlayerCommand.INTERACT:
+	if reliable and action not in PlayerCommand.RELIABLE_ACTIONS:
 		return false
 	if action in PlayerCommand.ACTIONS:
 		return command != null and command.action == action and command.valid()

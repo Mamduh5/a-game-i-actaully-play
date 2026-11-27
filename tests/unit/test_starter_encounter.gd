@@ -38,8 +38,21 @@ func test_encounter_manual_and_weapon_commit_at_the_closed_boundary_with_a_hidde
 	var aim := PlayerCommand.new(PlayerCommand.TARGET, 344, 228)
 	assert_eq(_submit(encounter, 1, aim), RunAuthority.Admission.QUEUED)
 	var cast := PlayerCommand.new(PlayerCommand.MANUAL, 155, 128)
-	assert_eq(_submit(encounter, 2, cast), RunAuthority.Admission.QUEUED)
+	var bridge := HostMovementBridge.new(encounter)
+	assert_true(bridge.bind(1, 20, 3, RUN, 1, REALM, SEAT, 17))
+	var payload := ReplicationMessage.pack(ReplicationMessage.Kind.INTERACTION,
+		RealmInteractionFrame.pack(1, 17, cast))
+	var received := NativeSessionHost.Command.new()
+	received.seat = 1
+	received.connection = 20
+	received.frame = NativeSessionFrame.read(NativeSessionFrame.pack(NativeSessionFrame.Kind.RELIABLE, 3, 1, payload),
+		NativeSessionFrame.channel(NativeSessionFrame.Kind.RELIABLE))
+	assert_eq(bridge.submit_interaction(received), RunAuthority.Admission.QUEUED)
+	assert_eq(bridge.submit_interaction(received), RunAuthority.Admission.DUPLICATE)
 	assert_true(encounter.close_tick())
+	assert_eq(encounter.checkpoint().sequences[SEAT], 1)
+	assert_eq(encounter.closed_result().accepted.size(), 2)
+	assert_true(encounter.closed_result().accepted[1].reliable)
 	var view := encounter.view_for(SEAT)
 	assert_false(view.manual_ready)
 	assert_eq(view.selected, &"")

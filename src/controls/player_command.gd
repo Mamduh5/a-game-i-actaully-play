@@ -9,6 +9,7 @@ const MANUAL := &"manual"
 const INTERACT := &"interact"
 const TARGET := &"target"
 const ACTIONS := [MOVE_AXES, MOVE_TO, AIM, MANUAL, INTERACT, TARGET]
+const RELIABLE_ACTIONS := [INTERACT, MANUAL, TARGET]
 
 var action: StringName
 var x: float
