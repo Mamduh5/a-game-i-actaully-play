@@ -19,6 +19,8 @@ const SIPHON := &"H01.siphon_pulse"
 const ACROBAT := &"H02"
 const VAULT := &"H02.vault"
 const CLOSE_CALL := &"H02.close_call"
+const GRAVITY_WEAVER := &"H05"
+const SINGULARITY := &"H05.singularity"
 const CONDUCTOR := &"H03"
 const HARMONIC_BURST := &"H03.harmonic_burst"
 
@@ -39,6 +41,14 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 @export var close_call_margin: float = 8.0
 @export var close_call_duration: int = 180
 @export var close_call_basis_points: int = 2000
+@export var gravity_force_scale: float = 1.3
+@export var gravity_reach: float = 150.0
+@export var gravity_radius: float = 64.0
+@export var gravity_pull: float = 16.0
+@export var gravity_push: float = 14.0
+@export var gravity_damage: int = 22
+@export var gravity_delay: int = 24
+@export var gravity_cooldown: int = 420
 @export var harmonic_reach: float = 96.0
 @export var harmonic_damage: int = 18
 @export var harmonic_cooldown: int = 240
@@ -67,6 +77,12 @@ func is_valid_for(catalog: DefinitionCatalog) -> bool:
 			or not is_finite(vault_distance) or vault_distance <= 0.0 or vault_steps <= 0 or vault_cooldown < vault_steps
 			or not is_finite(close_call_margin) or close_call_margin <= 0.0 or close_call_duration <= 0
 			or close_call_basis_points <= 0 or close_call_basis_points > RunPreparation.BASIS_POINTS
+			or not is_finite(gravity_force_scale) or gravity_force_scale < 1.0
+			or not is_finite(gravity_reach) or gravity_reach <= 0.0 or not is_finite(gravity_radius) or gravity_radius <= 0.0
+			or not is_finite(gravity_pull) or gravity_pull <= 0.0 or not is_finite(gravity_push) or gravity_push <= 0.0
+			or not is_finite(gravity_pull * gravity_force_scale) or not is_finite(gravity_push * gravity_force_scale)
+			or gravity_damage <= 0 or gravity_delay <= 0 or gravity_delay > RunAuthority.MAX_TICK - 10
+			or gravity_cooldown < gravity_delay
 			or not is_finite(force_distance) or force_distance <= 0.0
 			or not is_finite(lightning_reach) or lightning_reach <= 0.0 or lightning_damage <= 0
 			or bleed_damage <= 0 or bleed_capacity <= 0 or bleed_period <= 0 or bleed_duration < bleed_period or rupture_per_stack <= 0

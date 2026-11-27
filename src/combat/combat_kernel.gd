@@ -1383,13 +1383,21 @@ func _displace(group: Group, postings: Array[Posting]) -> bool:
 		var start := geometry.circle_center(target.id, hit.shape)
 		if start == null:
 			return false
+		var scale := 1.0 - target.displacement_resistance
+		var finish: RealmSweep.Point
 		if action.push_center != null:
-			var axis := PlayerControlState.direction(action.push_center, start, RealmSweep.Point.new(0, 0))
+			var center := action.push_center
+			var axis := PlayerControlState.direction(center, start, RealmSweep.Point.new(0, 0))
 			if axis.x == 0.0 and axis.y == 0.0:
 				continue
-			offset = RealmSweep.Point.new(axis.x * action.radial_distance, axis.y * action.radial_distance)
-		var scale := 1.0 - target.displacement_resistance
-		var finish := RealmSweep.Point.new(start.x + offset.x * scale, start.y + offset.y * scale)
+			if action.radial_pull:
+				var distance := sqrt((start.x - center.x) ** 2 + (start.y - center.y) ** 2)
+				var portion := minf(1.0, action.radial_distance * scale / distance)
+				finish = RealmSweep.Point.new(lerpf(start.x, center.x, portion), lerpf(start.y, center.y, portion))
+			else:
+				offset = RealmSweep.Point.new(axis.x * action.radial_distance, axis.y * action.radial_distance)
+		if finish == null:
+			finish = RealmSweep.Point.new(start.x + offset.x * scale, start.y + offset.y * scale)
 		hit.displacement = geometry.displace_body(target.id, hit.shape, finish, _blocker_masks[realm])
 		if hit.displacement == null:
 			return false

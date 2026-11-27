@@ -5,6 +5,7 @@ extends RefCounted
 enum Attempt { COMMITTED, NO_TARGET, REJECTED, FAULT }
 
 const WEAPON_COOLDOWN := &"main_weapon"
+const GRAVITY_PULL_SLOT := 2
 
 class Cue:
 	var radius: float
@@ -24,6 +25,10 @@ class Arrow:
 
 class Sigil:
 	var placed: int
+	var delivery: CombatDelivery
+	var cue: Cue
+
+class GravityField:
 	var delivery: CombatDelivery
 	var cue: Cue
 
@@ -49,6 +54,7 @@ var _last_tick := -1
 var _arrows: Array[Arrow] = []
 var _sigils: Array[Sigil] = []
 var _fracture: Cue
+var _gravity: GravityField
 var _effects: Array[Cue] = []
 var _resonance: int
 var _linked_lives: Dictionary[StringName, int] = {}
@@ -85,6 +91,7 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	var recovery := preparation.upgrade_basis_points(&"manual_cooldown_recovery")
 	result._rules.siphon_cooldown = _rate_period(rules.siphon_cooldown, recovery)
 	result._rules.vault_cooldown = _rate_period(rules.vault_cooldown, recovery)
+	result._rules.gravity_cooldown = _rate_period(rules.gravity_cooldown, recovery)
 	result._rules.harmonic_cooldown = _rate_period(rules.harmonic_cooldown, recovery)
 	result._rules.fracture_cooldown = _rate_period(rules.fracture_cooldown, recovery)
 	result._hero = preparation.hero
@@ -154,11 +161,12 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 			action.wake_period = _rules.wake_period
 			action.wake_duration = _rules.wake_duration
 			action.wake_damage = _rules.wake_damage
+		var force := _force_strength(_rules.force_distance)
 		if _weapon.delivery == StarterWeapon.Delivery.ARROW:
-			action.displacement = RealmSweep.Point.new(heading.x * _rules.force_distance, heading.y * _rules.force_distance)
+			action.displacement = RealmSweep.Point.new(heading.x * force, heading.y * force)
 		else:
 			action.push_center = aim if _weapon.delivery == StarterWeapon.Delivery.SIGIL else start
-			action.radial_distance = _rules.force_distance
+			action.radial_distance = force
 	var result: Attempt
 	match _weapon.delivery:
 		StarterWeapon.Delivery.CLEAVE: result = _cleave(action, tick, start, heading)
@@ -206,6 +214,10 @@ func movement_multiplier(tick: int) -> float:
 	return 1.0 + float(_rules.close_call_basis_points) / RunPreparation.BASIS_POINTS
 
 
+func _force_strength(authored: float) -> float:
+	return authored * _rules.gravity_force_scale if _hero == StarterCombatRules.GRAVITY_WEAVER else authored
+
+
 func _settled_candidates(candidates: Array[PlayerTargeting.Candidate]) -> Array[PlayerTargeting.Candidate]:
 	var visible: Array[PlayerTargeting.Candidate] = []
 	for entry: PlayerTargeting.Candidate in candidates:
@@ -238,6 +250,8 @@ func try_manual(tick: int, selected: RealmSweep.Point = null) -> Attempt:
 		return _harmonic_burst(tick, source, center)
 	if _hero == StarterCombatRules.CHRONOMANCER:
 		return _place_fracture(tick, source, center, selected)
+	if _hero == StarterCombatRules.GRAVITY_WEAVER:
+		return _place_gravity(tick, source, center, selected)
 	if (_hero != StarterCombatRules.UNDYING or tick > RunAuthority.MAX_TICK - _rules.siphon_lifetime
 			or not source.cooldown_ready(StarterCombatRules.SIPHON, CombatInstant.at_tick(tick))):
 		return Attempt.REJECTED
@@ -262,6 +276,61 @@ func commit_vault(tick: int) -> Attempt:
 		return Attempt.REJECTED
 	var action := _action(source, tick, 1, StarterCombatRules.VAULT, 0, _rules.vault_cooldown, CombatAction.Damage.PHYSICAL)
 	return _instant_delivery(action, tick, [])
+
+
+func _place_gravity(tick: int, source: CombatantState, center: RealmSweep.Point, selected: RealmSweep.Point) -> Attempt:
+	if (_gravity != null or selected == null or not is_finite(selected.x) or not is_finite(selected.y)
+			or tick > RunAuthority.MAX_TICK - maxi(_rules.gravity_delay + 10, _rules.gravity_cooldown)
+			or (selected.x - center.x) ** 2 + (selected.y - center.y) ** 2 > _rules.gravity_reach ** 2
+			or not source.cooldown_ready(StarterCombatRules.SINGULARITY, CombatInstant.at_tick(tick))):
+		return Attempt.REJECTED
+	var clear := _blockers_between(center, selected)
+	if not _certified(clear):
+		return Attempt.FAULT
+	if not clear.contacts.is_empty():
+		return Attempt.REJECTED
+	var victims := _gravity_contacts(selected)
+	if victims == null:
+		return Attempt.FAULT
+	var reversal := _action(source, tick, 1, StarterCombatRules.SINGULARITY, _rules.gravity_damage,
+		_rules.gravity_cooldown, CombatAction.Damage.MAGICAL)
+	reversal.push_center = selected
+	reversal.radial_distance = _force_strength(_rules.gravity_push)
+	var waiting := CombatDelivery.activate(_kernel, reversal, _geometry.realm_id, 0, true)
+	if waiting == null:
+		return Attempt.REJECTED
+	var pull := _action(source, tick, GRAVITY_PULL_SLOT, StarterCombatRules.SINGULARITY, 0,
+		0, CombatAction.Damage.MAGICAL)
+	pull.cooldown = &""
+	pull.components.clear()
+	pull.push_center = selected
+	pull.radial_distance = _force_strength(_rules.gravity_pull)
+	pull.radial_pull = true
+	if _instant_delivery(pull, tick, victims.contacts) != Attempt.COMMITTED:
+		waiting.finish()
+		return Attempt.FAULT
+	_gravity = GravityField.new()
+	_gravity.delivery = waiting
+	var due := tick + _rules.gravity_delay
+	_gravity.cue = _ring(StarterCombatRules.SINGULARITY, PlayerControlState.copy_point(selected),
+		_rules.gravity_radius, due, due + 10)
+	return Attempt.COMMITTED
+
+
+func _gravity_contacts(center: RealmSweep.Point) -> RealmGeometry.SweepCandidates:
+	var targets := _geometry.certify_circle_snapshot(_geometry.realm_id, center, _rules.gravity_radius, _hostiles, _actor)
+	if not _certified(targets):
+		return null
+	var clear: Array[RealmGeometry.Contact] = []
+	for contact: RealmGeometry.Contact in targets.contacts:
+		var body := _geometry.circle_center(contact.entity, contact.shape)
+		var proof := _blockers_between(center, body)
+		if not _certified(proof):
+			return null
+		if proof.contacts.is_empty():
+			clear.append(contact)
+	targets.contacts = clear
+	return targets
 
 
 func _place_fracture(tick: int, source: CombatantState, center: RealmSweep.Point, selected: RealmSweep.Point) -> Attempt:
@@ -381,6 +450,13 @@ func advance(tick: int) -> bool:
 		_fracture = null
 	if _fracture != null and not _kernel.compress_schedules(_actor, _geometry.realm_id, tick, _fracture.position, _fracture.reach):
 		return false
+	if _gravity != null and _gravity.cue.impact <= tick:
+		var contacts := _gravity_contacts(_gravity.cue.position)
+		if (tick != _gravity.cue.impact or contacts == null or not _admit_all(_gravity.delivery, contacts.contacts, tick)
+				or not _gravity.delivery.finish()):
+			return false
+		_effects.append(_gravity.cue)
+		_gravity = null
 	for index: int in range(_sigils.size() - 1, -1, -1):
 		var sigil := _sigils[index]
 		if tick > sigil.placed and sigil.cue.impact > tick and compresses_at(_actor, _geometry.realm_id, tick, sigil.cue.position):
@@ -430,6 +506,8 @@ func advance(tick: int) -> bool:
 
 func cues() -> Array[Cue]:
 	var visible: Array[Cue] = []
+	if _gravity != null:
+		visible.append(_copy_cue(_gravity.cue))
 	if _close_call_through > 0 and _close_call_through > _last_tick:
 		var at := _geometry.circle_center(_actor, 0)
 		if at != null:

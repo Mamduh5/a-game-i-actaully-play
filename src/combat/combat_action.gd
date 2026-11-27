@@ -115,6 +115,7 @@ var consume_status: StringName
 var displacement: RealmSweep.Point
 var push_center: RealmSweep.Point
 var radial_distance: float
+var radial_pull := false
 var lightning_reach: float
 var lightning_targets: int
 var lightning_damage: Quantity
@@ -147,6 +148,7 @@ func is_valid() -> bool:
 			or (displacement != null and (not is_finite(displacement.x) or not is_finite(displacement.y)))
 			or not is_finite(radial_distance) or radial_distance < 0.0
 			or (push_center == null) != (radial_distance == 0.0)
+			or (radial_pull and push_center == null)
 			or (push_center != null and (displacement != null or not is_finite(push_center.x) or not is_finite(push_center.y)))
 			or not is_finite(lightning_reach) or lightning_reach < 0.0 or lightning_targets < 0
 			or (lightning_damage == null) != (lightning_reach == 0.0)
@@ -228,6 +230,7 @@ func copy() -> CombatAction:
 	if push_center != null:
 		result.push_center = RealmSweep.Point.new(push_center.x, push_center.y)
 		result.radial_distance = radial_distance
+	result.radial_pull = radial_pull
 	for component: Component in components:
 		result.components.append(component.copy())
 	return result

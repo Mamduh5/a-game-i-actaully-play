@@ -8,6 +8,7 @@ const MAX_QUANTITY_HEX := 512
 const POINT_FIELDS := [&"mines", &"darts", &"lances", &"familiars"]
 const CUES := [&"W01", &"W02", &"W03", StarterCombatRules.SIPHON, StarterCombatRules.HARMONIC_BURST,
 	StarterCombatRules.TIME_FRACTURE, StarterCombatRules.TEMPORAL_ECHO, StarterCombatRules.CLOSE_CALL,
+	StarterCombatRules.SINGULARITY,
 	&"R02.lightning", &"RP02.blood_wake", &"RP03.storm_relay"]
 const DIRECTIONAL := [&"W01", &"W02", StarterCombatRules.HARMONIC_BURST,
 	&"R02.lightning", &"RP02.blood_wake", &"RP03.storm_relay"]

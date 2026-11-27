@@ -860,6 +860,76 @@ func test_prepared_damage_and_recovery_keep_weapon_manual_and_effect_clocks_dist
 		assert_true(source.cooldown_ready(StarterCombatRules.SIPHON, CombatInstant.at_tick(manual_tick)))
 
 
+func test_gravity_weaver_amplifies_only_the_weapon_force_already_present() -> void:
+	for arm: String in ["ordinary", "weaver", "plain"]:
+		var hero := &"H01" if arm == "ordinary" else &"H05"
+		var rune := &"" if arm == "plain" else &"R03"
+		var arena := Arena.new(&"W01", hero, false, rune, &"", {&"H05": true})
+		assert_not_null(arena.combat)
+		assert_false(&"H05" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.HERO, {}))
+		if arena.combat == null:
+			continue
+		assert_true(arena.add(&"target", 40, 0, 100))
+		assert_eq(arena.attack(1), Committed)
+		assert_true(arena.combat.advance(1))
+		assert_eq(arena.settle(1).size(), 1)
+		assert_eq(arena.hp(&"target").native_at_scale(0), 80)
+		var expected := 60.0 if arm == "ordinary" else (66.0 if arm == "weaver" else 40.0)
+		assert_almost_eq(arena.geometry.circle_center(&"target", 0).x, expected, 0.00001)
+
+
+func test_singularity_pulls_without_damage_then_rechecks_range_cover_and_resistance_on_reversal() -> void:
+	var arena := Arena.new(&"W01", &"H05", false, &"", &"", {&"H05": true})
+	assert_not_null(arena.combat)
+	if arena.combat == null:
+		return
+	assert_true(arena.add(&"ordinary", 88, 0, 100))
+	assert_true(arena.add(&"centered", 54, 0, 100))
+	assert_true(arena.add(&"resistant", 48, 40, 100, HOSTILE, true, &"", 1.0))
+	assert_true(arena.add(&"covered", 90, 20, 100))
+	assert_true(arena.add(&"friend", 80, -32, 100, FRIEND))
+	assert_true(arena.add(&"entry", 124, 3, 100))
+	assert_true(arena.add(&"leaving", 98, -35, 100))
+	assert_true(arena.wall(72, 10, 36))
+	var out_of_range := arena.combat.try_manual(1, RealmSweep.Point.new(151, 0))
+	assert_eq(out_of_range, StarterCombat.Attempt.REJECTED)
+	assert_eq(arena.combat.try_manual(1, RealmSweep.Point.new(48, 0)), Committed)
+	assert_true(arena.combat.advance(1))
+	var pulled := arena.settle(1)
+	assert_eq(pulled.size(), 4)
+	for hit: CombatKernel.Hit in pulled:
+		assert_false(hit.dealt_hostile_damage())
+	assert_almost_eq(arena.geometry.circle_center(&"ordinary", 0).x, 67.2, 0.00001)
+	assert_eq(arena.geometry.circle_center(&"centered", 0).x, 48.0)
+	assert_eq(arena.geometry.circle_center(&"resistant", 0).y, 40.0)
+	assert_eq(arena.geometry.circle_center(&"covered", 0).x, 90.0)
+	assert_eq(arena.geometry.circle_center(&"friend", 0).x, 80.0)
+	assert_eq(arena.geometry.circle_center(&"entry", 0).x, 124.0)
+	assert_eq(arena.combat.cues()[0].impact, 25)
+	for tick: int in range(2, 25):
+		assert_true(arena.combat.advance(tick))
+		assert_true(arena.settle(tick).is_empty())
+	assert_true(arena.move(&"entry", 106, 3))
+	assert_true(arena.move(&"leaving", 135, -52))
+	assert_true(arena.combat.advance(25))
+	var reversed := arena.settle(25)
+	assert_eq(reversed.size(), 4)
+	for hit: CombatKernel.Hit in reversed:
+		assert_eq(hit.family, StarterCombatRules.SINGULARITY)
+		assert_eq(hit.origin.owner, HERO)
+		assert_true(hit.dealt_hostile_damage())
+	assert_almost_eq(arena.geometry.circle_center(&"ordinary", 0).x, 85.4, 0.00001)
+	assert_eq(arena.geometry.circle_center(&"centered", 0).x, 48.0)
+	assert_eq(arena.geometry.circle_center(&"resistant", 0).y, 40.0)
+	for id: StringName in [&"ordinary", &"resistant", &"entry", &"centered"]:
+		assert_eq(arena.hp(id).native_at_scale(0), 78)
+	for id: StringName in [&"covered", &"friend", &"leaving"]:
+		assert_eq(arena.hp(id).native_at_scale(0), 100)
+	var source := arena.kernel.actor_snapshot(HERO)
+	assert_false(source.cooldown_ready(StarterCombatRules.SINGULARITY, CombatInstant.at_tick(420)))
+	assert_true(source.cooldown_ready(StarterCombatRules.SINGULARITY, CombatInstant.at_tick(421)))
+
+
 func test_siphon_rejects_weaker_replacement_decays_and_preserves_miss_cooldown() -> void:
 	var arena := Arena.new(&"W03", &"H01", true)
 	assert_true(arena.add(&"body", 30, 0, 100))
