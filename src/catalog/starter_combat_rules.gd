@@ -1,5 +1,13 @@
 class_name StarterCombatRules
 extends Resource
+
+const CHRONOMANCER := &"H04"
+const TIME_FRACTURE := &"H04.time_fracture"
+
+@export var fracture_reach: float = 180.0
+@export var fracture_radius: float = 48.0
+@export var fracture_duration: int = 90
+@export var fracture_cooldown: int = 240
 ## Stable C01 tuning and source IDs. Running combatants keep detached values.
 
 const UNDYING := &"H01"
@@ -39,6 +47,9 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 
 func is_valid_for(catalog: DefinitionCatalog) -> bool:
 	if (catalog == null or not catalog.is_valid() or revision <= 0 or weapons.size() != 3
+			or not is_finite(fracture_reach) or fracture_reach <= 0.0
+			or not is_finite(fracture_radius) or fracture_radius <= 0.0
+			or fracture_duration <= 0 or fracture_cooldown < fracture_duration
 			or not is_finite(harmonic_reach) or harmonic_reach <= 0.0 or harmonic_damage <= 0 or harmonic_cooldown <= 0
 			or not is_finite(force_distance) or force_distance <= 0.0
 			or not is_finite(lightning_reach) or lightning_reach <= 0.0 or lightning_damage <= 0

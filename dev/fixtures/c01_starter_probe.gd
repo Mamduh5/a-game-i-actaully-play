@@ -34,6 +34,11 @@ class Rules extends RunAuthority:
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
 		var hero := StarterCombatRules.CONDUCTOR if which.begins_with("conductor") else StarterCombatRules.UNDYING
+		var unlocked: Dictionary[StringName, bool] = {}
+		if which == "fracture":
+			hero = StarterCombatRules.CHRONOMANCER
+			weapon = &"W03"
+			unlocked[hero] = true
 		var runes: Array[StringName] = [&"", &""]
 		if which == "storm-relay":
 			runes.assign([&"R02", &"R03"])
@@ -43,7 +48,7 @@ class Rules extends RunAuthority:
 			runes.assign([&"R01", &"R03"])
 		elif which == "rupture":
 			runes.assign([&"R01", &"R02"])
-		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, {})
+		var prep := RunPreparation.select(catalog, hero, weapon, runes, slots, unlocked)
 		var actor := _actor(Player, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
@@ -75,6 +80,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"fracture":
+				return _enemy(&"aim", 440, 380, 100) and _enemy(&"arrival", 550, 380, 100, false)
 			"familiar":
 				return familiar != null and _enemy(&"near", 366, 380, 200) and _enemy(&"rear", 395, 380, 200)
 			"rupture":
@@ -133,7 +140,7 @@ class Rules extends RunAuthority:
 		passed = passed and _settle(now, false)
 		for intent: RunIntent in accepted:
 			if intent.action == PlayerCommand.MANUAL:
-				manual += int(combat.try_manual(tick) == StarterCombat.Attempt.COMMITTED)
+				manual += int(combat.try_manual(tick, RealmSweep.Point.new(intent.command.x, intent.command.y)) == StarterCombat.Attempt.COMMITTED)
 			else:
 				axes += int(intent.action == PlayerCommand.MOVE_AXES and intent.command.y < 0.0)
 				controls.apply(intent.command)
@@ -147,6 +154,9 @@ class Rules extends RunAuthority:
 		if tick == 16 and scenario == "sigil":
 			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(560, 520))
 			passed = passed and geometry.commit_circle_pose(&"arrival", 0, RealmSweep.Point.new(603, 401))
+		if tick == 20 and scenario == "fracture":
+			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(440, 470))
+			passed = passed and geometry.commit_circle_pose(&"arrival", 0, RealmSweep.Point.new(450, 385))
 		if tick == 5 and scenario == "undying":
 			passed = passed and _ally_elimination(tick)
 		if scenario == "wake" and tick in [83, 98]:
@@ -210,6 +220,9 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"fracture":
+				return (launches == 1 and manual == 1 and trace == [[22, "W03", "arrival", false]]
+					and kernel.actor_snapshot(&"aim").hp.amount.native_at_scale(0) == 100)
 			"familiar":
 				var dart_hits := 0
 				for row: Array in trace:
@@ -314,6 +327,8 @@ func _physics_process(_delta: float) -> void:
 			_rules.kernel.actor_snapshot(&"visitor").hp.amount.native_at_scale(0)]
 	elif _case == "familiar":
 		_hud.text = "Sketch Familiar\nTwin Quill + Piercing Quill"
+	elif _case == "fracture":
+		_hud.text = "The Chronomancer\nTime Fracture"
 	elif _case == "rupture":
 		_hud.text = "Thunder Rupture\nTarget HP %d   Flank HP %d" % [
 			_rules.kernel.actor_snapshot(&"near").hp.amount.native_at_scale(0),
@@ -326,7 +341,7 @@ func _physics_process(_delta: float) -> void:
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
-			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24]}[_case]:
+			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -339,6 +354,13 @@ func _physics_process(_delta: float) -> void:
 
 
 func _drive_visible_inputs(tick: int) -> void:
+	if _case == "fracture" and tick == 12:
+		for pressed: bool in [true, false]:
+			var field := InputEventMouseButton.new()
+			field.button_index = MOUSE_BUTTON_LEFT
+			field.position = Vector2(440, 380)
+			field.pressed = pressed
+			get_viewport().push_input(field, true)
 	if _case == "familiar" and tick == 10:
 		for pressed: bool in [true, false]:
 			var move := InputEventMouseButton.new()

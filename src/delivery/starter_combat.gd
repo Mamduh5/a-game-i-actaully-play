@@ -23,6 +23,7 @@ class Arrow:
 	var remaining: float
 
 class Sigil:
+	var placed: int
 	var delivery: CombatDelivery
 	var cue: Cue
 
@@ -41,6 +42,7 @@ var _blockers: int
 var _last_tick := -1
 var _arrows: Array[Arrow] = []
 var _sigils: Array[Sigil] = []
+var _fracture: Cue
 var _effects: Array[Cue] = []
 var _resonance: int
 var _linked_lives: Dictionary[StringName, int] = {}
@@ -149,7 +151,7 @@ func _settled_candidates(candidates: Array[PlayerTargeting.Candidate]) -> Array[
 
 ## A deliberate manual activation can validly miss. Barrier conversion uses
 ## only the actual damage from this pulse, summed across its simultaneous hits.
-func try_manual(tick: int) -> Attempt:
+func try_manual(tick: int, selected: RealmSweep.Point = null) -> Attempt:
 	if not _open_tick(tick):
 		return Attempt.REJECTED
 	var source := _kernel.actor_snapshot(_actor)
@@ -158,6 +160,8 @@ func try_manual(tick: int) -> Attempt:
 		return Attempt.REJECTED
 	if _hero == StarterCombatRules.CONDUCTOR:
 		return _harmonic_burst(tick, source, center)
+	if _hero == StarterCombatRules.CHRONOMANCER:
+		return _place_fracture(tick, source, center, selected)
 	if (_hero != StarterCombatRules.UNDYING or tick > RunAuthority.MAX_TICK - _rules.siphon_lifetime
 			or not source.cooldown_ready(StarterCombatRules.SIPHON, CombatInstant.at_tick(tick))):
 		return Attempt.REJECTED
@@ -170,6 +174,27 @@ func try_manual(tick: int) -> Attempt:
 	var result := _instant_delivery(action, tick, contacts.contacts)
 	if result == Attempt.COMMITTED:
 		_effects.append(_ring(StarterCombatRules.SIPHON, center, _rules.siphon_radius, tick, tick + 10))
+	return result
+
+
+func _place_fracture(tick: int, source: CombatantState, center: RealmSweep.Point, selected: RealmSweep.Point) -> Attempt:
+	if (selected == null or not is_finite(selected.x) or not is_finite(selected.y)
+			or tick > RunAuthority.MAX_TICK - _rules.fracture_cooldown
+			or (selected.x - center.x) ** 2 + (selected.y - center.y) ** 2 > _rules.fracture_reach ** 2
+			or not source.cooldown_ready(StarterCombatRules.TIME_FRACTURE, CombatInstant.at_tick(tick))):
+		return Attempt.REJECTED
+	var path := _blockers_between(center, selected)
+	if not _certified(path):
+		return Attempt.FAULT
+	if not path.contacts.is_empty():
+		return Attempt.REJECTED
+	var action := _action(source, tick, 1, StarterCombatRules.TIME_FRACTURE, 0,
+		_rules.fracture_cooldown, CombatAction.Damage.MAGICAL)
+	var result := _instant_delivery(action, tick, [])
+	if result == Attempt.COMMITTED:
+		_fracture = _ring(StarterCombatRules.TIME_FRACTURE, PlayerControlState.copy_point(selected),
+			_rules.fracture_radius, tick, tick + _rules.fracture_duration)
+		_effects.append(_fracture)
 	return result
 
 
@@ -259,8 +284,15 @@ func observe_closed_group(group: CombatKernel.WaveResult) -> void:
 func advance(tick: int) -> bool:
 	if not _open_tick(tick) or not _decay(tick):
 		return false
+	if _fracture != null and _fracture.ends <= tick:
+		_fracture = null
 	for index: int in range(_sigils.size() - 1, -1, -1):
 		var sigil := _sigils[index]
+		if (_fracture != null and tick > sigil.placed and sigil.cue.impact > tick
+				and (sigil.cue.position.x - _fracture.position.x) ** 2
+				+ (sigil.cue.position.y - _fracture.position.y) ** 2 <= _fracture.reach ** 2):
+			sigil.cue.impact -= 1
+			sigil.cue.ends -= 1
 		if sigil.cue.impact > tick:
 			continue
 		if sigil.cue.impact < tick:
@@ -380,6 +412,7 @@ func _place_sigil(action: CombatAction, tick: int, source: RealmSweep.Point, cen
 	if delivery == null:
 		return Attempt.REJECTED
 	var sigil := Sigil.new()
+	sigil.placed = tick
 	sigil.delivery = delivery
 	var impact := tick + _weapon.delay_ticks
 	sigil.cue = _ring(&"W03", center, _weapon.area_radius, impact, impact + 12)

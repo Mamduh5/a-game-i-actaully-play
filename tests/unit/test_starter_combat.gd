@@ -19,7 +19,7 @@ class Arena:
 	var targeting := PlayerTargeting.new()
 
 	func _init(weapon: StringName, hero: StringName = &"H01", short_cooldown: bool = false,
-			rune: StringName = &"", second_rune: StringName = &"") -> void:
+			rune: StringName = &"", second_rune: StringName = &"", unlocked: Dictionary[StringName, bool] = {}) -> void:
 		var source: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		catalog = source.compile()
 		if short_cooldown:
@@ -28,7 +28,7 @@ class Arena:
 		var slots: Array[StringName] = []
 		slots.resize(RunPreparation.CANDIDATE_SLOTS)
 		slots.fill(&"")
-		var prep := RunPreparation.select(catalog, hero, weapon, [rune, second_rune], slots, {})
+		var prep := RunPreparation.select(catalog, hero, weapon, [rune, second_rune], slots, unlocked)
 		var actor := make_actor(HERO, 100, CombatOrigin.Provenance.SEAT)
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
@@ -131,6 +131,37 @@ class Arena:
 			if barrier.id == id:
 				return barrier
 		return null
+
+
+func test_fracture_compresses_only_the_owners_sigil_inside_the_selected_field() -> void:
+	for inside: bool in [false, true]:
+		var arena := Arena.new(&"W03", &"H04", false, &"", &"", {&"H04": true})
+		assert_false(&"H04" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.HERO, {}))
+		assert_true(arena.add(&"aim", 100, 0, 200))
+		assert_true(arena.add(&"partner", 0, 5, 100, FRIEND))
+		var slots: Array[StringName] = []
+		slots.resize(RunPreparation.CANDIDATE_SLOTS)
+		slots.fill(&"")
+		var prep := RunPreparation.select(arena.catalog, &"H01", &"W03", [&"", &""], slots, {})
+		var partner := StarterCombat.create(arena.rules, arena.catalog, prep, arena.kernel, arena.geometry,
+			&"partner", HOSTILE, HOSTILE, BLOCKER)
+		var impacts: Dictionary[StringName, int] = {}
+		for tick: int in range(1, 31):
+			if tick == 1:
+				assert_eq(arena.attack(tick), Committed)
+				assert_eq(partner.try_weapon(tick, PlayerTargeting.new(), arena.candidates), Committed)
+			if tick == 2:
+				assert_eq(arena.combat.try_manual(tick, RealmSweep.Point.new(200, 0)), StarterCombat.Attempt.REJECTED)
+				assert_eq(arena.combat.try_manual(tick, RealmSweep.Point.new(100 if inside else 0, 0)), Committed)
+			if tick == 3:
+				assert_eq(arena.combat.try_manual(tick, RealmSweep.Point.new(100, 0)), StarterCombat.Attempt.REJECTED)
+			assert_true(arena.combat.advance(tick))
+			assert_true(partner.advance(tick))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				assert_false(impacts.has(hit.origin.owner))
+				impacts[hit.origin.owner] = tick
+		assert_eq(impacts.get(HERO, -1), 13 if inside else 25)
+		assert_eq(impacts.get(&"partner", -1), 25)
 
 
 func test_zero_charge_harmonic_burst_links_one_reached_hostile_and_commits_an_empty_cast() -> void:
