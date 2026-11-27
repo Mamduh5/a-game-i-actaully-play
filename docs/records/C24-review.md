@@ -31,3 +31,22 @@
 | `release/collapse-33.png` | `3b21703ed84dcd11965c941358bac0724db393e3bc6b16b51175292f996b8c12` |
 | `release/collapse-40.png` | `35144d64d5358c5583fce5797cc737015694125e1cf28c9f17236a6dea99d84a` |
 | `overlay-4beafbb-gut.xml` | `0404fe304f8a30898678078c1dd2c7b8d1e97ddc255523d621c4e60620d0e49d` |
+
+## Independent compound-impact and momentum review (3f7a224 / e9963cc)
+
+- **Target:** Isolated branch `work/c24`, commits `3f7a224df9fe055182829134a231dde46c01f308` (single kinetic debit per mover and compound creature, base `2b2243d`) and `e9963ccc7eefc33f62ed2511000428200ad94129` (single isolated-pair normal impulse transfer into a compound receiver, base `2d05b52`), writer handoff `85a87064deeec57a1092835879a9470e3d5a1104:docs/records/C24.md`.
+- **Reviewer / verdict:** Antigravity/Gemini — **CHECKPOINT APPROVED** (**`C24-O2` CLOSED**; **`C24-O1` RETRACTED / CLOSED** — direct inspection of `2b2243d:docs/records/C24.md` confirmed the branch record already carried the intact 64-character SHA-256 `025eba707f72f045562d86b84066ac9fcd04f263343a7b79e8803cd5f2b752bd`; the 61-character string in the prior review note was a reviewer transcription error). Package `C24` remains **`IN PROGRESS`** on `work/c24` pending elongated Fallen Pillar footprints, authoritative creature damage/control consumers, finite pickup/shrine consumers, and integration onto `dev` (`C25` and `C26` remain gated).
+- **Verified evidence:** All 10 writer SHA-256 digests under `.qa-evidence/C24/{kinetic-draft,3f7a224,composition-1071e6b-3f7a224,compound-momentum-before,e9963cc,composition-f621356-e9963cc}/` verified verbatim on disk. Independent negative counterexample (`2b2243d` + `e9963cc:tests/unit/test_world_objects.gd`) reproduced 2 failing test cases before the fixes. Clean-archive verification at `work/c24` `e9963cc` under pinned Godot `4.7.stable.official.5b4e0cb0f` (`GODOT_MCP_RUNTIME=off`, isolated `APPDATA`/`LOCALAPPDATA`) passed cold import, **273/273 GUT tests (7,909 assertions, 0 failures)**, and headless `c24_object_probe.tscn` (`warning` tick 2 / neutral `contact` tick 38). Overlaying `src/world/objects/` and `tests/unit/test_world_objects.gd{,.uid}` from `e9963cc` onto a clean archive of `dev` `eed905e` passed cold import and **342/342 GUT tests (11,469 assertions, 0 failures)**.
+- **Independent adversarial probe (`C24-review-r2/adversarial-probe.log`, 59/59 checks passed, 0 failures):**
+  - Confirmed unequal-strength contacts at an exact common instant (glancing slot `0` vs head-on slot `1`) select stronger slot `1` for BOTH isolated-pair momentum transfer (`pure +x` velocity) and single `CreatureImpact` debit across both shape registration orders (`[0, 1]` / `[1, 0]`) and both collision submission orders.
+  - Confirmed two distinct movers (`boulder_a`, `boulder_b`) hitting one creature at the same instant emit 2 `CreatureImpact` entries in canonical sorted mover order regardless of submission order.
+  - Confirmed simultaneous structure (`loose_crate`) + compound creature contact blocks isolated-pair momentum transfer (`transferred=false`, `vel=0`) while still posting 1 creature kinetic debit (`shape=0`).
+  - Confirmed resting-contact latch suppresses repeat impact without separation and re-enables single debit + momentum transfer after separation and genuine re-strike.
+
+| File under `.qa-evidence/C24-review-r2/` | SHA-256 |
+|---|---|
+| `import.log` | `b3c8614856450da253e50a81ac0b80644a6dff9043b6bb683f4ab6155584a093` |
+| `gut.xml` | `99161c542cc418b6f3efe3a07c6f968dca9b09b6ad02bf1089ab30d6ede0d01f` |
+| `headless/runtime.log` | `c11e6a6b8e373c04ef1eb52a1c610b4134e8f9ba2f029e9439ef73972d3c50d1` |
+| `overlay-eed905e-gut.xml` | `ee3e4248b57dc6a96264e9f5ce6858c803507a3779319b8467fc01383a8c38c8` |
+| `adversarial-probe.log` | `ef61beb6c6ced6172eaaf4cbdf88c60f2a379ec6c571bb4b57ffe25884034672` |
