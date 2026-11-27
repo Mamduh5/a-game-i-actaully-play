@@ -118,7 +118,7 @@ func _place_cycle(source: CombatantState, tick: int, rank: int) -> bool:
 		mine.charge = CombatMineCharge.create(action.origin.committed_at, ARM_DELAY, LIFETIME,
 			part.base, Quantity.from_count(int(rank == 5)), part.base.multiply(Quantity.from_count(2)))
 		mine.delivery = CombatDelivery.activate(_kernel, action, _geometry.realm_id, 0, true)
-		if mine.delivery == null or not mine.delivery.bind_mine(mine.charge):
+		if mine.delivery == null or not mine.delivery.bind_mine(mine.charge, point, TRIGGER_RADIUS, BLAST_RADIUS, _targets):
 			return false
 		_mines.append(mine)
 		placed += 1
@@ -141,8 +141,7 @@ func _check_trigger(mine: Mine, tick: int) -> bool:
 			return false
 		if at.order_against(CombatInstant.at_tick(mine.placed + LIFETIME)) == RealmCircleTime.Order.AFTER:
 			return true
-		var blast := _geometry.certify_disk_at(_geometry.realm_id, mine.center, BLAST_RADIUS, trigger.proof, _targets, _owner)
-		if blast == null or not blast.unresolved.is_empty() or not mine.delivery.offer_mine_entry(at, entrant.id, blast.contacts):
+		if not mine.delivery.offer_mine_entry(tick, trigger):
 			return false
 		entrants[entrant.id] = true
 	return true

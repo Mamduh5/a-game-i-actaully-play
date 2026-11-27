@@ -107,6 +107,10 @@ class WaveResult:
 
 class Commitment:
 	var armed_mine: CombatMineCharge
+	var mine_center: RealmSweep.Point
+	var mine_trigger_radius: float
+	var mine_blast_radius: float
+	var mine_targets: int
 	var action: CombatAction
 	var realm: StringName
 	var parts: Dictionary[int, bool] = {}
@@ -133,12 +137,12 @@ class Impact:
 	var ancestry: Ancestry
 
 class MineEntry:
-	var charge: CombatMineCharge
+	var held: Commitment
+	var proof: RealmCircleTime.Contact
 	var entrant: StringName
 	var life: int
 	var visit: int
 	var realm: StringName
-	var blast: Array[Impact] = []
 
 class Ancestry:
 	var key: String
@@ -496,41 +500,79 @@ func finish_delivery(key: String) -> bool:
 	return _accepting() and _actions.erase(key)
 
 
-func bind_mine(key: String, mine: CombatMineCharge) -> bool:
+func bind_mine(key: String, mine: CombatMineCharge, center: RealmSweep.Point, trigger_radius: float,
+		blast_radius: float, targets: int) -> bool:
 	var held: Commitment = _actions.get(key)
 	if (not _accepting() or held == null or held.action.family != &"P03" or held.action.components.size() != 1
+			or center == null or not is_finite(center.x) or not is_finite(center.y) or not is_finite(trigger_radius)
+			or not is_finite(blast_radius) or trigger_radius <= 0 or blast_radius < trigger_radius or targets <= 0
 			or held.armed_mine != null or not held.parts.is_empty() or mine == null or mine.end_reason != CombatMineCharge.End.LIVE):
 		return false
 	held.armed_mine = mine
+	held.mine_center = PlayerControlState.copy_point(center)
+	held.mine_trigger_radius = trigger_radius
+	held.mine_blast_radius = blast_radius
+	held.mine_targets = targets
 	return true
 
 
 ## Register a prospective entry. A preceding combat group can eliminate the
 ## entrant before this instant, leaving the mine for another eligible crossing.
-func offer_mine_entry(key: String, part: int, at: CombatInstant, entrant: StringName,
-		contacts: Array[RealmGeometry.Contact]) -> bool:
+func offer_mine_entry(key: String, part: int, start_tick: int, contact: RealmGeometry.Contact) -> bool:
+	if contact == null:
+		return false
+	var at := CombatInstant.at_contact(start_tick, contact.proof)
 	var held: Commitment = _actions.get(key)
-	var actor: CombatantState = _actors.get(entrant)
+	var entrant: CombatantState = _actors.get(contact.entity)
 	if (not _accepting() or held == null or held.armed_mine == null or part < 1 or held.parts.has(part)
-			or actor == null or not actor.is_alive() or actor.realm != held.realm or at == null
+			or entrant == null or not entrant.is_alive() or entrant.realm != held.realm or at == null
 			or (_closed != null and _closed.order_against(at) != RealmCircleTime.Order.BEFORE)):
 		return false
-	var potency := held.armed_mine.potency_at(at)
-	if potency == null:
+	var origin := held.action.origin.copy()
+	origin.delivery_part = part
+	var entry := MineEntry.new()
+	entry.held = held
+	entry.entrant = entrant.id
+	entry.life = entrant.life
+	entry.visit = entrant.realm_visit
+	entry.realm = held.realm
+	entry.proof = contact.proof.copy()
+	if _queue.admit(origin, at) != CombatRootQueue.Result.ACCEPTED:
+		return false
+	held.parts[part] = true
+	_mine_entries[origin.occurrence_key()] = entry
+	return true
+
+
+func _resolve_mine_entry(group: Group, origin: CombatOrigin, entry: MineEntry) -> bool:
+	var held := entry.held
+	var entrant := group.actors[entry.entrant]
+	if (held.armed_mine.end_reason != CombatMineCharge.End.LIVE or held.armed_mine in group.detonations
+			or not entrant.is_alive() or entrant.life != entry.life or entrant.realm_visit != entry.visit or entrant.realm != entry.realm):
+		return true
+	var geometry := _geometry[held.realm]
+	var inside := geometry.certify_disk_at(held.realm, held.mine_center, held.mine_trigger_radius,
+		entry.proof, held.mine_targets, held.action.source)
+	if inside == null or not inside.unresolved.is_empty():
+		return false
+	var eligible := false
+	for contact: RealmGeometry.Contact in inside.contacts:
+		if contact.entity == entrant.id:
+			eligible = true
+			break
+	if not eligible:
+		return true
+	var blast := geometry.certify_disk_at(held.realm, held.mine_center, held.mine_blast_radius,
+		entry.proof, held.mine_targets, held.action.source)
+	var potency := held.armed_mine.potency_at(group.receipt.due)
+	if blast == null or not blast.unresolved.is_empty() or potency == null:
 		return false
 	var action := held.action.copy()
 	action.components[0].base = potency
-	var origin := action.origin.copy()
-	origin.delivery_part = part
-	var entry := MineEntry.new()
-	entry.charge = held.armed_mine
-	entry.entrant = entrant
-	entry.life = actor.life
-	entry.visit = actor.realm_visit
-	entry.realm = held.realm
+	group.detonations.append(held.armed_mine)
 	var seen: Dictionary[StringName, bool] = {}
-	for contact: RealmGeometry.Contact in contacts:
-		var target: CombatantState = _actors.get(contact.entity)
+	for contact: RealmGeometry.Contact in blast.contacts:
+		var target: CombatantState = group.actors.get(contact.entity)
 		if target == null or target.realm != held.realm or not target.is_alive() or seen.has(target.id):
 			continue
 		seen[target.id] = true
@@ -543,11 +585,7 @@ func offer_mine_entry(key: String, part: int, at: CombatInstant, entrant: String
 		impact.target_visit = target.realm_visit
 		impact.shape = contact.shape
 		impact.hostile = true
-		entry.blast.append(impact)
-	if _queue.admit(origin, at) != CombatRootQueue.Result.ACCEPTED:
-		return false
-	held.parts[part] = true
-	_mine_entries[origin.occurrence_key()] = entry
+		group.pending.append(impact)
 	return true
 
 
@@ -729,11 +767,8 @@ func _open_group(through: CombatInstant) -> WaveResult:
 	for origin: CombatOrigin in wave.origins:
 		var impact: Impact = _impacts.get(origin.occurrence_key())
 		var entry: MineEntry = _mine_entries.get(origin.occurrence_key())
-		if entry != null and entry.charge.end_reason == CombatMineCharge.End.LIVE and entry.charge not in _group.detonations:
-			var entrant := _group.actors[entry.entrant]
-			if entrant.is_alive() and entrant.life == entry.life and entrant.realm_visit == entry.visit and entrant.realm == entry.realm:
-				_group.detonations.append(entry.charge)
-				_group.pending.append_array(entry.blast)
+		if entry != null and not _resolve_mine_entry(_group, origin, entry):
+			return _interrupt(&"mine_entry")
 		if impact == null or (not impact.activation.is_empty()
 				and _group.activation_outcomes[impact.activation] != ActivationOutcome.PAID):
 			continue

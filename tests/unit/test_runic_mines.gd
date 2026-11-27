@@ -85,3 +85,22 @@ func test_mine_survives_when_an_earlier_root_kills_the_only_expected_entrant() -
 	arena.settle(15)
 	assert_eq(arena.hp(&"bystander").native_at_scale(0), 84)
 	assert_true(mines.positions().is_empty())
+
+
+func test_mine_rechecks_displaced_entrant_and_samples_new_bystanders_at_trigger() -> void:
+	for displaced: bool in [false, true]:
+		var arena := Arena.new(&"W01")
+		assert_true(arena.add(&"entrant", -30, 0, 100))
+		assert_true(arena.add(&"bystander", 80, 0, 100))
+		var mines := RunicMines.create(HERO, FamiliarTest._earn(arena, 1, &"P03"), arena.kernel, arena.geometry, 1, 2)
+		for tick: int in range(1, 13):
+			assert_true(mines.advance(tick))
+			arena.settle(tick)
+		assert_true(arena.geometry.stage_circle_motion(&"entrant", 0, RealmSweep.Point.new(30, 0)))
+		assert_true(mines.advance(13))
+		if displaced:
+			assert_true(arena.move(&"entrant", -80, 0))
+		assert_true(arena.move(&"bystander", 24, 0))
+		arena.settle(14)
+		assert_eq(arena.hp(&"bystander").native_at_scale(0), 100 if displaced else 84)
+		assert_eq(mines.positions().size(), 1 if displaced else 0)

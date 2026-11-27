@@ -155,12 +155,13 @@ func finish() -> bool:
 	return true
 
 
-func bind_mine(charge: CombatMineCharge) -> bool:
-	return _kernel.bind_mine(_commitment, charge)
+func bind_mine(charge: CombatMineCharge, center: RealmSweep.Point, trigger_radius: float, blast_radius: float,
+		targets: int) -> bool:
+	return _kernel.bind_mine(_commitment, charge, center, trigger_radius, blast_radius, targets)
 
 
-func offer_mine_entry(at: CombatInstant, entrant: StringName, contacts: Array[RealmGeometry.Contact]) -> bool:
-	if _next_part == Quantity.INT_MAX or not _kernel.offer_mine_entry(_commitment, _next_part, at, entrant, contacts):
+func offer_mine_entry(tick: int, contact: RealmGeometry.Contact) -> bool:
+	if _next_part == Quantity.INT_MAX or not _kernel.offer_mine_entry(_commitment, _next_part, tick, contact):
 		return false
 	_next_part += 1
 	return true
