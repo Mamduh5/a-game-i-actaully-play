@@ -111,6 +111,10 @@ func initialized_seats() -> Array[StringName]:
 	return _members.keys()
 
 
+func host_seat() -> StringName:
+	return _host
+
+
 func belongs_to(run: StringName, epoch: int) -> bool:
 	return run == _run and epoch > 0 and epoch == _epoch
 

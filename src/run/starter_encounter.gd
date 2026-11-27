@@ -4,6 +4,7 @@ extends RunAuthority
 
 const PLAYER_BODY := 4
 const SIGHT := 420.0
+const COMMON_CURRENCY := ProfileShop.COMMON
 const TUNING: StarterCombatRules = preload("res://src/catalog/starter_combat.tres")
 
 class Build:
@@ -26,6 +27,13 @@ class Seat:
 	var mines: RunicMines
 	var lance: SpectralLance
 	var tether: ArcaneTether
+
+class EnemyEarning:
+	var amount: Quantity
+	var radius: float
+	var life: int
+	var occurrence: String
+	var presence: RunEncounterPresence
 
 class Fighter:
 	var id: StringName
@@ -69,6 +77,8 @@ var _activity: WorldActivity
 var _party: RunParty
 var _seats: Dictionary[StringName, Seat] = {}
 var _enemies: Array[StringName] = []
+var _earning_accounts: Dictionary[StringName, OrdinaryCurrency] = {}
+var _enemy_earnings: Dictionary[StringName, EnemyEarning] = {}
 var _fault: StringName
 var _staged_inputs: Array[RunIntent] = []
 var _resolved_frame: WorldActivity.Frame
@@ -168,10 +178,45 @@ static func _entry_amount(prep: RunPreparation, stat: StringName, authored: Quan
 	return authored.multiply(Quantity.from_count(RunPreparation.BASIS_POINTS + bonus, 4)) if bonus != 0 else authored
 
 
-func place_enemy(id: StringName, rules: WorldEnemy.Rules, at: RealmSweep.Point) -> bool:
-	if (_party == null or next_tick() != 1 or has_unpublished_tick()
-			or not _activity.introduce_enemy(id, _geometry.realm_id, rules, at)):
+## The composition supplies one persisted profile account per initialized
+## seat. Seat IDs and profile IDs need not be the same.
+func bind_enemy_currency(accounts: Dictionary[StringName, OrdinaryCurrency]) -> bool:
+	if (_party == null or next_tick() != 1 or not _earning_accounts.is_empty()
+			or accounts.size() != _seats.size()):
 		return false
+	var host := _party.host_seat()
+	var local: OrdinaryCurrency = accounts.get(host)
+	if local == null or not local.is_local_recipient():
+		return false
+	var ordered: Array[OrdinaryCurrency] = []
+	for seat: StringName in _party.initialized_seats():
+		var account: OrdinaryCurrency = accounts.get(seat)
+		if (not local.shares_issuer_with(account) or account.account() != COMMON_CURRENCY
+				or account.is_local_recipient() != (seat == host)):
+			return false
+		ordered.append(account)
+	if not _attach_ordinary_currency_batch(ordered):
+		return false
+	_earning_accounts = accounts.duplicate()
+	return true
+
+
+func place_enemy(id: StringName, rules: WorldEnemy.Rules, at: RealmSweep.Point, common_reward: int = 0) -> bool:
+	if (_party == null or next_tick() != 1 or has_unpublished_tick() or common_reward < 0
+			or (common_reward > 0 and (_earning_accounts.is_empty() or rules == null))):
+		return false
+	var earning: EnemyEarning
+	if common_reward > 0:
+		earning = EnemyEarning.new()
+		earning.amount = Quantity.from_count(common_reward)
+		earning.radius = rules.radius
+		earning.occurrence = "enemy/" + JSON.stringify([_geometry.realm_id, id]).sha256_text()
+		if not _sample_presence(earning, 1, at, CombatInstant.at_tick(0)):
+			return false
+	if not _activity.introduce_enemy(id, _geometry.realm_id, rules, at):
+		return false
+	if earning != null:
+		_enemy_earnings[id] = earning
 	_enemies.append(id)
 	_enemies.sort()
 	return true
@@ -208,7 +253,8 @@ func movement_state(seat: StringName, baseline: int, serial: int) -> MovementSna
 
 
 func can_open_earning_group() -> bool:
-	return _party != null and not _party.defeated and _fault.is_empty() and super.can_open_earning_group()
+	return (_party != null and not _party.defeated and _fault.is_empty()
+		and (_earning_accounts.is_empty() or _ordinary_session != null) and super.can_open_earning_group())
 
 
 func _supports_action(action: StringName) -> bool:
@@ -268,6 +314,8 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 		if at == null:
 			return false
 		targets[id] = _targets(at)
+	if not _sample_enemy_earnings(CombatInstant.at_tick(tick)):
+		return false
 	for intent: RunIntent in accepted:
 		var id := intent.seat_id
 		var seat := _seats[id]
@@ -346,8 +394,62 @@ func _observe_wave(closed: CombatKernel.WaveResult) -> bool:
 				seat.vault = null
 	if not _party.observe_combat(closed):
 		return false
+	if not _queue_enemy_earnings(closed):
+		return false
 	for seat: Seat in _seats.values():
 		seat.combat.observe_closed_group(closed)
+	return true
+
+
+func _sample_enemy_earnings(now: CombatInstant) -> bool:
+	for id: StringName in _enemy_earnings:
+		var actor := _kernel.actor_vitals(id)
+		if actor == null:
+			return false
+		if actor.hp.sign_value > 0 and not _sample_presence(_enemy_earnings[id], actor.life,
+				_geometry.circle_center(id, 0), now):
+			return false
+	return true
+
+
+func _sample_presence(earning: EnemyEarning, life: int, at: RealmSweep.Point, now: CombatInstant) -> bool:
+	if at == null:
+		return false
+	if earning.presence != null and earning.life == life:
+		return earning.presence.observe(now, at)
+	earning.life = life
+	earning.presence = RunEncounterPresence.start(_party, StringName(earning.occurrence),
+		_geometry.realm_id, at, earning.radius, now)
+	return earning.presence != null
+
+
+func _queue_enemy_earnings(closed: CombatKernel.WaveResult) -> bool:
+	var allocations: Dictionary[OrdinaryCurrency, Dictionary] = {}
+	var consumed: Array[StringName] = []
+	for hit: CombatKernel.Hit in closed.eliminations:
+		var earning: EnemyEarning = _enemy_earnings.get(hit.target)
+		if (earning == null or not hit.hostile or hit.origin.provenance != CombatOrigin.Provenance.SEAT
+				or not _seats.has(hit.origin.owner)):
+			continue
+		var at := _geometry.circle_center(hit.target, 0)
+		if (earning.presence == null or earning.life != hit.target_life) and not _sample_presence(earning, hit.target_life, at, closed.due):
+			return false
+		if at == null or not earning.presence.settle(closed.due, at):
+			return false
+		var recipients := earning.presence.recipients()
+		if recipients.is_empty():
+			earning.presence = null
+			continue
+		for seat: StringName in recipients:
+			var account := _earning_accounts[seat]
+			var empty: Dictionary[String, Quantity] = {}
+			var sources: Dictionary[String, Quantity] = allocations.get_or_add(account, empty)
+			sources[earning.occurrence] = earning.amount
+		consumed.append(hit.target)
+	if not allocations.is_empty() and not _accrue_closed_ordinary(allocations):
+		return false
+	for id: StringName in consumed:
+		_enemy_earnings.erase(id)
 	return true
 
 

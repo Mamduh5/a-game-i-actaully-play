@@ -37,9 +37,12 @@ static func start(party: RunParty, occurrence: StringName, realm: StringName, ce
 
 ## Also sample after movement and before a lethal group can change a fresh
 ## arrival into a body at the closing instant.
-func observe(now: CombatInstant) -> bool:
+func observe(now: CombatInstant, center: RealmSweep.Point = null) -> bool:
 	if (_settled or now == null or not _party.has_realm(_realm) or (_latest != null and _latest.order_against(now)
 			not in [RealmCircleTime.Order.BEFORE, RealmCircleTime.Order.SAME])):
+		return false
+	var footprint := _center if center == null else center
+	if not is_finite(footprint.x) or not is_finite(footprint.y):
 		return false
 	var seen := _seen.duplicate()
 	var nearby: Array[StringName] = []
@@ -48,7 +51,7 @@ func observe(now: CombatInstant) -> bool:
 		var member := _party.view(seat, now)
 		if member.realm != _realm or member.position == null:
 			continue
-		var overlap := certifier.measure(member.position, member.position, MARGIN, _center, _center, _radius)
+		var overlap := certifier.measure(member.position, member.position, MARGIN, footprint, footprint, _radius)
 		match overlap.outcome:
 			RealmCircleTime.Result.UNRESOLVED: return false
 			RealmCircleTime.Result.MISS: continue
@@ -59,11 +62,13 @@ func observe(now: CombatInstant) -> bool:
 	_seen = seen
 	_nearby = nearby
 	_latest = now
+	if center != null:
+		_center = PlayerControlState.copy_point(center)
 	return true
 
 
-func settle(now: CombatInstant) -> bool:
-	if not observe(now):
+func settle(now: CombatInstant, center: RealmSweep.Point = null) -> bool:
+	if not observe(now, center):
 		return false
 	_settled = true
 	return true

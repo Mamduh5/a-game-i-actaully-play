@@ -80,15 +80,32 @@ func matches_world_seed(seed: int) -> bool:
 
 
 func attach_ordinary_currency(earnings: OrdinaryCurrency) -> bool:
-	if (_identity.is_empty() or _exit != Exit.ACTIVE or _ordinary_ending or _closing != null or _gateway != null or earnings == null
-			or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])
-			or (_ordinary_session != null and not _ordinary_session.tracks(earnings))):
+	return _attach_ordinary_currency_batch([earnings])
+
+
+func _attach_ordinary_currency_batch(accounts: Array[OrdinaryCurrency]) -> bool:
+	if _identity.is_empty() or _exit != Exit.ACTIVE or _ordinary_ending or _closing != null or _gateway != null:
 		return false
-	for existing: OrdinaryCurrency in _ordinary_currency:
-		if existing.recipient() == earnings.recipient() and existing.account() == earnings.account():
+	var combined := _ordinary_currency.duplicate()
+	for earnings: OrdinaryCurrency in accounts:
+		if (earnings == null or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])
+				or (_ordinary_session != null and not _ordinary_session.tracks(earnings))):
 			return false
-	_ordinary_currency.append(earnings)
+		for existing: OrdinaryCurrency in combined:
+			if existing.recipient() == earnings.recipient() and existing.account() == earnings.account():
+				return false
+		combined.append(earnings)
+	_ordinary_currency = combined
 	return true
+
+
+func _accrue_closed_ordinary(allocations: Dictionary[OrdinaryCurrency, Dictionary]) -> bool:
+	if not _resolving or _closing == null or _ordinary_session == null or not _ordinary_session.is_open():
+		return false
+	for account: OrdinaryCurrency in allocations:
+		if account not in _ordinary_currency:
+			return false
+	return OrdinaryCurrency._accrue_closed_group(allocations)
 
 
 ## The live shell confirms the issuer's activity before opening earning groups.

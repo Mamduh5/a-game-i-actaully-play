@@ -4,7 +4,7 @@ extends Node2D
 const SEAT := &"wp23-terminal"
 const RUN := &"live-defeat"
 const REALM := WorldTopology.OVERWORLD
-const ACCOUNT := "currency/permanent"
+const FIXTURE_ACCOUNT := "currency/permanent"
 const SHELL := preload("res://src/app/main.tscn")
 
 class RefusalStore extends ProfileStore:
@@ -38,13 +38,17 @@ var _capture: String
 var _fault_after: int
 var _capture_ok := true
 var _active_wait: String
+var _gameplay_earned: bool
+var _earning_receipt: Dictionary
+var _account := FIXTURE_ACCOUNT
 var _clock := EarningClock.new()
 
 
 func _ready() -> void:
 	set_physics_process(false)
 	var args := OS.get_cmdline_user_args()
-	if args.size() < 2 or args.size() > 3 or args[0] not in ["money", "marker", "read", "active-entry", "active-wave"]:
+	if (args.size() < 2 or args.size() > 3
+			or args[0] not in ["money", "marker", "read", "active-entry", "active-wave", "earned", "read-earned"]):
 		get_tree().quit(2)
 		return
 	if _store.open(String(SEAT), args[1]) != ProfileStore.OpenResult.OPENED:
@@ -55,13 +59,16 @@ func _ready() -> void:
 	if not shell.bind_profile(_store):
 		get_tree().quit(4)
 		return
-	if args[0] == "read":
+	_gameplay_earned = args[0] in ["earned", "read-earned"]
+	if _gameplay_earned:
+		_account = StarterEncounter.COMMON_CURRENCY
+	if args[0] in ["read", "read-earned"]:
 		_readback()
 		return
 	shell.hide()
 	_capture = args[2] if args.size() == 3 else ""
 	_fault_after = int(args[0] == "marker")
-	if args[0].begins_with("active-"):
+	if args[0].begins_with("active-") or _gameplay_earned:
 		_active_wait = args[0]
 	RenderingServer.set_default_clear_color(Color("#202b29"))
 	_stage = StarterEncounterView.new()
@@ -111,7 +118,7 @@ func _begin() -> bool:
 	foe.faction = &"fixture"
 	foe.foes = [WorldEnemy.PARTY]
 	foe.family = &"fixture/defeat-strike"
-	foe.hp = Quantity.from_count(100)
+	foe.hp = Quantity.from_count(24 if _gameplay_earned else 100)
 	foe.damage = Quantity.from_count(100 if _active_wait.is_empty() else 16)
 	foe.radius = 12.0
 	foe.sight = 154.0
@@ -119,8 +126,6 @@ func _begin() -> bool:
 	foe.attack_radius = 26.0
 	foe.windup_ticks = 2
 	foe.recovery_ticks = 78
-	if not _encounter.place_enemy(&"foe", foe, RealmSweep.Point.new(155, 128)):
-		return false
 	var key := Crypto.new().generate_rsa(2048)
 	var grant := ProfileGrant.Binding.new()
 	grant.run = RUN
@@ -130,8 +135,15 @@ func _begin() -> bool:
 	grant.issuer = key
 	grant.recipient_key = key
 	var sample := Callable() if _active_wait.is_empty() else _clock.sample
-	_ordinary = OrdinaryCurrency.begin(_store, grant, key, ACCOUNT, sample)
-	return _encounter.attach_ordinary_currency(_ordinary)
+	_ordinary = OrdinaryCurrency.begin(_store, grant, key, _account, sample)
+	var far := RealmSweep.Point.new(155, 128)
+	if not _gameplay_earned:
+		return _encounter.place_enemy(&"foe", foe, far) and _encounter.attach_ordinary_currency(_ordinary)
+	var first := foe.copy()
+	first.hp = Quantity.from_count(20)
+	return (_encounter.bind_enemy_currency({SEAT: _ordinary})
+		and _encounter.place_enemy(&"first", first, RealmSweep.Point.new(110, 128), 7)
+		and _encounter.place_enemy(&"foe", foe, far, 11))
 
 
 func _physics_process(_delta: float) -> void:
@@ -152,7 +164,7 @@ func _physics_process(_delta: float) -> void:
 	var delayed := not _encounter.close_tick() and _encounter.has_unpublished_tick() and _encounter.fault().is_empty()
 	var retained := (_encounter.closed_result() == before and _encounter.movement_acknowledgement(SEAT) == 0
 		and _encounter.view_for(SEAT) == null and _encounter.next_tick() == 3)
-	var balance_at_wait: int = _store.balance(ACCOUNT).native_at_scale(0)
+	var balance_at_wait: int = _store.balance(_account).native_at_scale(0)
 	var refused_again := not _encounter.close_tick()
 	_caption.text = "Saving run earnings"
 	await _snap("waiting.png")
@@ -173,14 +185,16 @@ func _physics_process(_delta: float) -> void:
 func _exercise_active_wait() -> void:
 	var before := _encounter.closed_result()
 	var input := _admit_move() and _admit_click(Vector2(155, 128), MOUSE_BUTTON_LEFT, 2)
-	var accrued := _ordinary.accrue("fixture/earlier-spawn", Quantity.from_count(7)) == OrdinaryCurrency.Eligibility.QUEUED
+	var first_pending: int = _ordinary.pending_amount().native_at_scale(0)
+	var accrued := (first_pending == 7 and _ordinary.oldest_eligible_usec() == 0 if _gameplay_earned
+		else _ordinary.accrue("fixture/earlier-spawn", Quantity.from_count(7)) == OrdinaryCurrency.Eligibility.QUEUED)
 	_store.remaining_before_refusal = 0
 	_clock.reads_before_deadline = 1 if _active_wait == "active-entry" else 4
 	var held := not _encounter.close_tick() and _encounter.has_unpublished_tick() and _encounter.fault().is_empty()
 	var retained := (_encounter.closed_result() == before and _encounter.movement_acknowledgement(SEAT) == 0
 		and _encounter.view_for(SEAT) == null and _encounter.next_tick() == 3)
 	_encounter.service_ordinary_currency()
-	var refused_again := not _encounter.close_tick() and _store.balance(ACCOUNT).sign_value == 0
+	var refused_again := not _encounter.close_tick() and _store.balance(_account).sign_value == 0
 	_caption.text = "Saving run earnings"
 	await _snap("waiting.png")
 	_store.remaining_before_refusal = -1
@@ -193,10 +207,23 @@ func _exercise_active_wait() -> void:
 	_stage.display(view)
 	_caption.text = "Play resumed  ·  Earnings saved"
 	await _snap("resumed.png")
-	var resumed: bool = (not view.defeated and view.tick == 3 and _encounter.movement_acknowledgement(SEAT) == 2
-		and closed.accepted.size() == 2 and closed.outcomes.size() == 3 and is_equal_approx(view.player.at.x, 62.0 + 100.0 / 60.0)
-		and view.player.hp.native_at_scale(0) == 84 and view.others[0].hp.native_at_scale(0) == 76
-		and view.barrier.native_at_scale(0) == 18 and _encounter.close_tick())
+	var common: bool = (not view.defeated and view.tick == 3 and _encounter.movement_acknowledgement(SEAT) == 2
+		and closed.accepted.size() == 2 and closed.outcomes.size() == (4 if _gameplay_earned else 3)
+		and is_equal_approx(view.player.at.x, 62.0 + 100.0 / 60.0)
+		and view.player.hp.native_at_scale(0) == (70 if _gameplay_earned else 84))
+	var later_pending: int = _ordinary.pending_amount().native_at_scale(0)
+	var issued: int = _store.balance(_account).native_at_scale(0)
+	var correct_award: bool = (view.cleared and view.barrier.native_at_scale(0) == 20 and later_pending == 11
+		and _ordinary.oldest_eligible_usec() == OrdinaryCurrency.MAX_AGE_USEC and issued == 7)
+	if _gameplay_earned:
+		_earning_receipt = {"held_tick": 3, "held_previous_receipt": retained,
+			"issued_on_repair": issued, "first_pending": first_pending, "later_pending": later_pending,
+			"resumed_at": view.tick, "movement_ack": _encounter.movement_acknowledgement(SEAT),
+			"hp_on_resume": view.player.hp.native_at_scale(0), "barrier_on_resume": view.barrier.native_at_scale(0),
+			"outcomes": closed.outcomes.size()}
+	var resumed: bool = (common and (correct_award if _gameplay_earned else
+		view.others[0].hp.native_at_scale(0) == 76 and view.barrier.native_at_scale(0) == 18)
+		and _encounter.close_tick())
 	var quit := _encounter.settle_orderly_quit()
 	_finish(input and accrued and held and retained and refused_again and resumed and quit)
 
@@ -232,11 +259,14 @@ func _snap(name: String) -> void:
 func _finish(passed: bool) -> void:
 	set_physics_process(false)
 	var closed := _encounter.closed_result() if _encounter != null else {}
-	var balance: int = _store.balance(ACCOUNT).native_at_scale(0)
+	var balance: int = _store.balance(_account).native_at_scale(0)
 	var generation: int = _store.checkpoint().get("generation", -1)
 	var saved := _store.close()
-	passed = passed and _capture_ok and balance == 7 and generation == 3 and saved
-	if _active_wait.is_empty():
+	passed = passed and _capture_ok and _expected_settlement(balance, generation) and saved
+	if _gameplay_earned:
+		_earning_receipt.merge({"passed": passed, "balance": balance, "generation": generation})
+		print("WP23_GAMEPLAY_EARNINGS ", JSON.stringify(_earning_receipt))
+	elif _active_wait.is_empty():
 		print("WP23_LIVE_DEFEAT ", JSON.stringify({"passed": passed, "fault_after": _fault_after,
 			"balance": balance, "tick": closed.get("tick", -1), "generation": generation}))
 	else:
@@ -246,10 +276,14 @@ func _finish(passed: bool) -> void:
 
 
 func _readback() -> void:
-	var balance: int = _store.balance(ACCOUNT).native_at_scale(0)
+	var balance: int = _store.balance(_account).native_at_scale(0)
 	var generation: int = _store.checkpoint().get("generation", -1)
 	var clear := ProfileOrdinarySession.reopen_status(_store) == ProfileOrdinarySession.ReopenStatus.CLEAR
 	var saved := _store.close()
-	var passed := clear and balance == 7 and generation == 3 and saved
+	var passed := clear and _expected_settlement(balance, generation) and saved
 	print("WP23_LIVE_READ ", JSON.stringify({"passed": passed, "balance": balance, "generation": generation, "clear": clear}))
 	get_tree().quit(0 if passed else 1)
+
+
+func _expected_settlement(balance: int, generation: int) -> bool:
+	return balance == 18 and generation == 4 if _gameplay_earned else balance == 7 and generation == 3

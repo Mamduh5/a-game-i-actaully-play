@@ -3,6 +3,7 @@ extends GutTest
 const SEAT := &"player"
 const REALM := WorldTopology.OVERWORLD
 const RUN := &"wp32-test"
+const CURRENCY := StarterEncounter.COMMON_CURRENCY
 
 class TerminalWriteStore extends ProfileStore:
 	var commits_before_refusal := -1
@@ -346,8 +347,222 @@ func test_active_currency_deadline_holds_input_and_resumes_world_at_the_same_tic
 		assert_true(store.close())
 
 
+func test_gameplay_earning_retains_its_deadline_and_later_elimination_across_sqlite_refusal() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var encounter := _assemble({SEAT: 62.0})
+	assert_not_null(encounter)
+	var scratch := DirAccess.create_temp("agip-closed-earning")
+	var store := TerminalWriteStore.new()
+	assert_eq(store.open("issuer", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var key := Crypto.new().generate_rsa(2048)
+	var clock := EarningClock.new()
+	var ordinary := OrdinaryCurrency.begin(store, _grant_binding(encounter, "issuer", key, key), key, CURRENCY, clock.sample)
+	var first := _foe()
+	first.hp = Quantity.from_count(20)
+	var second := _foe()
+	second.hp = Quantity.from_count(24)
+	assert_false(encounter.place_enemy(&"first", first, RealmSweep.Point.new(110, 128), 7))
+	assert_true(encounter.bind_enemy_currency({SEAT: ordinary}))
+	assert_true(encounter.place_enemy(&"first", first, RealmSweep.Point.new(110, 128), 7))
+	assert_true(encounter.place_enemy(&"second", second, RealmSweep.Point.new(155, 128), 11))
+	assert_false(encounter.close_tick())
+	assert_true(encounter.begin_ordinary_session(store))
+	assert_true(encounter.close_tick())
+	assert_eq(_eliminations(encounter), [&"first"])
+	assert_eq(ordinary.pending_amount().native_at_scale(0), 7)
+	assert_eq(ordinary.oldest_eligible_usec(), 0)
+	assert_true(encounter.close_tick())
+	var before := encounter.closed_result()
+	assert_eq(_submit(encounter, 1, PlayerCommand.new(PlayerCommand.MOVE_TO, 78, 128)), RunAuthority.Admission.QUEUED)
+	assert_eq(_submit(encounter, 2, PlayerCommand.new(PlayerCommand.MANUAL, 155, 128)), RunAuthority.Admission.QUEUED)
+	store.commits_before_refusal = 0
+	clock.reads_before_deadline = 4
+	assert_false(encounter.close_tick())
+	assert_true(encounter.has_unpublished_tick())
+	assert_eq(encounter.closed_result(), before)
+	assert_eq(encounter.movement_acknowledgement(SEAT), 0)
+	assert_null(encounter.view_for(SEAT))
+	assert_eq(encounter._kernel.actor_vitals(&"second").hp.native_at_scale(0), 24)
+	encounter.service_ordinary_currency()
+	assert_false(encounter.close_tick())
+	assert_eq(ordinary.pending_amount().native_at_scale(0), 7)
+	assert_eq(ordinary.oldest_eligible_usec(), 0)
+	assert_eq(store.balance(CURRENCY).sign_value, 0)
+	store.commits_before_refusal = -1
+	encounter.service_ordinary_currency()
+	assert_true(encounter.close_tick())
+	assert_eq(_eliminations(encounter), [&"second"])
+	assert_eq(encounter.movement_acknowledgement(SEAT), 2)
+	assert_eq(encounter.closed_result().accepted.size(), 2)
+	assert_true(encounter.view_for(SEAT).cleared)
+	assert_eq(ordinary.pending_amount().native_at_scale(0), 11)
+	assert_eq(ordinary.oldest_eligible_usec(), OrdinaryCurrency.MAX_AGE_USEC)
+	assert_eq(store.balance(CURRENCY).native_at_scale(0), 7)
+	assert_true(encounter.close_tick())
+	assert_eq(_eliminations(encounter), [])
+	assert_true(encounter.settle_orderly_quit())
+	assert_true(store.close())
+	assert_eq(store.open("issuer", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(store.balance(CURRENCY).native_at_scale(0), 18)
+	assert_eq(store.checkpoint()["generation"], 4)
+	assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
+	assert_true(store.close())
+
+
+func test_gameplay_currency_issues_for_a_late_nearby_guest_and_excludes_outside_guest() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var encounter := _assemble({SEAT: 62.0, &"late": 323.5, &"outside": 322.25})
+	assert_not_null(encounter)
+	var scratch := DirAccess.create_temp("agip-gameplay-party-earning")
+	var issuer := ProfileStore.new()
+	var late_store := ProfileStore.new()
+	var outside_store := ProfileStore.new()
+	assert_eq(issuer.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(late_store.open("bob", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(outside_store.open("carol", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var crypto := Crypto.new()
+	var owner := crypto.generate_rsa(2048)
+	var late := crypto.generate_rsa(2048)
+	var outside := crypto.generate_rsa(2048)
+	var local := _grant_binding(encounter, "alice", owner, owner)
+	var eligible := _grant_binding(encounter, "bob", owner, late)
+	var excluded := _grant_binding(encounter, "carol", owner, outside)
+	assert_eq(ProfileGrantSettlement.retain_original_binding(issuer, eligible, owner).status, ProfileStore.CommitResult.COMMITTED)
+	assert_eq(ProfileGrantSettlement.retain_original_binding(issuer, excluded, owner).status, ProfileStore.CommitResult.COMMITTED)
+	assert_eq(ProfileGrantSettlement.retain_original_binding(late_store, eligible, late).status, ProfileStore.CommitResult.COMMITTED)
+	var first := OrdinaryCurrency.begin(issuer, local, owner, CURRENCY)
+	var second := OrdinaryCurrency.begin(issuer, eligible, owner, CURRENCY)
+	var third := OrdinaryCurrency.begin(issuer, excluded, owner, CURRENCY)
+	assert_false(encounter.bind_enemy_currency({SEAT: first, &"late": first, &"outside": third}))
+	assert_false(encounter.bind_enemy_currency({SEAT: second, &"late": first, &"outside": third}))
+	assert_true(encounter.bind_enemy_currency({SEAT: first, &"late": second, &"outside": third}))
+	assert_true(encounter.begin_ordinary_session(issuer))
+	var foe := _foe()
+	foe.hp = Quantity.from_count(20)
+	assert_true(encounter.place_enemy(&"reward", foe, RealmSweep.Point.new(110, 128), 3))
+	var step := PlayerCommand.new(PlayerCommand.MOVE_AXES, -1, 0)
+	var intent := RunIntent.new(RUN, 1, REALM, &"late", 1, 1, step.action, step)
+	assert_eq(encounter.submit(&"late", intent), RunAuthority.Admission.QUEUED)
+	assert_true(encounter.close_tick())
+	assert_eq(_eliminations(encounter), [&"reward"])
+	assert_eq(encounter.closed_result().outcomes[1].owner, SEAT)
+	assert_eq(first.pending_amount().native_at_scale(0), 3)
+	assert_eq(second.pending_amount().native_at_scale(0), 3)
+	assert_eq(third.pending_amount().native_at_scale(0), 0)
+	assert_true(encounter.settle_orderly_quit())
+	assert_eq(issuer.balance(CURRENCY).native_at_scale(0), 3)
+	var grants := issuer.pending_grants()
+	assert_eq(grants.size(), 1)
+	if grants.size() == 1:
+		assert_eq(grants[0].recipient, "bob")
+		var applied := ProfileGrantSettlement.apply(late_store, eligible, late, grants[0].body)
+		assert_eq(applied.receipt.status, ProfileStore.CommitResult.COMMITTED)
+		assert_eq(ProfileGrantSettlement.apply(late_store, eligible, late, grants[0].body).receipt.status, ProfileStore.CommitResult.DUPLICATE)
+		assert_eq(ProfileGrantSettlement.acknowledge(issuer, eligible, applied.acknowledgement).status, ProfileStore.CommitResult.COMMITTED)
+	assert_true(issuer.pending_grants().is_empty())
+	assert_eq(late_store.balance(CURRENCY).native_at_scale(0), 3)
+	assert_eq(outside_store.balance(CURRENCY).sign_value, 0)
+	assert_true(late_store.close())
+	assert_eq(late_store.open("bob", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(late_store.balance(CURRENCY).native_at_scale(0), 3)
+	assert_true(late_store.close())
+	assert_true(outside_store.close())
+	assert_true(issuer.close())
+
+
+func test_gameplay_currency_survives_faction_only_kill_and_pays_once_across_combat_lives() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var encounter := _assemble({SEAT: 62.0})
+	var scratch := DirAccess.create_temp("agip-original-spawn-earning")
+	var store := ProfileStore.new()
+	assert_eq(store.open("issuer", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var key := Crypto.new().generate_rsa(2048)
+	var binding := _grant_binding(encounter, "issuer", key, key)
+	var ordinary := OrdinaryCurrency.begin(store, binding, key, CURRENCY)
+	assert_true(encounter.bind_enemy_currency({SEAT: ordinary}))
+	assert_true(encounter.begin_ordinary_session(store))
+	var foe := _foe()
+	foe.faction = &"victim"
+	foe.foes = []
+	foe.hp = Quantity.from_count(9)
+	var striker := _foe()
+	striker.faction = &"predator"
+	striker.foes = [&"victim"]
+	striker.radius = 4
+	striker.attack_radius = 4
+	striker.windup_ticks = 1
+	assert_true(encounter.place_enemy(&"reward", foe, RealmSweep.Point.new(144, 128), 3))
+	assert_true(encounter.place_enemy(&"faction", striker, RealmSweep.Point.new(173, 128)))
+	assert_true(encounter.close_tick())
+	assert_true(encounter.close_tick())
+	assert_eq(_eliminations(encounter), [&"reward"])
+	assert_eq(ordinary.pending_amount().sign_value, 0)
+	assert_true(encounter._activity.reanimate(&"reward", 1, Quantity.from_count(1), 10))
+	assert_eq(_submit(encounter, 1, PlayerCommand.new(PlayerCommand.MANUAL, 144, 128)), RunAuthority.Admission.QUEUED)
+	assert_true(encounter.close_tick())
+	assert_eq(_eliminations(encounter), [&"reward"])
+	assert_eq(ordinary.pending_amount().native_at_scale(0), 3)
+	assert_true(encounter._activity.reanimate(&"reward", 2, Quantity.from_count(1), 10))
+	assert_eq(_submit(encounter, 2, PlayerCommand.new(PlayerCommand.MOVE_TO, 78, 128)), RunAuthority.Admission.QUEUED)
+	var later_kills: Array[StringName] = []
+	for tick: int in range(4, 13):
+		assert_true(encounter.close_tick())
+		later_kills.append_array(_eliminations(encounter))
+	assert_eq(later_kills, [&"reward"])
+	assert_eq(ordinary.pending_amount().native_at_scale(0), 3)
+	assert_true(encounter.settle_orderly_quit())
+	assert_true(store.close())
+	assert_eq(store.open("issuer", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	assert_eq(store.balance(CURRENCY).native_at_scale(0), 3)
+	# Replay the same original occurrence from an empty live earning buffer.
+	var replay := _assemble({SEAT: 62.0})
+	var retry := OrdinaryCurrency.begin(store, binding, key, CURRENCY)
+	assert_true(replay.bind_enemy_currency({SEAT: retry}))
+	assert_true(replay.place_enemy(&"reward", foe, RealmSweep.Point.new(144, 128), 3))
+	assert_true(replay.begin_ordinary_session(store))
+	assert_true(replay.close_tick())
+	assert_true(replay.close_tick())
+	assert_eq(_submit(replay, 1, PlayerCommand.new(PlayerCommand.MANUAL, 144, 128)), RunAuthority.Admission.QUEUED)
+	assert_true(replay.close_tick())
+	assert_eq(_eliminations(replay), [&"reward"])
+	assert_true(replay.settle_orderly_quit())
+	assert_eq(store.balance(CURRENCY).native_at_scale(0), 3)
+	assert_true(store.close())
+
+
+static func _grant_binding(encounter: StarterEncounter, recipient: String, issuer: CryptoKey,
+		key: CryptoKey) -> ProfileGrant.Binding:
+	var identity: Dictionary = encounter.checkpoint().identity
+	var binding := ProfileGrant.Binding.new()
+	binding.run = String(identity.run)
+	binding.rules = String(identity.rules)
+	binding.catalog = String(identity.catalog)
+	binding.recipient = recipient
+	binding.issuer = issuer
+	binding.recipient_key = key
+	return binding
+
+
+static func _eliminations(encounter: StarterEncounter) -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for outcome: Dictionary in encounter.closed_result().outcomes:
+		if outcome.get("eliminated", false):
+			ids.append(outcome.target)
+	return ids
+
+
 static func _encounter(start_x: float, hero: StringName = &"H01", weapon: StringName = &"W01",
 		foe: WorldEnemy.Rules = null) -> StarterEncounter:
+	var encounter := _assemble({SEAT: start_x}, hero, weapon)
+	var enemy := foe if foe != null else _foe()
+	return encounter if encounter != null and encounter.place_enemy(&"near", enemy, RealmSweep.Point.new(155, 128)) else null
+
+
+static func _assemble(positions: Dictionary[StringName, float], hero: StringName = &"H01",
+		weapon: StringName = &"W01") -> StarterEncounter:
 	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 	var catalog := bundle.compile()
 	var slots: Array[StringName] = []
@@ -361,16 +576,18 @@ static func _encounter(start_x: float, hero: StringName = &"H01", weapon: String
 	setup.rules_revision = &"V42.6/R1"
 	setup.catalog_revision = catalog.revision
 	setup.challenge_id = &"test"
-	setup.initial_realms = {SEAT: REALM}
-	var build := StarterEncounter.Build.new()
-	build.preparation = RunPreparation.select(catalog, hero, weapon, [&"", &""], slots, {hero: true, weapon: true})
-	build.powers = RunRewardQueue.begin(build.preparation, RunRandom.new(setup.seed), SEAT)
-	build.start = RealmSweep.Point.new(start_x, 128.0)
-	build.maximum_hp = Quantity.from_count(100)
-	var floor := WorldExploration.create(WorldTopology.generate(setup.seed), [SEAT])
-	var encounter := StarterEncounter.assemble(setup, SEAT, floor, {SEAT: build})
-	var enemy := foe if foe != null else _foe()
-	return encounter if encounter != null and encounter.place_enemy(&"near", enemy, RealmSweep.Point.new(155, 128)) else null
+	setup.role = RunSetup.Role.HOST if positions.size() > 1 else RunSetup.Role.SOLO
+	var builds: Dictionary[StringName, StarterEncounter.Build] = {}
+	for id: StringName in positions:
+		setup.initial_realms[id] = REALM
+		var build := StarterEncounter.Build.new()
+		build.preparation = RunPreparation.select(catalog, hero, weapon, [&"", &""], slots, {hero: true, weapon: true})
+		build.powers = RunRewardQueue.begin(build.preparation, RunRandom.new(setup.seed), id)
+		build.start = RealmSweep.Point.new(positions[id], 128.0)
+		build.maximum_hp = Quantity.from_count(100)
+		builds[id] = build
+	var floor := WorldExploration.create(WorldTopology.generate(setup.seed), positions.keys())
+	return StarterEncounter.assemble(setup, SEAT, floor, builds)
 
 
 static func _foe() -> WorldEnemy.Rules:

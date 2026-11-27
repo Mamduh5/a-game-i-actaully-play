@@ -84,6 +84,15 @@ func issued_by(store: ProfileStore) -> bool:
 	return store != null and store == _store and store.identity() == _issuer_profile
 
 
+func is_local_recipient() -> bool:
+	return _binding != null and _binding.recipient == _issuer_profile
+
+
+func shares_issuer_with(other: OrdinaryCurrency) -> bool:
+	return (other != null and _facts_scope.size() == 6 and other._facts_scope.size() == 6
+		and _store == other._store and _facts_scope[4] == other._facts_scope[4])
+
+
 ## The authoritative driver calls before opening another earning group.
 ## Service continues while this fence is raised.
 func can_earn() -> bool:
@@ -102,6 +111,34 @@ func accrue(occurrence: String, amount: Quantity) -> Eligibility:
 	var prior: Earning = _pending.get(occurrence)
 	if prior != null:
 		return Eligibility.DUPLICATE if prior.amount.compare(amount) == 0 else Eligibility.CONFLICT
+	_enqueue(occurrence, amount)
+	return Eligibility.QUEUED
+
+
+## The authority has just checked its clock at combat publication. Validate
+## the complete allocation before inserting any recipient's earning.
+static func _accrue_closed_group(allocations: Dictionary[OrdinaryCurrency, Dictionary]) -> bool:
+	for tracker: OrdinaryCurrency in allocations:
+		if (tracker == null or tracker._ending or tracker._fault_since >= 0 or tracker._now < 0
+				or tracker._store.identity() != tracker._issuer_profile):
+			return false
+		var sources: Dictionary[String, Quantity] = allocations[tracker]
+		for occurrence: String in sources:
+			var amount := sources[occurrence]
+			if not ProfileGrant.valid_field(occurrence) or amount == null or amount.sign_value <= 0:
+				return false
+			var prior: Earning = tracker._pending.get(occurrence)
+			if prior != null and prior.amount.compare(amount) != 0:
+				return false
+	for tracker: OrdinaryCurrency in allocations:
+		var sources: Dictionary[String, Quantity] = allocations[tracker]
+		for occurrence: String in sources:
+			if not tracker._pending.has(occurrence):
+				tracker._enqueue(occurrence, sources[occurrence])
+	return true
+
+
+func _enqueue(occurrence: String, amount: Quantity) -> void:
 	var earned := Earning.new()
 	earned.occurrence = occurrence
 	earned.amount = amount
@@ -112,7 +149,6 @@ func accrue(occurrence: String, amount: Quantity) -> Eligibility:
 	_pending[occurrence] = earned
 	if _oldest < 0:
 		_oldest = _now
-	return Eligibility.QUEUED
 
 
 func oldest_eligible_usec() -> int:
