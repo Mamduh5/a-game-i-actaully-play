@@ -15,6 +15,7 @@ class Rules extends RunAuthority:
 	var targeting := PlayerTargeting.new()
 	var combat: StarterCombat
 	var familiar: SketchFamiliar
+	var mines: RunicMines
 	var targets: Array[PlayerTargeting.Candidate] = []
 	var scenario: String
 	var trace: Array[Array] = []
@@ -57,17 +58,21 @@ class Rules extends RunAuthority:
 				or not kernel.attach_geometry(geometry, Wall)):
 			return false
 		combat = StarterCombat.create(tuning, catalog, prep, kernel, geometry, Player, Foe, Foe, Wall)
-		if which == "familiar":
+		if which in ["familiar", "mines"]:
 			var rewards := RunRewardQueue.begin(prep, RunRandom.new(17), Player)
+			var family := &"P02" if which == "familiar" else &"P03"
 			for event: int in range(1, 100):
-				if rewards.ranks().get(&"P02", 0) == 5:
+				if rewards.ranks().get(family, 0) == 5:
 					break
 				var ordinal := rewards.earn(event)
 				var options := rewards.read_offer(ordinal).options
-				rewards.select(ordinal, &"P02" if options.has(&"P02") else options.keys()[0])
-			if rewards.ranks().get(&"P02", 0) != 5:
+				rewards.select(ordinal, family if options.has(family) else options.keys()[0])
+			if rewards.ranks().get(family, 0) != 5:
 				return false
-			familiar = SketchFamiliar.create(kernel, geometry, Player, rewards, Foe, Wall)
+			if which == "familiar":
+				familiar = SketchFamiliar.create(kernel, geometry, Player, rewards, Foe, Wall)
+			else:
+				mines = RunicMines.create(Player, rewards, kernel, geometry, Foe, Wall, combat)
 		var setup := RunSetup.new()
 		setup.run_id = Run
 		setup.authority_id = Player
@@ -80,6 +85,8 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"mines":
+				return mines != null and _enemy(&"left", 304, 380, 200) and _enemy(&"arrival", 420, 380, 200, false)
 			"fracture":
 				return _enemy(&"aim", 440, 380, 100) and _enemy(&"arrival", 550, 380, 100, false)
 			"familiar":
@@ -145,7 +152,7 @@ class Rules extends RunAuthority:
 				axes += int(intent.action == PlayerCommand.MOVE_AXES and intent.command.y < 0.0)
 				controls.apply(intent.command)
 		passed = passed and controls.step(geometry, Player, 0, Wall, 100.0, 1.0 / 60.0) != null
-		if (tick == 8 and scenario not in ["undying", "familiar"]) or (tick == 68 and scenario == "wake"):
+		if (tick == 8 and scenario not in ["undying", "familiar", "mines"]) or (tick == 68 and scenario == "wake"):
 			launches += int(combat.try_weapon(tick, targeting, targets) == StarterCombat.Attempt.COMMITTED)
 		if tick == 11 and scenario in ["bow", "bow-miss"]:
 			passed = passed and geometry.commit_circle_pose(&"aim", 0, RealmSweep.Point.new(570, 500))
@@ -164,6 +171,12 @@ class Rules extends RunAuthority:
 				RealmSweep.Point.new(387, 389 if tick == 83 else 410))
 		if familiar != null:
 			passed = passed and familiar.advance(tick, targets)
+		if mines != null:
+			if tick == 35:
+				passed = passed and geometry.stage_circle_motion(&"arrival", 0, RealmSweep.Point.new(340, 380))
+			elif tick == 36:
+				passed = passed and geometry.commit_circle_motion(&"arrival", 0)
+			passed = passed and mines.advance(tick)
 		passed = passed and combat.advance(tick) and _settle(now, true)
 		if kernel.advance_survival(now).result == CombatKernel.Result.INTERRUPTED:
 			passed = false
@@ -220,6 +233,11 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"mines":
+				return (trace == [[13, "P03", "left", false], [35, "P03", "arrival", false], [35, "P03", "left", false]]
+					and kernel.actor_snapshot(&"left").hp.amount.native_at_scale(0) == 130
+					and kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0) == 154
+					and mines.positions().is_empty())
 			"fracture":
 				return (launches == 1 and manual == 1 and trace == [[22, "W03", "arrival", false],
 					[37, "H04.temporal_echo", "arrival", false]]
@@ -329,6 +347,10 @@ func _physics_process(_delta: float) -> void:
 			_rules.kernel.actor_snapshot(&"visitor").hp.amount.native_at_scale(0)]
 	elif _case == "familiar":
 		_hud.text = "Sketch Familiar\nTwin Quill + Piercing Quill"
+	elif _case == "mines":
+		_hud.text = "Runic Mine\nLeft HP %d   Arrival HP %d" % [
+			_rules.kernel.actor_snapshot(&"left").hp.amount.native_at_scale(0),
+			_rules.kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0)]
 	elif _case == "fracture":
 		_hud.text = "The Chronomancer\nTime Fracture"
 	elif _case == "rupture":
@@ -343,7 +365,8 @@ func _physics_process(_delta: float) -> void:
 	queue_redraw()
 	if not _capture_dir.is_empty() and tick in {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
-			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23]}[_case]:
+			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23],
+			"mines": [6, 18, 38]}[_case]:
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
 	if tick >= int({"conductor-charged": 252, "bleed": 192, "wake": 118}.get(_case, 59)) or not _rules.passed:
 		var good := _rules.verdict() and _capture_success
@@ -363,7 +386,7 @@ func _drive_visible_inputs(tick: int) -> void:
 			field.position = Vector2(440, 380)
 			field.pressed = pressed
 			get_viewport().push_input(field, true)
-	if _case == "familiar" and tick == 10:
+	if _case in ["familiar", "mines"] and tick == 10:
 		for pressed: bool in [true, false]:
 			var move := InputEventMouseButton.new()
 			move.button_index = MOUSE_BUTTON_RIGHT
@@ -401,10 +424,15 @@ func _draw() -> void:
 		var living := _rules.kernel.actor_snapshot(target.id).is_alive()
 		draw_circle(location, 12, Color("#df9290") if living else Color("#4b4c57"), true, -1.0, true)
 		draw_arc(location, 12, 0, TAU, 24, Color("#774d59") if living else Color("#69727e"), 1.5, true)
-		var label_offset := Vector2(-22, -23) if _case in ["wake", "rupture"] and target.id == &"near" else Vector2(-22, 34)
+		var above := (_case in ["wake", "rupture"] and target.id == &"near") or (_case == "mines" and target.id == &"left")
+		var label_offset := Vector2(-22, -23) if above else Vector2(-22, 34)
 		draw_string(ThemeDB.fallback_font, location + label_offset, String(target.id),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#ded7ca"))
 	draw_circle(Vector2(player.x, player.y), 14, Color("#9fe0c5"), true, -1.0, true)
+	if _rules.mines != null:
+		for mine: RealmSweep.Point in _rules.mines.positions():
+			draw_arc(Vector2(mine.x, mine.y), RunicMines.TRIGGER_RADIUS, 0, TAU, 24, Color("#e5c28b"), 2, true)
+			draw_circle(Vector2(mine.x, mine.y), 4, Color("#e5c28b"), true, -1, true)
 	if _rules.familiar != null and _rules.familiar.position() != null:
 		var pet := _rules.familiar.position()
 		draw_circle(Vector2(pet.x, pet.y), 6.0, Color("#e1d6bf"), true, -1.0, true)
