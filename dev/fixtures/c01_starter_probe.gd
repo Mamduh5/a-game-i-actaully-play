@@ -402,9 +402,11 @@ func _physics_process(_delta: float) -> void:
 			_rules.kernel.actor_snapshot(&"left").hp.amount.native_at_scale(0),
 			_rules.kernel.actor_snapshot(&"arrival").hp.amount.native_at_scale(0)]
 	elif _case == "lance":
-		_hud.text = "Spectral Lance\nEdge HP %d   Rear HP %d" % [
+		var rear := _rules.kernel.actor_snapshot(&"rear").hp.amount
+		var rear_label := "%.2f" % (float(rear.native_at_scale(2)) / 100.0) if _rules.prepared else str(rear.native_at_scale(0))
+		_hud.text = "Spectral Lance\nEdge HP %d   Rear HP %s" % [
 			_rules.kernel.actor_snapshot(&"edge").hp.amount.native_at_scale(0),
-			_rules.kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0)]
+			rear_label]
 	elif _case == "tether":
 		_hud.text = "Arcane Tether\nEndpoint HP %d   Visitor HP %d" % [
 			_rules.kernel.actor_snapshot(&"first").hp.amount.native_at_scale(0),
