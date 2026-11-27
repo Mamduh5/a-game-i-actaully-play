@@ -464,6 +464,8 @@ Use a continuous local controller for supervised normal play. Give it rendered p
 
 **WP14 independently approved on `dev` (`1f0d5dd`).** The dev fixture sends a restricted 6-field visible frame to an isolated deterministic Python policy process (`-I -u`), dispatches ordinary bound keys from `InputMap` and paired viewport pointer events, and writes privileged evidence only to a separate write-only collector. Independent Antigravity verification reproduced the clean rendered alpha/beta/remapped-replay matrix, passed 15/15 adversarial controls (including left-steering, hidden-field rejection, missed-button world click leak, hazard failure, out-of-range manual rejection and privileged-command rejection), verified clean Player export exclusion and retested integrated `dev` (`5a99478`). [Pilot fixture, review and evidence](records/WP14.md)
 
+**WP32 native solo checkpoint awaits independent review (`1071e6b`).** Generated floor movement, encounter combat and telegraphs share the fixed-step authority. The isolated visible pilot drove three rendered Windows Dev builds with the ordinary router and reproduced each closed trace under alternate presentation. The Player pack excludes the fixture and pilot. Native guest composition and peer play remain open. [WP32 handoff](records/WP32.md#native-solo-encounter-review-handoff)
+
 Keep the player-facing Simple Run Summary to outcome, survival duration, final level, defeats, final build, earned rewards and new unlocks. Contextual Mastery Records have their own approved purpose. Local investigation adds neither required remote telemetry nor a player-facing replay/analytics service. [GDS §§22.2, 25.2](GDS.md#gds-onboarding)
 
 <a id="tds-decisions"></a>
