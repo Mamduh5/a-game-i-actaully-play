@@ -345,7 +345,7 @@ func _drive_visible_inputs(tick: int) -> void:
 			move.button_index = MOUSE_BUTTON_RIGHT
 			move.position = Vector2(320, 330)
 			move.pressed = pressed
-			Input.parse_input_event(move)
+			get_viewport().push_input(move, true)
 	if _case == "sword" and tick in [1, 31]:
 		var event := InputEventKey.new()
 		event.physical_keycode = KEY_W
