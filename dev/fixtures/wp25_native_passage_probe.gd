@@ -20,7 +20,7 @@ class PassageAuthority extends RunAuthority:
 	var valid := true
 
 	func _supports_action(action: StringName) -> bool:
-		return action in [PlayerCommand.MOVE_AXES, PlayerCommand.INTERACT]
+		return action in [PlayerCommand.MOVE_AXES, PlayerCommand.MOVE_TO, PlayerCommand.INTERACT]
 
 	func _resolve_tick(tick: int, accepted: Array[RunIntent], _streams: RunRandom) -> Array[Dictionary]:
 		clicks.clear()
@@ -123,7 +123,7 @@ func _run_host() -> void:
 		if not _queue_command(command):
 			_finish(false)
 			return
-	if _received_motion and _received_click and not _close_and_publish():
+	if not _advance_host():
 		_finish(false)
 		return
 	if _departures == 1 and not _closing:
@@ -136,6 +136,10 @@ func _run_host() -> void:
 
 func _host_verdict() -> bool:
 	return _authority.next_tick() == 3 and _facts.get("stale_refused", false)
+
+
+func _advance_host() -> bool:
+	return not (_received_motion and _received_click) or _close_and_publish()
 
 
 func _queue_command(command: NativeSessionHost.Command) -> bool:
@@ -172,7 +176,11 @@ func _close_and_publish() -> bool:
 	_facts["guest_realm"] = _party.view(GUEST, CombatInstant.at_tick(state.tick)).realm
 	_facts["movement_ack"] = state.acknowledged
 	return (state.acknowledged == 2 and _facts["host_realm"] == OUTSIDE and _facts["guest_realm"] == GARDEN
-		and _authority.clicks.is_empty() and _send(Kinds.STATE, state.pack()))
+		and _authority.clicks.is_empty() and _publish_movement(state))
+
+
+func _publish_movement(state: MovementSnapshot) -> bool:
+	return _send(Kinds.STATE, state.pack())
 
 
 func _publish_scope() -> bool:

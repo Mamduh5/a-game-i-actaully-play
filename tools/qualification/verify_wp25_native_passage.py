@@ -20,7 +20,7 @@ def passage_facts(path, marker="WP25_NATIVE "):
     raise RuntimeError(f"Missing {marker.strip()} receipt in {path.name}")
 
 
-def run_peers(exe, evidence, secrets, fingerprint, gateway, world, rendered):
+def run_peers(exe, evidence, secrets, fingerprint, gateway, world, rendered, walk_return):
     host, guest = secrets / "host", secrets / "guest"
     port = ephemeral_port()
     offered, ready = host / "offered", host / "ready"
@@ -42,7 +42,7 @@ def run_peers(exe, evidence, secrets, fingerprint, gateway, world, rendered):
         visitor = launch([exe], guest_log, guest_env, "guest", port, guest, fingerprint,
                          guest / "guest.key", copied, "-", "paired", rendered=rendered)
         children.append(visitor)
-        exits = [child.wait(timeout=10) for child in children]
+        exits = [child.wait(timeout=32 if walk_return else 10) for child in children]
     finally:
         for child in children:
             stop(child)
@@ -81,6 +81,23 @@ def run_peers(exe, evidence, secrets, fingerprint, gateway, world, rendered):
                             and hashlib.sha256(trace.read_bytes()).hexdigest() == host_world["digest"]
                             and (not rendered or all((evidence / f"{role}-scope" / "view.png").is_file()
                                                      for role in ("host", "guest"))))
+    if walk_return:
+        host_return, guest_return = (passage_facts(path, "WP18_EXIT ") for path in (host_log, guest_log))
+        result["return"] = {"host": host_return, "guest": guest_return}
+        end = host_return.get("exit_tick", 0)
+        trace = evidence / "host-scope" / "return.json"
+        result["passed"] = (result["passed"] and guest_return.get("returned", False)
+                            and end >= 760 and guest_return["exit_tick"] == end
+                            and len(host_return["legs"]) == 3 and host_return["legs"] == guest_return["legs"]
+                            and host_return["final_ack"] == guest_return["final_ack"] == 5
+                            and host_return["final_tick"] == guest_return["final_tick"] == end + 60
+                            and host_return["spawned_while_empty"] == end + 30
+                            and host_return["reentry_tick"] == guest_return["reentry_tick"] == end + 61
+                            and host_return["reentry_hp"] == guest_return["reentry_hp"]
+                            and host_return["stale_exit_refused"] and guest_return["exit_cell_retained"]
+                            and host_return["resident_retained"] and host_return["later_resident"]
+                            and hashlib.sha256(trace.read_bytes()).hexdigest() == host_return["world_digest"]
+                            and (not rendered or (evidence / "guest-scope" / "overworld-return.png").is_file()))
     return result
 
 
@@ -91,10 +108,11 @@ def main():
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--gateway", action="store_true")
     target.add_argument("--world", action="store_true")
+    target.add_argument("--walk-return", action="store_true")
     parser.add_argument("--rendered", action="store_true")
     options = parser.parse_args()
-    if options.rendered and not options.world:
-        parser.error("--rendered requires --world")
+    if options.rendered and not (options.world or options.walk_return):
+        parser.error("--rendered requires --world or --walk-return")
     exe, evidence = options.exe.resolve(strict=True), options.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="agip-wp25-passage-") as directory:
@@ -103,7 +121,8 @@ def main():
             keygen(exe, secrets / role, evidence, role)
         shutil.copyfile(secrets / "guest" / "guest.pub", secrets / "host" / "guest.pub")
         fingerprint = enroll(exe, secrets, evidence)
-        result = run_peers(exe, evidence, secrets, fingerprint, options.gateway, options.world, options.rendered)
+        result = run_peers(exe, evidence, secrets, fingerprint, options.gateway, options.world or options.walk_return,
+                           options.rendered, options.walk_return)
     body = json.dumps(result, indent=2, sort_keys=True)
     (evidence / "receipt.json").write_text(body + "\n", encoding="utf-8")
     print(body)

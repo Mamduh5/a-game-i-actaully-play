@@ -10,6 +10,7 @@ const SITE := &"arrival"
 var _trace: Array[Dictionary] = []
 var _world_facts: Dictionary = {}
 var _display: StarterEncounterView
+var _caption: Label
 var _capture: String
 var _ending: bool
 var _garden_unviewed: bool
@@ -192,6 +193,9 @@ func _fighter(id: StringName, realm: StringName, enemy: bool) -> StarterEncounte
 func _present(view: StarterEncounter.View, realm: StringName, title: String) -> void:
 	if _capture.is_empty() or DisplayServer.get_name() == "headless":
 		return
+	if _display != null:
+		_display.queue_free()
+		_caption.queue_free()
 	_display = StarterEncounterView.new()
 	var point := Vector2(view.player.at.x, view.player.at.y)
 	var cells: Array[Vector2i] = [Vector2i((point / WorldTopology.MODULE_SIZE).floor())]
@@ -203,11 +207,11 @@ func _present(view: StarterEncounter.View, realm: StringName, title: String) -> 
 	var outside_view := point + Vector2(0, 480)
 	_display.prepare_floor(cells, StarterEncounterView.section_edges(cells, floor), outside_view, outside_view)
 	_display.display(view)
-	var caption := Label.new()
-	caption.position = Vector2(430, 82)
-	caption.add_theme_font_size_override("font_size", 29)
-	caption.text = title
-	add_child(caption)
+	_caption = Label.new()
+	_caption.position = Vector2(430, 82)
+	_caption.add_theme_font_size_override("font_size", 29)
+	_caption.text = title
+	add_child(_caption)
 
 
 func _finish(passed: bool) -> void:
