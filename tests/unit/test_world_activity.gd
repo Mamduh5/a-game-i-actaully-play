@@ -258,3 +258,28 @@ func test_hunter_keeps_active_memory_over_a_nearby_faction_rival_then_engages_af
 		assert_eq(strike[0], 5)
 		assert_eq(strike[3], rival_at.x)
 		assert_eq(strike[4], rival_at.y)
+
+
+func test_hunter_retains_last_seen_pose_after_the_seat_leaves_its_realm() -> void:
+	var room := Room.new()
+	var floor := room.exploration.geometry()
+	assert_true(room.enter())
+	assert_true(room.add(&"hunter", -48.0, [], true, 2))
+	assert_true(floor.commit_circle_pose(&"hunter", 0, room.point(-48.0, 41.0)))
+	assert_true(floor.commit_circle_pose(Hero, 0, room.point(56.0, 41.0)))
+	assert_not_null(room.world.advance(1))
+	var memory: Array = room.world.snapshot().actors[&"hunter"][7][3]
+	assert_eq(memory, [Hero, room.point(56.0, 41.0).x, room.point(56.0, 41.0).y, 3])
+	var far_layout := WorldTopology.generate_optional(122, &"hall_of_echoes")
+	var far_room := WorldExploration.create(far_layout, [Hero])
+	assert_true(room.world.register_realm(far_room))
+	assert_true(room.kernel.transfer_player(Hero, 1, floor, far_room.geometry(), far_layout.center(WorldTopology.ENTRY)))
+	for tick: int in [2, 3]:
+		assert_not_null(room.world.advance(tick))
+		assert_eq(room.world.snapshot().actors[&"hunter"][7][3], memory)
+	assert_not_null(room.world.advance(4))
+	var last: Dictionary = room.world.snapshot().actors
+	assert_eq(last[&"hunter"][7][3], [])
+	assert_eq(last[&"hunter"][7][4], [])
+	assert_eq(last[Hero][0], far_layout.realm)
+	assert_eq(last[Hero][2], "20")
