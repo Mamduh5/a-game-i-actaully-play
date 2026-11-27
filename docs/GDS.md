@@ -621,6 +621,8 @@ Neutral magical damage, no innate element/status, and zero base mana cost. Compa
 
 No innate force, status or penetration amplification. No artificial target-number limit within valid geometry. Movement stays unrestricted. **Discovery - Piercing Mastery:** hit multiple aligned enemies with one eligible piercing attack using previously available content such as Spectral Lance; then permanent-currency unlock.
 
+**C06 provisional thrust geometry under OWNER-T04/O26.** Use a forward capsule of full width 22 with its leading edge 125 units from the committed source. A solid or compatible shield contact at an equal position on the path wins the tie. All eligible targets before the obstruction share one delivery instant and one activation payment. An equipped Force Rune pushes along the committed thrust direction. The shape and timing live in the native weapon rules and await owner playtesting. [C06 evidence](records/C06.md#spear-review-handoff)
+
 ### W05. Warhammer - unlockable
 <a id="catalog-w05"></a>
 
