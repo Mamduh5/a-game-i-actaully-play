@@ -53,6 +53,114 @@ func test_a_low_obstacle_still_blocks_walking_and_an_occupied_vault_landing_cost
 	assert_true(encounter.closed_result().outcomes[0].manual)
 
 
+func test_low_vault_keeps_each_sample_and_ground_strike_protection_through_tick_fifteen() -> void:
+	for radius: float in [0.0, 4.0, 12.0]:
+		var floor := _floor()
+		if radius > 0.0:
+			assert_true(floor.place_route_solid(&"low", RealmSweep.Point.new(94, Y), radius, null, true))
+		var encounter := _acrobat(floor)
+		assert_true(_height_foe(encounter, 14, true))
+		assert_true(encounter.close_tick())
+		assert_eq(encounter.view_for(SEAT).threats[0].impact_tick, 15)
+		assert_eq(_submit(encounter, 1, PlayerCommand.MANUAL), RunAuthority.Admission.QUEUED)
+		for tick: int in range(2, 17):
+			assert_true(encounter.close_tick())
+			assert_eq(encounter.fault(), &"")
+			var state := encounter.movement_state(SEAT, 1, tick + 1)
+			assert_eq(state.permits_prediction, tick == 16)
+			assert_almost_eq(state.position.x, START_X + 64.0 * float(tick - 2) / 14.0, 0.000001)
+			assert_eq(encounter.view_for(SEAT).player.hp.native_at_scale(0), 100)
+
+
+func test_vault_above_a_low_solid_keeps_airborne_reaching_hits_eligible_and_can_settle_a_body() -> void:
+	for damage: int in [16, 100]:
+		var floor := _floor()
+		assert_true(floor.place_route_solid(&"low", RealmSweep.Point.new(94, Y), 12.0, null, true))
+		var encounter := _acrobat(floor)
+		assert_true(_height_foe(encounter, 8, false, damage))
+		assert_true(encounter.close_tick())
+		assert_eq(_submit(encounter, 1, PlayerCommand.MANUAL), RunAuthority.Admission.QUEUED)
+		while encounter.next_tick() <= 9:
+			assert_true(encounter.close_tick())
+		assert_eq(encounter.fault(), &"")
+		var state := encounter.movement_state(SEAT, 1, 10)
+		var view := encounter.view_for(SEAT)
+		assert_eq(view.player.hp.native_at_scale(0), 100 - damage)
+		if damage == 100:
+			assert_true(view.defeated)
+			assert_true(_standable(floor))
+			assert_eq(state.position.x, view.player.at.x, "the rescue body starts at the safe landing")
+		else:
+			assert_false(state.permits_prediction)
+			assert_almost_eq(state.position.x, 94.0, 0.000001)
+
+
+func test_dynamic_sealed_obstruction_aborts_a_low_crossing_at_a_certified_landing() -> void:
+	var floor := _floor()
+	assert_true(floor.place_route_solid(&"low", RealmSweep.Point.new(94, Y), 12.0, null, true))
+	var encounter := _acrobat(floor)
+	assert_eq(_submit(encounter, 1, PlayerCommand.MANUAL), RunAuthority.Admission.QUEUED)
+	while encounter.next_tick() <= 8:
+		assert_true(encounter.close_tick())
+	assert_almost_eq(encounter.view_for(SEAT).player.at.x, 94.0, 0.000001)
+	assert_false(_standable(floor))
+	var wall := RealmOutline.Edge.new()
+	wall.first = RealmSweep.Point.new(105, Y - 32)
+	wall.last = RealmSweep.Point.new(105, Y + 32)
+	assert_true(floor.geometry().add_segment(&"inserted", 0, wall, WorldExploration.SEALED_BLOCKER, false))
+	while not encounter.movement_state(SEAT, 1, encounter.next_tick()).permits_prediction and encounter.next_tick() <= 15:
+		assert_true(encounter.close_tick())
+		assert_eq(encounter.fault(), &"")
+	assert_true(_standable(floor))
+	assert_almost_eq(encounter.view_for(SEAT).player.at.x, START_X + 64.0 / 14.0, 0.000001)
+
+
+func test_forced_relocation_interrupts_vault_at_a_standable_pose() -> void:
+	for destination_y: float in [Y - 10.0, Y - 35.0]:
+		var floor := _floor()
+		assert_true(floor.place_route_solid(&"low", RealmSweep.Point.new(94, Y), 12.0, null, true))
+		var encounter := _acrobat(floor)
+		assert_eq(_submit(encounter, 1, PlayerCommand.MANUAL), RunAuthority.Admission.QUEUED)
+		while encounter.next_tick() <= 8:
+			assert_true(encounter.close_tick())
+		var geometry := floor.geometry()
+		var pushed := geometry.displace_body(SEAT, 0, RealmSweep.Point.new(94.0, destination_y), WorldExploration.BLOCKER)
+		assert_not_null(pushed)
+		assert_eq(pushed.finish.y, destination_y)
+		assert_true(encounter.close_tick())
+		assert_true(encounter.movement_state(SEAT, 1, 10).permits_prediction)
+		assert_true(_standable(floor))
+		var pose := encounter.view_for(SEAT).player.at
+		assert_almost_eq(pose.x, START_X + 64.0 / 14.0 if destination_y == Y - 10.0 else 94.0, 0.000001)
+		assert_eq(pose.y, Y if destination_y == Y - 10.0 else destination_y)
+
+
+func test_route_solid_checkpoint_preserves_low_and_sealed_vault_outcomes() -> void:
+	for low: bool in [false, true]:
+		var floor := _floor()
+		assert_true(floor.place_route_solid(&"obstacle", RealmSweep.Point.new(94, Y), 4.0, Quantity.from_count(9), low))
+		var saved := floor.checkpoint()
+		var reopened := WorldExploration.restore(saved, [SEAT])
+		assert_not_null(reopened)
+		assert_eq(reopened.checkpoint(), saved)
+		var expected := WorldExploration.VAULTABLE_BLOCKER if low else WorldExploration.SEALED_BLOCKER
+		assert_eq(reopened.geometry().circle_category(&"obstacle", 0), expected)
+		var encounter := _acrobat(reopened)
+		assert_eq(_submit(encounter, 1, PlayerCommand.MANUAL), RunAuthority.Admission.QUEUED)
+		while encounter.next_tick() <= 15:
+			assert_true(encounter.close_tick())
+		assert_almost_eq(encounter.view_for(SEAT).player.at.x, 126.0 if low else 76.0, 0.000001)
+		var invalid := saved.duplicate(true)
+		invalid.solids[0]["vaultable"] = 1
+		assert_null(WorldExploration.restore(invalid, [SEAT]))
+		var legacy := saved.duplicate(true)
+		legacy.solids[0].erase("vaultable")
+		var sealed := WorldExploration.restore(legacy, [SEAT])
+		assert_eq(sealed.geometry().circle_category(&"obstacle", 0), WorldExploration.SEALED_BLOCKER)
+		legacy.solids[0]["vaultable"] = false
+		assert_eq(WorldExploration.restore(legacy, [SEAT]).checkpoint(), sealed.checkpoint())
+
+
 func test_airborne_ground_only_strike_misses_while_sword_and_airborne_reaching_strike_still_hit() -> void:
 	for ground_only: bool in [true, false]:
 		var encounter := _acrobat(_floor())
@@ -155,6 +263,30 @@ func test_close_call_rewards_only_a_narrow_miss_and_preserves_accrued_weapon_rec
 
 static func _floor() -> WorldExploration:
 	return WorldExploration.create(WorldTopology.generate(3207), [SEAT])
+
+
+static func _height_foe(encounter: StarterEncounter, windup: int, ground_only: bool, damage: int = 16) -> bool:
+	var foe := WorldEnemy.Rules.new()
+	foe.faction = &"fixture"
+	foe.foes = [WorldEnemy.PARTY]
+	foe.family = &"fixture/height"
+	foe.hp = Quantity.from_count(100)
+	foe.damage = Quantity.from_count(damage)
+	foe.radius = 8.0
+	foe.sight = 150.0
+	foe.attack_range = 120.0
+	foe.attack_radius = 70.0
+	foe.windup_ticks = windup
+	foe.recovery_ticks = 40
+	foe.ground_only = ground_only
+	return encounter.place_enemy(&"foe", foe, RealmSweep.Point.new(62, Y - 76))
+
+
+static func _standable(floor: WorldExploration) -> bool:
+	var geometry := floor.geometry()
+	var pose := geometry.circle_center(SEAT, 0)
+	var footprint := geometry.certify_circle_snapshot(REALM, pose, geometry.circle_radius(SEAT, 0), WorldExploration.BLOCKER, SEAT)
+	return footprint != null and footprint.contacts.is_empty() and footprint.unresolved.is_empty()
 
 
 static func _acrobat(floor: WorldExploration, row: float = Y) -> StarterEncounter:

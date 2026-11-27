@@ -326,6 +326,8 @@ func checkpoint() -> Dictionary:
 			if center == null:
 				return {}
 			var solid := {"id": id, "x": center.x, "y": center.y, "radius": _route_solids[id]}
+			if _geometry.circle_category(id, 0) == VAULTABLE_BLOCKER:
+				solid["vaultable"] = true
 			if _durability.has(id):
 				solid["durability"] = QuantityCodec.encode(_durability[id])
 			solids.append(solid)
@@ -351,7 +353,8 @@ static func restore(saved: Dictionary, seats: Array[StringName]) -> WorldExplora
 		return null
 	for solid: Variant in solids:
 		if (not solid is Dictionary or not solid.get("id") is StringName or not solid.get("x") is float
-				or not solid.get("y") is float or not solid.get("radius") is float):
+				or not solid.get("y") is float or not solid.get("radius") is float
+				or not solid.get("vaultable", false) is bool):
 			return null
 		var center := RealmSweep.Point.new(solid["x"], solid["y"])
 		var durability: Quantity
@@ -361,7 +364,7 @@ static func restore(saved: Dictionary, seats: Array[StringName]) -> WorldExplora
 			durability = QuantityCodec.decode(solid["durability"])
 			if durability == null:
 				return null
-		if not reopened.place_route_solid(solid["id"], center, solid["radius"], durability):
+		if not reopened.place_route_solid(solid["id"], center, solid["radius"], durability, solid.get("vaultable", false)):
 			return null
 	return reopened
 

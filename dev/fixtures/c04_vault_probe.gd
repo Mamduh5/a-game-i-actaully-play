@@ -12,6 +12,7 @@ var _encounter: StarterEncounter
 var _caption := Label.new()
 var _capture: String
 var _low := true
+var _wide := false
 var _close_call := false
 var _gravity := false
 var _pulled := false
@@ -19,12 +20,16 @@ var _sequence: int
 var _committed := false
 var _warning := false
 var _capture_fault := false
+var _airborne_ticks: int
+var _previous_x := 62.0
+var _max_step: float
 
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	_capture = args[0] if not args.is_empty() else ""
-	_low = args.size() < 2 or args[1] == "low"
+	_wide = args.size() > 1 and args[1] == "low-wide"
+	_low = args.size() < 2 or args[1] == "low" or _wide
 	_close_call = args.size() > 1 and args[1] == "close-call"
 	_gravity = args.size() > 1 and args[1] == "gravity"
 	RenderingServer.set_default_clear_color(Color("#202b29"))
@@ -69,7 +74,8 @@ func _begin() -> bool:
 	var solids: Array[StringName] = []
 	if not _close_call and not _gravity:
 		solids.append(SOLID)
-	if not solids.is_empty() and not world.place_route_solid(SOLID, RealmSweep.Point.new(94, 128), 4.0, null, _low):
+	var radius := 12.0 if _wide else 4.0
+	if not solids.is_empty() and not world.place_route_solid(SOLID, RealmSweep.Point.new(94, 128), radius, null, _low):
 		return false
 	_encounter = StarterEncounter.assemble(setup, SEAT, world, {SEAT: build})
 	if _encounter == null:
@@ -92,6 +98,10 @@ func _begin() -> bool:
 	if _gravity:
 		position = RealmSweep.Point.new(178, 128)
 		foe.windup_ticks = 58
+	if _wide:
+		position = RealmSweep.Point.new(62, 52)
+		foe.windup_ticks = 14
+		foe.attack_radius = 70.0
 	return _encounter.place_enemy(&"foe", foe, position)
 
 
@@ -117,6 +127,14 @@ func _physics_process(_delta: float) -> void:
 		_committed = _committed or outcome.get("manual", false)
 	var view := _encounter.view_for(SEAT)
 	_stage.display(view)
+	if _wide and tick >= 2:
+		_airborne_ticks += int(not _encounter.movement_state(SEAT, 1, tick + 1).permits_prediction)
+		_max_step = maxf(_max_step, absf(view.player.at.x - _previous_x))
+		_previous_x = view.player.at.x
+		if tick == 9 or tick == 15:
+			set_physics_process(false)
+			await _snap("crossing.png" if tick == 9 else "strike.png")
+			set_physics_process(true)
 	if _gravity and tick > 1:
 		_observe_gravity(tick, view)
 	elif tick == 1 or tick == (40 if _close_call else 16):
@@ -136,7 +154,8 @@ func _physics_process(_delta: float) -> void:
 		else:
 			await _snap("landed.png")
 			var correct_x := 126.0 if _low else 76.0
-			_finish(_warning and _committed and not _capture_fault and absf(view.player.at.x - correct_x) < 0.01
+			var cadence := not _wide or (_airborne_ticks == 14 and absf(_max_step - 64.0 / 14.0) < 0.000001)
+			_finish(cadence and _warning and _committed and not _capture_fault and absf(view.player.at.x - correct_x) < 0.01
 				and view.player.hp.native_at_scale(0) == 100 and _encounter.movement_state(SEAT, 1, 17).permits_prediction)
 
 
@@ -189,5 +208,8 @@ func _finish(passed: bool) -> void:
 	else:
 		facts["low"] = _low
 		facts["committed"] = _committed
+		if _wide:
+			facts["airborne_ticks"] = _airborne_ticks
+			facts["max_step"] = snappedf(_max_step, 0.000001)
 		print("C04_VAULT ", JSON.stringify(facts))
 	get_tree().quit(0 if passed else 1)

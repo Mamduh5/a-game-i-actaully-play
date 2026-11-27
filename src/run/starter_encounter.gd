@@ -306,9 +306,11 @@ func _move_seat(id: StringName, tick: int) -> RealmSweep.Point:
 	var seat := _seats[id]
 	if seat.vault == null:
 		return _party.step_movement(id, _movement_speed(seat, tick), 1.0 / 60.0)
-	if _party.can_control(id) and not seat.vault.advance(_geometry):
+	var controlled := _party.can_control(id)
+	var advanced := seat.vault.advance(_geometry) if controlled else seat.vault.settle_if_interrupted(_geometry, false)
+	if not advanced:
 		return null
-	if not _party.can_control(id) or not seat.vault.airborne():
+	if not seat.vault.airborne():
 		seat.vault = null
 	return _geometry.circle_center(id, 0)
 
@@ -329,6 +331,14 @@ func _try_manual(id: StringName, tick: int, pointer: RealmSweep.Point) -> Starte
 
 
 func _observe_wave(closed: CombatKernel.WaveResult) -> bool:
+	for id: StringName in _seats:
+		var seat := _seats[id]
+		if seat.vault != null:
+			var actor := _kernel.actor_vitals(id)
+			if actor == null or not seat.vault.settle_if_interrupted(_geometry, actor.hp.sign_value > 0):
+				return false
+			if not seat.vault.airborne():
+				seat.vault = null
 	if not _party.observe_combat(closed):
 		return false
 	for seat: Seat in _seats.values():

@@ -165,7 +165,7 @@ func release(kernel: CombatKernel, geometry: RealmGeometry, subjects: Dictionary
 			var other: Subject = subjects.get(contact.entity)
 			if (other != null and other.realm == geometry.realm_id and other.hp.sign_value > 0 and _hostile(other.faction)
 					and (not _rules.ground_only or not other.airborne)
-					and _unobstructed(geometry, held.origin, other.at, blockers)):
+					and _unobstructed(geometry, held.origin, other.at, _cover_for(other, blockers))):
 				if held.delivery.admit(tick, contact, other.life, true) not in [
 						CombatDelivery.Result.ADMITTED, CombatDelivery.Result.CADENCE]:
 					return false
@@ -194,10 +194,14 @@ func _narrow_miss(kernel: CombatKernel, floor: RealmGeometry, held: Strike, watc
 		if edge.outcome == RealmCircleTime.Result.UNRESOLVED:
 			return false
 		in_band = in_band or edge.outcome == RealmCircleTime.Result.HIT
-	if not in_band or not _unobstructed(floor, held.origin, watched.at, blockers):
+	if not in_band or not _unobstructed(floor, held.origin, watched.at, _cover_for(watched, blockers)):
 		return false
 	var actor := kernel.actor_snapshot(watched.id)
 	return _threatens(actor, watched, tick) and actor.realm_visit == held.watched_visit
+
+
+static func _cover_for(subject: Subject, blockers: int) -> int:
+	return blockers & ~WorldExploration.VAULTABLE_BLOCKER if subject.airborne else blockers
 
 
 func _threatens(actor: CombatantState, target: Subject, tick: int) -> bool:
