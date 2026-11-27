@@ -39,6 +39,7 @@ var _frame: Frame
 var _decisions_opened := false
 var _tick: int
 var _fault: StringName
+var _storage_wait: bool
 var _terminal: CombatKernel.Terminal
 
 
@@ -122,9 +123,12 @@ func schedule_spawn(site: SpawnSite) -> bool:
 ## the same tick to avoid redoing decisions, releases and spawn opportunities.
 func advance(tick: int, authority: RunAuthority = null, play: Callable = Callable(),
 		settled: Callable = Callable()) -> Frame:
+	_storage_wait = false
 	if (_kernel == null or _kernel.arena_started() or not _fault.is_empty() or tick != _tick + 1 or tick > RunAuthority.MAX_TICK
-			or _terminal != CombatKernel.Terminal.ACTIVE
-			or (authority != null and not authority.can_open_earning_group())):
+			or _terminal != CombatKernel.Terminal.ACTIVE):
+		return null
+	if authority != null and not authority.can_open_earning_group():
+		_storage_wait = true
 		return null
 	var now := CombatInstant.at_tick(tick)
 	if _frame == null:
@@ -211,6 +215,7 @@ func _drain(now: CombatInstant, authority: RunAuthority, inclusive: bool, settle
 			CombatKernel.Result.YIELDED:
 				continue
 			CombatKernel.Result.STORAGE_WAIT:
+				_storage_wait = true
 				return false
 			_:
 				_fault = closed.fault
@@ -220,6 +225,10 @@ func _drain(now: CombatInstant, authority: RunAuthority, inclusive: bool, settle
 
 func fault() -> StringName:
 	return _fault
+
+
+func waiting_for_storage() -> bool:
+	return _storage_wait
 
 
 ## The player movement owner marks height during the open movement phase.

@@ -17,6 +17,17 @@ class RefusalStore extends ProfileStore:
 			remaining_before_refusal -= 1
 		return super._commit_io()
 
+class EarningClock:
+	var reads_before_deadline := -1
+	var now: int
+
+	func sample() -> int:
+		if reads_before_deadline == 0:
+			now = OrdinaryCurrency.MAX_AGE_USEC
+		elif reads_before_deadline > 0:
+			reads_before_deadline -= 1
+		return now
+
 var _store := RefusalStore.new()
 var _encounter: StarterEncounter
 var _ordinary: OrdinaryCurrency
@@ -26,12 +37,14 @@ var _caption: Label
 var _capture: String
 var _fault_after: int
 var _capture_ok := true
+var _active_wait: String
+var _clock := EarningClock.new()
 
 
 func _ready() -> void:
 	set_physics_process(false)
 	var args := OS.get_cmdline_user_args()
-	if args.size() < 2 or args.size() > 3 or args[0] not in ["money", "marker", "read"]:
+	if args.size() < 2 or args.size() > 3 or args[0] not in ["money", "marker", "read", "active-entry", "active-wave"]:
 		get_tree().quit(2)
 		return
 	if _store.open(String(SEAT), args[1]) != ProfileStore.OpenResult.OPENED:
@@ -48,6 +61,8 @@ func _ready() -> void:
 	shell.hide()
 	_capture = args[2] if args.size() == 3 else ""
 	_fault_after = int(args[0] == "marker")
+	if args[0].begins_with("active-"):
+		_active_wait = args[0]
 	RenderingServer.set_default_clear_color(Color("#202b29"))
 	_stage = StarterEncounterView.new()
 	_stage.position = Vector2(435, 148)
@@ -97,7 +112,7 @@ func _begin() -> bool:
 	foe.foes = [WorldEnemy.PARTY]
 	foe.family = &"fixture/defeat-strike"
 	foe.hp = Quantity.from_count(100)
-	foe.damage = Quantity.from_count(100)
+	foe.damage = Quantity.from_count(100 if _active_wait.is_empty() else 16)
 	foe.radius = 12.0
 	foe.sight = 154.0
 	foe.attack_range = 103.0
@@ -114,7 +129,8 @@ func _begin() -> bool:
 	grant.recipient = SEAT
 	grant.issuer = key
 	grant.recipient_key = key
-	_ordinary = OrdinaryCurrency.begin(_store, grant, key, ACCOUNT)
+	var sample := Callable() if _active_wait.is_empty() else _clock.sample
+	_ordinary = OrdinaryCurrency.begin(_store, grant, key, ACCOUNT, sample)
 	return _encounter.attach_ordinary_currency(_ordinary)
 
 
@@ -126,6 +142,9 @@ func _physics_process(_delta: float) -> void:
 		_stage.display(_encounter.view_for(SEAT))
 		return
 	set_physics_process(false)
+	if not _active_wait.is_empty():
+		await _exercise_active_wait()
+		return
 	var before := _encounter.closed_result()
 	var input := _admit_move()
 	var accrued := _ordinary.accrue("fixture/earlier-spawn", Quantity.from_count(7)) == OrdinaryCurrency.Eligibility.QUEUED
@@ -151,20 +170,55 @@ func _physics_process(_delta: float) -> void:
 	_finish(input and accrued and delayed and retained and refused_again and balance_at_wait == _fault_after * 7 and published)
 
 
+func _exercise_active_wait() -> void:
+	var before := _encounter.closed_result()
+	var input := _admit_move() and _admit_click(Vector2(155, 128), MOUSE_BUTTON_LEFT, 2)
+	var accrued := _ordinary.accrue("fixture/earlier-spawn", Quantity.from_count(7)) == OrdinaryCurrency.Eligibility.QUEUED
+	_store.remaining_before_refusal = 0
+	_clock.reads_before_deadline = 1 if _active_wait == "active-entry" else 4
+	var held := not _encounter.close_tick() and _encounter.has_unpublished_tick() and _encounter.fault().is_empty()
+	var retained := (_encounter.closed_result() == before and _encounter.movement_acknowledgement(SEAT) == 0
+		and _encounter.view_for(SEAT) == null and _encounter.next_tick() == 3)
+	_encounter.service_ordinary_currency()
+	var refused_again := not _encounter.close_tick() and _store.balance(ACCOUNT).sign_value == 0
+	_caption.text = "Saving run earnings"
+	await _snap("waiting.png")
+	_store.remaining_before_refusal = -1
+	_encounter.service_ordinary_currency()
+	if not _encounter.close_tick():
+		_finish(false)
+		return
+	var view := _encounter.view_for(SEAT)
+	var closed := _encounter.closed_result()
+	_stage.display(view)
+	_caption.text = "Play resumed  ·  Earnings saved"
+	await _snap("resumed.png")
+	var resumed: bool = (not view.defeated and view.tick == 3 and _encounter.movement_acknowledgement(SEAT) == 2
+		and closed.accepted.size() == 2 and closed.outcomes.size() == 3 and is_equal_approx(view.player.at.x, 62.0 + 100.0 / 60.0)
+		and view.player.hp.native_at_scale(0) == 84 and view.others[0].hp.native_at_scale(0) == 76
+		and view.barrier.native_at_scale(0) == 18 and _encounter.close_tick())
+	var quit := _encounter.settle_orderly_quit()
+	_finish(input and accrued and held and retained and refused_again and resumed and quit)
+
+
 func _admit_move() -> bool:
-	var point := _stage.get_global_transform_with_canvas() * Vector2(64, 128)
+	return _admit_click(Vector2(64, 128), MOUSE_BUTTON_RIGHT, 1)
+
+
+func _admit_click(at: Vector2, button: MouseButton, sequence: int) -> bool:
+	var point := _stage.get_global_transform_with_canvas() * at
 	for pressed: bool in [true, false]:
 		var event := InputEventMouseButton.new()
 		event.position = point
 		event.global_position = point
-		event.button_index = MOUSE_BUTTON_RIGHT
+		event.button_index = button
 		event.pressed = pressed
 		get_viewport().push_input(event, true)
 	var commands := _router.drain()
 	if commands.size() != 1:
 		return false
 	var command := commands[0]
-	var intent := RunIntent.new(RUN, 1, REALM, SEAT, 3, 1, command.action, command)
+	var intent := RunIntent.new(RUN, 1, REALM, SEAT, 3, sequence, command.action, command)
 	return _encounter.submit(SEAT, intent) == RunAuthority.Admission.QUEUED
 
 
@@ -182,8 +236,12 @@ func _finish(passed: bool) -> void:
 	var generation: int = _store.checkpoint().get("generation", -1)
 	var saved := _store.close()
 	passed = passed and _capture_ok and balance == 7 and generation == 3 and saved
-	print("WP23_LIVE_DEFEAT ", JSON.stringify({"passed": passed, "fault_after": _fault_after,
-		"balance": balance, "tick": closed.get("tick", -1), "generation": generation}))
+	if _active_wait.is_empty():
+		print("WP23_LIVE_DEFEAT ", JSON.stringify({"passed": passed, "fault_after": _fault_after,
+			"balance": balance, "tick": closed.get("tick", -1), "generation": generation}))
+	else:
+		print("WP23_LIVE_RESUME ", JSON.stringify({"passed": passed, "arm": _active_wait,
+			"balance": balance, "tick_after_resume": closed.get("tick", -1), "generation": generation}))
 	get_tree().quit(0 if passed else 1)
 
 

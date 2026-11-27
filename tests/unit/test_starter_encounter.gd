@@ -14,6 +14,17 @@ class TerminalWriteStore extends ProfileStore:
 			commits_before_refusal -= 1
 		return super._commit_io()
 
+class EarningClock:
+	var reads_before_deadline := -1
+	var now: int
+
+	func sample() -> int:
+		if reads_before_deadline == 0:
+			now = OrdinaryCurrency.MAX_AGE_USEC
+		elif reads_before_deadline > 0:
+			reads_before_deadline -= 1
+		return now
+
 
 func test_generated_encounter_strike_hits_a_stationary_player_and_misses_after_legal_movement() -> void:
 	for evades: bool in [false, true]:
@@ -216,6 +227,88 @@ func test_live_defeat_waits_for_currency_and_closing_marker_then_publishes_once(
 		assert_true(store.close())
 		assert_eq(store.open(String(SEAT), scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
 		assert_eq(store.balance(account).native_at_scale(0), 7)
+		assert_eq(store.checkpoint()["generation"], 3)
+		assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
+		assert_true(store.close())
+
+
+func test_active_currency_deadline_holds_input_and_resumes_world_at_the_same_tick() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var signer := Crypto.new().generate_rsa(2048)
+	var foe := _foe()
+	foe.windup_ticks = 2
+	var control := _encounter(62.0, &"H01", &"W01", foe)
+	var walk := PlayerCommand.new(PlayerCommand.MOVE_TO, 78, 128)
+	var siphon := PlayerCommand.new(PlayerCommand.MANUAL, 155, 128)
+	assert_true(control.close_tick())
+	assert_true(control.close_tick())
+	assert_eq(_submit(control, 1, walk), RunAuthority.Admission.QUEUED)
+	assert_eq(_submit(control, 2, siphon), RunAuthority.Admission.QUEUED)
+	assert_true(control.close_tick())
+	var expected := control.closed_result()
+	var view := control.view_for(SEAT)
+	assert_eq(view.player.hp.native_at_scale(0), 84)
+	assert_eq(view.others[0].hp.native_at_scale(0), 76)
+	assert_eq(view.barrier.native_at_scale(0), 18)
+	# With two or five reads the deadline falls before decisions or just
+	# before the combat wave publishes. The accepted commands are identical.
+	for reads: int in [1, 4]:
+		var encounter := _encounter(62.0, &"H01", &"W01", foe)
+		var scope := encounter.checkpoint().identity as Dictionary
+		var scratch := DirAccess.create_temp("agip-active-earning")
+		var store := TerminalWriteStore.new()
+		assert_eq(store.open(String(SEAT), scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+		var binding := ProfileGrant.Binding.new()
+		binding.run = String(scope.run)
+		binding.rules = String(scope.rules)
+		binding.catalog = String(scope.catalog)
+		binding.recipient = String(SEAT)
+		binding.issuer = signer
+		binding.recipient_key = signer
+		var clock := EarningClock.new()
+		var ordinary := OrdinaryCurrency.begin(store, binding, signer, "currency/permanent", clock.sample)
+		assert_true(encounter.attach_ordinary_currency(ordinary))
+		assert_true(encounter.begin_ordinary_session(store))
+		assert_true(encounter.close_tick())
+		assert_true(encounter.close_tick())
+		assert_eq(ordinary.accrue("fixture/earlier-spawn", Quantity.from_count(7)), OrdinaryCurrency.Eligibility.QUEUED)
+		var previous := encounter.closed_result()
+		assert_eq(_submit(encounter, 1, walk), RunAuthority.Admission.QUEUED)
+		assert_eq(_submit(encounter, 2, siphon), RunAuthority.Admission.QUEUED)
+		store.commits_before_refusal = 0
+		clock.reads_before_deadline = reads
+		assert_false(encounter.close_tick())
+		assert_eq(encounter.fault(), &"")
+		assert_eq(encounter.next_tick(), 3)
+		assert_true(encounter.has_unpublished_tick())
+		assert_eq(encounter.closed_result(), previous)
+		assert_eq(encounter.movement_acknowledgement(SEAT), 0)
+		assert_null(encounter.view_for(SEAT))
+		assert_null(encounter.movement_state(SEAT, 1, 3))
+		assert_true(encounter.checkpoint().is_empty())
+		assert_eq(_submit(encounter, 3, walk), RunAuthority.Admission.INACTIVE)
+		assert_eq(encounter._kernel.actor_vitals(SEAT).hp.native_at_scale(0), 100)
+		assert_almost_eq(encounter._geometry.circle_center(SEAT, 0).x, 62.0 if reads == 1 else view.player.at.x, 0.000001)
+		encounter.service_ordinary_currency()
+		assert_false(encounter.close_tick())
+		assert_eq(store.balance("currency/permanent").sign_value, 0)
+		store.commits_before_refusal = -1
+		encounter.service_ordinary_currency()
+		assert_true(encounter.close_tick())
+		assert_eq(encounter.closed_result(), expected)
+		assert_eq(encounter.movement_acknowledgement(SEAT), 2)
+		assert_eq(encounter.view_for(SEAT).player.at.x, view.player.at.x)
+		assert_eq(encounter.view_for(SEAT).player.hp.native_at_scale(0), 84)
+		assert_eq(encounter.view_for(SEAT).others[0].hp.native_at_scale(0), 76)
+		assert_eq(encounter.view_for(SEAT).barrier.native_at_scale(0), 18)
+		assert_eq(store.balance("currency/permanent").native_at_scale(0), 7)
+		assert_true(encounter.close_tick())
+		assert_eq(encounter.closed_result().outcomes, [])
+		assert_true(encounter.settle_orderly_quit())
+		assert_true(store.close())
+		assert_eq(store.open(String(SEAT), scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+		assert_eq(store.balance("currency/permanent").native_at_scale(0), 7)
 		assert_eq(store.checkpoint()["generation"], 3)
 		assert_eq(ProfileOrdinarySession.reopen_status(store), ProfileOrdinarySession.ReopenStatus.CLEAR)
 		assert_true(store.close())

@@ -110,7 +110,7 @@ func begin_ordinary_session(profile: ProfileStore) -> bool:
 
 ## Also used by the group owner before opening an earning boundary within a tick.
 func can_open_earning_group() -> bool:
-	if (_exit != Exit.ACTIVE or _ordinary_ending or _closing != null or _gateway != null
+	if (_exit != Exit.ACTIVE or _ordinary_ending or (_closing != null and not _resolving) or _gateway != null
 			or (_ordinary_session != null and not _ordinary_session.is_open())):
 		return false
 	var permitted := true
@@ -244,7 +244,8 @@ func _progression_can_cross(progression: PartyProgression) -> bool:
 
 
 func accepted_interaction(intent: RunIntent, party: RunParty) -> bool:
-	return (_exit == Exit.ACTIVE and not _ordinary_ending and _gateway == null and not _resolving and intent != null and party != null
+	return (_exit == Exit.ACTIVE and not _ordinary_ending and _gateway == null and _closing == null and not _resolving
+		and intent != null and party != null
 		and intent.action == PlayerCommand.INTERACT and intent.valid_payload() and intent.tick == _closed_tick
 		and belongs_to(intent.run_id, intent.epoch) and party.belongs_to(intent.run_id, intent.epoch)
 		and _realms.get(intent.seat_id) == intent.realm_id and intent.receipt() in _observation["accepted"])
@@ -487,6 +488,6 @@ func _resolve_tick(_tick: int, _accepted: Array[RunIntent], _streams: RunRandom)
 	return []
 
 
-## A refused terminal write can keep the resolved batch private for retry.
+## A storage wait can keep the admitted batch private until it can close.
 func _finish_resolved_tick(_tick: int, _outcomes: Array[Dictionary]) -> bool:
 	return true
