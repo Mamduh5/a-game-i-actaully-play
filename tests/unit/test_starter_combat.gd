@@ -19,7 +19,8 @@ class Arena:
 	var targeting := PlayerTargeting.new()
 
 	func _init(weapon: StringName, hero: StringName = &"H01", short_cooldown: bool = false,
-			rune: StringName = &"", second_rune: StringName = &"", unlocked: Dictionary[StringName, bool] = {}) -> void:
+			rune: StringName = &"", second_rune: StringName = &"", unlocked: Dictionary[StringName, bool] = {},
+			owner: StringName = HERO) -> void:
 		var source: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 		catalog = source.compile()
 		if short_cooldown:
@@ -30,6 +31,7 @@ class Arena:
 		slots.fill(&"")
 		var prep := RunPreparation.select(catalog, hero, weapon, [rune, second_rune], slots, unlocked)
 		var actor := make_actor(HERO, 100, CombatOrigin.Provenance.SEAT)
+		actor.owner = owner
 		actor.physical.rating = Quantity.from_count(10)
 		actor.magical.rating = Quantity.from_count(10)
 		actor.resources[MANA] = Quantity.from_count(10)
@@ -218,8 +220,9 @@ func test_temporal_echo_from_arrow_preserves_contact_point_and_one_typed_damage_
 	assert_null(arena.kernel.next_due())
 
 
-func test_fracture_compresses_only_owned_bleed_while_target_is_in_field_without_adding_ticks() -> void:
-	var arena := Arena.new(&"W01", &"H04", false, &"R01", &"", {&"H04": true})
+func test_fracture_compresses_owned_echo_and_bleed_when_seat_and_actor_ids_differ() -> void:
+	var seat := &"seat_a"
+	var arena := Arena.new(&"W01", &"H04", false, &"R01", &"", {&"H04": true}, seat)
 	assert_true(arena.add(&"target", 30, 0, 500))
 	assert_true(arena.add(&"partner", 0, 4, 100, FRIEND))
 	var slots: Array[StringName] = []
@@ -230,6 +233,7 @@ func test_fracture_compresses_only_owned_bleed_while_target_is_in_field_without_
 		&"partner", HOSTILE, HOSTILE, BLOCKER)
 	var mine: Array[int] = []
 	var theirs: Array[int] = []
+	var echoes: Array[int] = []
 	for tick: int in range(1, 183):
 		if tick == 1:
 			assert_eq(arena.attack(tick), Committed)
@@ -240,10 +244,20 @@ func test_fracture_compresses_only_owned_bleed_while_target_is_in_field_without_
 		assert_true(arena.combat.advance(tick))
 		for hit: CombatKernel.Hit in arena.settle(tick):
 			if hit.family == &"R01.bleed":
-				if hit.origin.owner == HERO:
+				if hit.origin.owner == seat:
 					mine.append(tick)
 				else:
 					theirs.append(tick)
+			if hit.family == StarterCombatRules.TEMPORAL_ECHO:
+				assert_eq(hit.origin.owner, seat)
+				echoes.append(tick)
+		if tick == 2:
+			var echo_deadlines: Array[int] = []
+			for cue: StarterCombat.Cue in arena.combat.cues():
+				if cue.id == StarterCombatRules.TEMPORAL_ECHO:
+					echo_deadlines.append(cue.impact)
+			assert_eq(echo_deadlines, [30])
+	assert_eq(echoes, [16])
 	assert_eq(mine, [31, 91, 151])
 	assert_eq(theirs, [61, 121, 181])
 	assert_null(arena.kernel.next_due())
@@ -510,6 +524,30 @@ func test_force_translates_all_body_circles_and_clips_at_an_unstruck_members_wal
 	assert_eq(secondary.y - primary.y, 90.0)
 
 
+func test_sword_force_uses_the_same_compound_contact_when_slots_register_in_reverse() -> void:
+	for reversed: bool in [false, true]:
+		var arena := Arena.new(&"W01", &"H01", false, &"R03")
+		assert_true(arena.move(HERO, 0, 40))
+		var secondary_pose := RealmSweep.Point.new(30, 55)
+		if reversed:
+			assert_true(arena.geometry.add_circle(&"beast", 1, secondary_pose, 3, HOSTILE))
+		assert_true(arena.add(&"beast", 30, 25, 100, HOSTILE, false))
+		if not reversed:
+			assert_true(arena.geometry.add_circle(&"beast", 1, secondary_pose, 3, HOSTILE))
+		assert_true(arena.add(&"aim", 70, 40, 100))
+		assert_eq(arena.attack(1), Committed)
+		var hits := arena.settle(1)
+		var contacted: Array[int] = []
+		for hit: CombatKernel.Hit in hits:
+			if hit.target == &"beast":
+				contacted.append(hit.shape)
+		assert_eq(contacted, [0])
+		var primary := arena.geometry.circle_center(&"beast", 0)
+		var secondary := arena.geometry.circle_center(&"beast", 1)
+		assert_almost_eq(primary.y, 16.055728, 0.000001)
+		assert_almost_eq(secondary.y - primary.y, 30.0, 0.000001)
+
+
 func test_force_sword_uses_actual_target_direction_resistance_and_wall_clearance() -> void:
 	for rune: StringName in [&"", &"R03"]:
 		var arena := Arena.new(&"W01", &"H01", false, rune)
@@ -577,6 +615,53 @@ func test_lightning_and_storm_relay_choose_from_the_struck_and_displaced_positio
 				assert_eq(hit.family, &"R02.lightning" if hit.target == &"first" else &"RP03.storm_relay")
 				assert_eq(hit.arc_start.x, 50.0 if hit.target == &"first" else 70.0)
 				assert_eq(hit.arc_end.x, 30.0 if hit.target == &"first" else 90.0)
+
+
+func test_lightning_and_relay_break_equal_distance_ties_by_stable_target_id() -> void:
+	for reversed: bool in [false, true]:
+		var arena := Arena.new(&"W02", &"H01", false, &"R02", &"R03")
+		assert_true(arena.move(HERO, 0, 45))
+		assert_true(arena.add(&"primary", 50, 45, 100))
+		var ids: Array[StringName] = [&"alpha", &"beta", &"north", &"south"]
+		if reversed:
+			ids.reverse()
+		for id: StringName in ids:
+			var initial := id in [&"alpha", &"beta"]
+			assert_true(arena.add(id, 40 if initial else 75, 35 if id in [&"alpha", &"north"] else 55,
+				100, HOSTILE, false))
+		assert_eq(arena.attack(1), Committed)
+		var arcs: Dictionary[StringName, StringName] = {}
+		for tick: int in range(1, 8):
+			assert_true(arena.combat.advance(tick))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				if hit.family != &"W02":
+					assert_false(arcs.has(hit.family))
+					arcs[hit.family] = hit.target
+		assert_eq(arcs.get(&"R02.lightning"), &"alpha")
+		assert_eq(arcs.get(&"RP03.storm_relay"), &"north")
+
+
+func test_sword_cleave_gives_the_same_parent_the_lethal_arc_when_shapes_register_in_reverse() -> void:
+	for reversed: bool in [false, true]:
+		var arena := Arena.new(&"W01", &"H01", false, &"R02", &"R01")
+		assert_true(arena.move(HERO, 0, 40))
+		var ids: Array[StringName] = [&"alpha", &"beta"]
+		if reversed:
+			ids.reverse()
+		for id: StringName in ids:
+			assert_true(arena.add(id, 60, 18 if id == &"alpha" else 62, 100))
+		assert_true(arena.add(&"gamma", 95, 40, 10, HOSTILE, false))
+		assert_eq(arena.attack(1), Committed)
+		var alpha_event := 0
+		var winning_parents: Array[int] = []
+		for hit: CombatKernel.Hit in arena.settle(1):
+			if hit.family == &"W01" and hit.target == &"alpha":
+				assert_eq(hit.origin.delivery_part, 1)
+				alpha_event = hit.event
+			if hit.family == &"R02.lightning" and hit.target == &"gamma" and hit.eliminated:
+				winning_parents.append(hit.parent)
+		assert_gt(alpha_event, 0)
+		assert_eq(winning_parents, [alpha_event])
 
 
 func test_lightning_refuses_a_secondary_behind_cover_or_outside_reach() -> void:

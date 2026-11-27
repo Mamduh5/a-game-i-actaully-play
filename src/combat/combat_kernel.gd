@@ -877,35 +877,37 @@ func _advance_wakes(group: Group) -> bool:
 
 ## One extra logical step per tick of overlap. A retry cannot move the same
 ## pending repetition twice, and reaching the current boundary fires it there.
-func compress_schedules(owner: StringName, realm: StringName, tick: int, center: RealmSweep.Point, radius: float) -> bool:
+func compress_schedules(actor_id: StringName, realm: StringName, tick: int, center: RealmSweep.Point, radius: float) -> bool:
+	var source: CombatantState = _actors.get(actor_id)
 	var now := CombatInstant.at_tick(tick)
-	if (not _accepting() or owner.is_empty() or not _geometry.has(realm) or center == null or now == null
+	if (not _accepting() or source == null or not _geometry.has(realm) or center == null or now == null
 			or not is_finite(center.x) or not is_finite(center.y) or not is_finite(radius) or radius <= 0.0
 			or (_closed != null and _closed.order_against(now) != RealmCircleTime.Order.BEFORE)):
 		return false
 	for echo: Echo in _echoes:
-		if echo.origin.owner != owner or echo.realm != realm or echo.last_advanced >= tick or echo.due.tick <= tick:
+		if (echo.origin.owner != source.owner or echo.origin.provenance != source.provenance
+				or echo.realm != realm or echo.last_advanced >= tick or echo.due.tick <= tick):
 			continue
 		if (echo.center.x - center.x) ** 2 + (echo.center.y - center.y) ** 2 <= radius ** 2:
 			echo.due = CombatInstant.at_tick(echo.due.tick - 1)
 			echo.last_advanced = tick
-	var source: CombatantState = _actors.get(owner)
-	if source == null:
-		return false
 	for id: StringName in _bleeds:
 		var target := _actors[id]
 		if target.realm != realm:
 			continue
 		var point := _geometry[realm].circle_center(id, 0)
 		if point != null and (point.x - center.x) ** 2 + (point.y - center.y) ** 2 <= radius ** 2:
-			_bleeds[id].compress_owner(source.provenance, owner, tick)
+			_bleeds[id].compress_owner(source.provenance, source.owner, tick)
 	return true
 
 
-func echo_cues(owner: StringName, realm: StringName) -> Array[EchoCue]:
+func echo_cues(actor_id: StringName, realm: StringName) -> Array[EchoCue]:
 	var result: Array[EchoCue] = []
+	var source: CombatantState = _actors.get(actor_id)
+	if source == null:
+		return result
 	for echo: Echo in _echoes:
-		if echo.origin.owner == owner and echo.realm == realm:
+		if echo.origin.owner == source.owner and echo.origin.provenance == source.provenance and echo.realm == realm:
 			var cue := EchoCue.new()
 			cue.center = PlayerControlState.copy_point(echo.center)
 			cue.radius = echo.radius
@@ -1480,6 +1482,7 @@ func _queue_lightning(group: Group, claims: Array[ReactionClaim], posting: Posti
 			if pose == null:
 				continue
 			var distance := (pose.x - at.x) ** 2 + (pose.y - at.y) ** 2
+			# Snapshot enumeration is canonical. Keep the first clear shape at a tied distance.
 			if distance >= best:
 				continue
 			var sight := geometry.certify_frozen_path(source.realm, at, pose, 0.0, _blocker_masks[source.realm], hit.target)

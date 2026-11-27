@@ -274,9 +274,14 @@ func certify_disk_at(realm: StringName, center: RealmSweep.Point, radius: float,
 	return result
 
 
+## Enumerate settled contacts in stable entity and shape order. Each proof
+## retains its path time for callers that compare moving impacts.
 func certify_frozen_path(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
 		compatible: int, except_entity: StringName = &"") -> SweepCandidates:
-	return _sweep(realm, start, finish, radius, compatible, except_entity, RealmCircleTime.new(), true)
+	var result := _sweep(realm, start, finish, radius, compatible, except_entity, RealmCircleTime.new(), true)
+	if result != null and result.contacts.size() > 1:
+		result.contacts.sort_custom(_compare_shape_ids)
+	return result
 
 
 ## Use the same blocker motion as the certified delivery, restricted to the
