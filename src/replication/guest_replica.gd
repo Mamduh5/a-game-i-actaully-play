@@ -38,7 +38,7 @@ func receive_frame(frame: NativeSessionFrame) -> Acceptance:
 	if wire == null:
 		return Acceptance.INVALID
 	match wire.kind:
-		ReplicationMessage.Kind.VIEW:
+		ReplicationMessage.Kind.VIEW, ReplicationMessage.Kind.VIEW_STATE:
 			return _receive_view(wire.body)
 		ReplicationMessage.Kind.SNAPSHOT_PART:
 			var assembly := _view_parts.accept(frame.generation, wire, ReplicationMessage.Kind.VIEW)
@@ -110,3 +110,39 @@ func active_warning_ids(tick: int) -> Array[String]:
 			if tick >= warning.activation and tick <= warning.impact:
 				active.append(String(warning.id))
 	return active
+
+
+## Sample only the local recipient's display. Prediction changes the local
+## drawing pose. Health, warnings and contacts stay on the host timeline.
+func encounter_view(seat: StringName, render_tick: int, predicted: RealmSweep.Point = null) -> StarterEncounter.View:
+	if _latest == null or _latest.encounter == null or _latest.encounter.player.id != seat:
+		return null
+	var source := _latest.encounter
+	var view := StarterEncounter.View.new()
+	view.tick = source.tick
+	view.player = source.player.at_pose(predicted if predicted != null else source.player.at)
+	for fighter: StarterEncounter.Fighter in source.others:
+		view.others.append(fighter.at_pose(actor_pose(String(fighter.id), render_tick)))
+	view.barrier = source.barrier
+	view.selected = source.selected
+	view.manual_ready = source.manual_ready
+	view.defeated = source.defeated
+	view.cleared = source.cleared
+	for warning: WorldEnemy.Threat in source.threats:
+		var copy := WorldEnemy.Threat.new()
+		copy.center = PlayerControlState.copy_point(warning.center)
+		copy.radius = warning.radius
+		copy.start_tick = warning.start_tick
+		copy.impact_tick = warning.impact_tick
+		view.threats.append(copy)
+	for cue: StarterCombat.Cue in source.cues:
+		view.cues.append(StarterCombat._copy_cue(cue))
+	for field: StringName in EncounterViewCodec.POINT_FIELDS:
+		var points: Array[RealmSweep.Point] = source.get(field)
+		var cloned: Array[RealmSweep.Point] = []
+		for point: RealmSweep.Point in points:
+			cloned.append(PlayerControlState.copy_point(point))
+		view.set(field, cloned)
+	for segment: Array in source.tethers:
+		view.tethers.append([PlayerControlState.copy_point(segment[0]), PlayerControlState.copy_point(segment[1])])
+	return view

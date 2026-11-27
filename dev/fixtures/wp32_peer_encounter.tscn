@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://dev/fixtures/wp32_peer_encounter.gd" id="1_peer"]
+
+[node name="PeerEncounterFixture" type="Node"]
+script = ExtResource("1_peer")

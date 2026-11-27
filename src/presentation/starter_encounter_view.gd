@@ -25,23 +25,37 @@ func _ready() -> void:
 
 func prepare(cells: Array[Vector2i], geometry: RealmGeometry, solids: Array[StringName],
 		passage: Vector2, goal: Vector2) -> void:
-	_cells = cells.duplicate()
-	var tile := float(WorldTopology.MODULE_SIZE)
-	var covered := Rect2(Vector2(_cells[0]) * tile, Vector2.ONE * tile)
-	for cell: Vector2i in _cells:
-		covered = covered.merge(Rect2(Vector2(cell) * tile, Vector2.ONE * tile))
-	for edge: RealmOutline.Edge in geometry.segments(WorldExploration.BLOCKER):
-		var first := _point(edge.first)
-		var last := _point(edge.last)
-		var bounds := covered.grow(0.1)
-		if bounds.has_point(first) and bounds.has_point(last):
-			_edges.append(edge)
+	var edges := section_edges(cells, geometry)
+	prepare_floor(cells, edges, passage, goal)
 	for id: StringName in solids:
 		var at := geometry.circle_center(id, 0)
 		_solids.append(Vector3(at.x, at.y, geometry.circle_radius(id, 0)))
+
+
+func prepare_floor(cells: Array[Vector2i], edges: Array[RealmOutline.Edge], passage: Vector2, goal: Vector2) -> void:
+	_cells = cells.duplicate()
+	_edges = edges.duplicate()
+	_solids.clear()
 	_passage = passage
 	_goal = goal
 	queue_redraw()
+
+
+static func section_edges(cells: Array[Vector2i], geometry: RealmGeometry) -> Array[RealmOutline.Edge]:
+	var edges: Array[RealmOutline.Edge] = []
+	if cells.is_empty():
+		return edges
+	var tile := float(WorldTopology.MODULE_SIZE)
+	var covered := Rect2(Vector2(cells[0]) * tile, Vector2.ONE * tile)
+	for cell: Vector2i in cells:
+		covered = covered.merge(Rect2(Vector2(cell) * tile, Vector2.ONE * tile))
+	covered = covered.grow(0.1)
+	for edge: RealmOutline.Edge in geometry.segments(WorldExploration.BLOCKER):
+		var first := _point(edge.first)
+		var last := _point(edge.last)
+		if covered.has_point(first) and covered.has_point(last):
+			edges.append(edge)
+	return edges
 
 
 func display(view: StarterEncounter.View) -> void:
@@ -92,9 +106,15 @@ func _draw() -> void:
 		draw_circle(_point(dart), 3.0, Color("#d5d6a0"), true, -1.0, true)
 	for lance: RealmSweep.Point in _view.lances:
 		_diamond(_point(lance), 4.0, Color("#8bb6fb"))
+	var ally_visible := false
 	for unit: StarterEncounter.Fighter in _view.others:
 		_draw_fighter(unit, unit.id == _view.selected)
+		ally_visible = ally_visible or not unit.enemy
 	_draw_fighter(_view.player, false)
+	if ally_visible:
+		var at := _point(_view.player.at)
+		draw_line(at + Vector2(-5, 4), at + Vector2(0, 8), INK, 1.5, true)
+		draw_line(at + Vector2(0, 8), at + Vector2(5, 4), INK, 1.5, true)
 	if _view.barrier != null and _view.barrier.sign_value > 0:
 		draw_arc(_point(_view.player.at), _view.player.radius + 2.0, 0, TAU, 34, Color("#7fcfe2"), 2.4, true)
 

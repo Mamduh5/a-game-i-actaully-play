@@ -4,6 +4,7 @@ extends RefCounted
 ## and the identifiers visible or warnable from that viewpoint.
 
 const VERSION := 1
+const ENCOUNTER_VERSION := 2
 const PARTY_STATUS := [&"living", &"down", &"disconnected"]
 
 class Scope:
@@ -37,6 +38,7 @@ class Snapshot:
 	var actors: Dictionary[String, RealmSweep.Point] = {}
 	var warnings: Dictionary[String, Warning] = {}
 	var explored: Array[Vector2i] = []
+	var encounter: StarterEncounter.View
 
 
 ## The run supplies visibility at the actual corpse and at eligible living
@@ -64,7 +66,8 @@ static func spectator_scope(corpse: Scope, follow: StringName, living: Dictionar
 static func pack(scope: Scope, epoch: int, baseline: int, tick: int, shared_level: int, shared_xp: String,
 		party: Dictionary[StringName, StringName], actors: Array[Actor], warnings: Array[Warning],
 		exploration: WorldExploration, limit: int = ReplicationMessage.MAX_BODY,
-		follow: StringName = &"", living: Dictionary[StringName, Scope] = {}) -> PackedByteArray:
+		follow: StringName = &"", living: Dictionary[StringName, Scope] = {},
+		encounter: StarterEncounter.View = null) -> PackedByteArray:
 	if (scope == null or scope.seat.is_empty() or scope.realm.is_empty() or epoch <= 0 or baseline <= 0
 			or tick < 0 or tick > RunAuthority.MAX_TICK or shared_level < 0 or not _valid_xp(shared_xp)):
 		return PackedByteArray()
@@ -102,15 +105,61 @@ static func pack(scope: Scope, epoch: int, baseline: int, tick: int, shared_leve
 	var permitted := {"v": VERSION, "epoch": str(epoch), "baseline": str(baseline), "tick": str(tick),
 		"realm": String(scope.realm), "level": str(shared_level), "xp": shared_xp, "party": statuses,
 		"actors": visible, "warnings": cues, "explored": cells}
+	if encounter != null:
+		if not follow.is_empty() or encounter.player == null or encounter.player.id != scope.seat or encounter.tick != tick:
+			return PackedByteArray()
+		var display := EncounterViewCodec.fields(encounter, visible)
+		if display.is_empty():
+			return PackedByteArray()
+		permitted["v"] = ENCOUNTER_VERSION
+		permitted["encounter"] = display
 	var bytes := JSON.stringify(permitted, "", true, true).to_utf8_buffer()
 	return bytes if bytes.size() <= mini(limit, ReplicationChunks.MAX_ASSEMBLED) else PackedByteArray()
+
+
+## The caller supplies a closed view already projected for one seat.
+static func pack_encounter(view: StarterEncounter.View, state: MovementSnapshot, realm: StringName,
+		party: Dictionary[StringName, StringName], exploration: WorldExploration) -> PackedByteArray:
+	if view == null or view.player == null or state == null or state.tick != view.tick:
+		return PackedByteArray()
+	var scope := Scope.new()
+	scope.seat = view.player.id
+	scope.realm = realm
+	var actors: Array[Actor] = []
+	var fighters: Array[StarterEncounter.Fighter] = [view.player]
+	fighters.append_array(view.others)
+	for fighter: StarterEncounter.Fighter in fighters:
+		var actor := Actor.new()
+		actor.id = fighter.id
+		actor.realm = realm
+		actor.position = fighter.at
+		actors.append(actor)
+		scope.actors[actor.id] = true
+	var warnings: Array[Warning] = []
+	for tell: WorldEnemy.Threat in view.threats:
+		var warning := Warning.new()
+		# A warning identifier describes the cue without exposing its source.
+		warning.id = StringName("impact/%d/%d" % [tell.impact_tick, warnings.size()])
+		warning.realm = realm
+		warning.origin = tell.center
+		warning.end = tell.center
+		warning.radius = tell.radius
+		warning.activation = tell.start_tick
+		warning.impact = tell.impact_tick
+		warnings.append(warning)
+		scope.warnings[warning.id] = true
+	return pack(scope, state.epoch, state.baseline, view.tick, 1, "0", party, actors, warnings,
+		exploration, ReplicationMessage.MAX_BODY, &"", {}, view)
 
 
 static func read(bytes: PackedByteArray) -> Snapshot:
 	if bytes.is_empty() or bytes.size() > ReplicationChunks.MAX_ASSEMBLED:
 		return null
 	var decoded: Variant = JSON.parse_string(bytes.get_string_from_utf8())
-	if not decoded is Dictionary or decoded.size() != 11 or not _number(decoded.get("v")) or decoded["v"] != VERSION:
+	if not decoded is Dictionary or not _number(decoded.get("v")):
+		return null
+	var with_encounter: bool = decoded["v"] == ENCOUNTER_VERSION and decoded.size() == 12
+	if not with_encounter and (decoded["v"] != VERSION or decoded.size() != 11):
 		return null
 	var snapshot := Snapshot.new()
 	snapshot.epoch = _unsigned(decoded.get("epoch"))
@@ -138,6 +187,10 @@ static func read(bytes: PackedByteArray) -> Snapshot:
 		if not cell is Array or cell.size() != 2 or not _cell_coord(cell[0]) or not _cell_coord(cell[1]):
 			return null
 		snapshot.explored.append(Vector2i(int(cell[0]), int(cell[1])))
+	if with_encounter:
+		snapshot.encounter = EncounterViewCodec.read(decoded.get("encounter"), snapshot)
+		if snapshot.encounter == null:
+			return null
 	return snapshot
 
 

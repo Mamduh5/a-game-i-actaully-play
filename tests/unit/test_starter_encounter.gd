@@ -70,6 +70,47 @@ func test_encounter_manual_and_weapon_commit_at_the_closed_boundary_with_a_hidde
 	assert_true(StarterCombatRules.SIPHON in hits)
 
 
+func test_peer_encounter_snapshot_preserves_closed_health_and_omits_covered_creatures() -> void:
+	var encounter := _encounter(90.0)
+	assert_true(encounter.place_enemy(&"covered", _foe(), RealmSweep.Point.new(344, 228)))
+	var cast := PlayerCommand.new(PlayerCommand.MANUAL, 155, 128)
+	assert_eq(_submit(encounter, 1, cast), RunAuthority.Admission.QUEUED)
+	assert_true(encounter.close_tick())
+	var state := encounter.movement_state(SEAT, 1, 2)
+	var source := encounter.view_for(SEAT)
+	var body := RecipientView.pack_encounter(source, state, REALM, encounter.party_statuses(), null)
+	assert_false(body.get_string_from_utf8().contains("covered"))
+	var replica := GuestReplica.new()
+	assert_true(replica.install_scope(REALM, state))
+	var frame := _view_frame(body, ReplicationMessage.Kind.VIEW_STATE)
+	assert_eq(replica.receive_frame(frame), GuestReplica.Acceptance.APPLIED)
+	assert_eq(replica.receive_frame(frame), GuestReplica.Acceptance.STALE)
+	assert_null(replica.encounter_view(&"other", 1))
+	var view := replica.encounter_view(SEAT, 1, RealmSweep.Point.new(91, 128))
+	assert_not_null(view)
+	if view != null:
+		assert_eq(view.player.at.x, 91.0)
+		assert_eq(view.player.hp.native_at_scale(0), 100)
+		assert_eq(view.others[0].hp.native_at_scale(0), 56)
+		assert_eq(view.barrier.native_at_scale(0), 18)
+		assert_false(view.manual_ready)
+		assert_eq(view.threats.size(), 1)
+		assert_eq(view.threats[0].impact_tick, 40)
+		assert_eq(view.cues.size(), source.cues.size())
+		view.others[0].at.x = 999.0
+		view.threats[0].center.x = 999.0
+		assert_eq(replica.encounter_view(SEAT, 1).others[0].at.x, 155.0)
+		assert_eq(replica.encounter_view(SEAT, 1).threats[0].center.x, 90.0)
+	var invalid: Dictionary = JSON.parse_string(body.get_string_from_utf8())
+	invalid["encounter"]["roster"]["near"][1] = "zz"
+	assert_eq(replica.receive_frame(_view_frame(JSON.stringify(invalid).to_utf8_buffer(),
+		ReplicationMessage.Kind.VIEW)), GuestReplica.Acceptance.INVALID)
+	var newer := encounter.movement_state(SEAT, 2, 3)
+	assert_true(replica.install_scope(REALM, newer))
+	assert_eq(replica.receive_frame(frame), GuestReplica.Acceptance.STALE)
+	assert_null(replica.encounter_view(SEAT, 1))
+
+
 static func _encounter(start_x: float) -> StarterEncounter:
 	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 	var catalog := bundle.compile()
@@ -114,3 +155,9 @@ static func _foe() -> WorldEnemy.Rules:
 static func _submit(encounter: StarterEncounter, sequence: int, command: PlayerCommand) -> RunAuthority.Admission:
 	var intent := RunIntent.new(RUN, 1, REALM, SEAT, encounter.next_tick(), sequence, command.action, command)
 	return encounter.submit(SEAT, intent)
+
+
+static func _view_frame(body: PackedByteArray, kind: ReplicationMessage.Kind) -> NativeSessionFrame:
+	var lane := ReplicationMessage.transport_kind(kind)
+	return NativeSessionFrame.read(NativeSessionFrame.pack(lane, 1, 1, ReplicationMessage.pack(kind, body)),
+		NativeSessionFrame.channel(lane))

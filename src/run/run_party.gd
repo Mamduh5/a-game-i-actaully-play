@@ -259,6 +259,11 @@ func step_movement(seat: StringName, speed: float, seconds: float) -> RealmSweep
 	return member.controls.step(_realms[member.realm], member.actor, 0, _blockers, speed, seconds)
 
 
+func movement_input(seat: StringName) -> PlayerCommand:
+	var member: Member = _members.get(seat)
+	return member.controls.movement_snapshot() if member != null else null
+
+
 func view(seat: StringName, now: CombatInstant) -> View:
 	var member: Member = _members.get(seat)
 	if member == null or now == null:

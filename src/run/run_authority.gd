@@ -55,6 +55,11 @@ func next_tick() -> int:
 	return _closed_tick + 1
 
 
+func movement_acknowledgement(seat: StringName) -> int:
+	var inputs: SeatInputs = _inputs.get(seat)
+	return inputs.primary.through if inputs != null else -1
+
+
 func belongs_to(run: StringName, epoch: int) -> bool:
 	return not _identity.is_empty() and _identity["run"] == run and _epoch == epoch
 

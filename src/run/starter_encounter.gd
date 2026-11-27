@@ -31,6 +31,16 @@ class Fighter:
 	var maximum: Quantity
 	var enemy: bool
 
+	func at_pose(pose: RealmSweep.Point) -> Fighter:
+		var fighter := Fighter.new()
+		fighter.id = id
+		fighter.at = PlayerControlState.copy_point(pose)
+		fighter.radius = radius
+		fighter.hp = hp
+		fighter.maximum = maximum
+		fighter.enemy = enemy
+		return fighter
+
 class View:
 	var player: Fighter
 	var others: Array[Fighter] = []
@@ -143,6 +153,30 @@ func place_enemy(id: StringName, rules: WorldEnemy.Rules, at: RealmSweep.Point) 
 
 func fault() -> StringName:
 	return _fault
+
+
+func party_statuses() -> Dictionary[StringName, StringName]:
+	return _party.status_ids()
+
+
+func movement_state(seat: StringName, baseline: int, serial: int) -> MovementSnapshot:
+	var tick := _party.closed_tick
+	var member := _party.view(seat, CombatInstant.at_tick(tick))
+	if member == null:
+		return null
+	var state := MovementSnapshot.new()
+	state.epoch = _epoch
+	state.baseline = baseline
+	state.revision = _geometry.compatible_revision(WorldExploration.BLOCKER)
+	state.serial = serial
+	state.tick = tick
+	state.acknowledged = movement_acknowledgement(seat)
+	state.position = member.position
+	state.movement = _party.movement_input(seat)
+	state.speed = PlayerControlState.REFERENCE_SPEED
+	state.radius = _geometry.circle_radius(seat, 0)
+	state.permits_prediction = _party.can_control(seat)
+	return state
 
 
 func can_open_earning_group() -> bool:
@@ -275,7 +309,7 @@ func view_for(id: StringName) -> View:
 			view.threats.append(threat)
 	for other: Seat in _seats.values():
 		for cue: StarterCombat.Cue in other.combat.cues():
-			if _visible(pose, cue.position):
+			if _visible(pose, cue.position) and _visible_direction(pose, cue):
 				view.cues.append(cue)
 		_append_visible(view.familiars, pose, [other.familiar.position()])
 		_append_visible(view.darts, pose, other.familiar.dart_positions())
@@ -303,6 +337,14 @@ func _append_visible(output: Array[RealmSweep.Point], from: RealmSweep.Point, po
 	for at: RealmSweep.Point in points:
 		if _visible(from, at):
 			output.append(at)
+
+
+func _visible_direction(from: RealmSweep.Point, cue: StarterCombat.Cue) -> bool:
+	if cue.id not in [StarterCombatRules.HARMONIC_BURST, &"R02.lightning", &"RP02.blood_wake", &"RP03.storm_relay"]:
+		return true
+	var end := RealmSweep.Point.new(cue.position.x + cue.heading.x * cue.reach,
+		cue.position.y + cue.heading.y * cue.reach)
+	return _visible(from, end)
 
 
 func _visible(from: RealmSweep.Point, at: RealmSweep.Point) -> bool:
