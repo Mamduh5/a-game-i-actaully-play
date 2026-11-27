@@ -28,7 +28,7 @@ func _ready() -> void:
 		get_tree().quit(3)
 		return
 	if readback:
-		var balance := _store.balance(ACCOUNT).native_at_scale(0)
+		var balance: Variant = _store.balance(ACCOUNT).native_at_scale(0)
 		var generation: int = _store.checkpoint()["generation"]
 		print("WP23_QUIT balance=%d generation=%d" % [balance, generation])
 		var closed := _store.close()
