@@ -2014,6 +2014,8 @@ Meaningful but bounded account advantages, with **15-25% per supported statistic
 
 Each branch has finite ranks, progressively higher fixed prices and consistent incremental benefit within that branch. Earlier ranks use common currency; selected later ranks may use rare currency. Specific rank counts/price tables are tuning. Previous ranks prerequisite later ones, but independent branches have no mandatory global order. No automatic respec/refund or wealth-based dynamic pricing. Upgrades persist, apply consistently across heroes and never cause enemies to scale against the account.
 
+Prepared base damage and automatic frequency apply to the committed impacts and activation periods of the base Sketch Familiar, Runic Mines, Spectral Lance and Arcane Tether. The mine's base increase enters its existing twice-base damage cap. Arming, elapsed pressure, projectile flight and link pulse and lifetime clocks keep their authored rates. Manual recovery remains a separate prepared statistic. [WP21 evidence](records/WP21.md#independent-power-stats-review-handoff)
+
 ### 20.5 Achievements and mastery
 
 Track combat, exploration and challenges independently while recognizing major quest milestones. Unique accomplishments are one-time achievements; selected gameplay categories use multi-tier meaningful mastery tracks. Visible ordinary achievements/masteries coexist with secrets hidden or vaguely hinted until discovered/completed. Previously completed applicable accomplishments should not need repetition merely because another tracking surface became available, subject to explicit eligibility.
