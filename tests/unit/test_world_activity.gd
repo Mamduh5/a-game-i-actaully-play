@@ -74,6 +74,42 @@ class Room:
 			and delivery.finish())
 
 
+func test_first_entry_to_idle_realm_matches_early_registration_during_remote_combat() -> void:
+	var reference: Array = []
+	for defer_registration: bool in [false, true]:
+		var room := Room.new()
+		assert_true(room.enter())
+		assert_true(room.add(Attacker, -24.0, [WorldEnemy.PARTY]))
+		var layout := WorldTopology.generate_optional(122, &"hall_of_echoes")
+		var interior := WorldExploration.create(layout, [Hero, &"visitor"])
+		if not defer_registration:
+			assert_true(room.world.register_realm(interior))
+		var trace: Array = []
+		for tick: int in range(1, 8):
+			if tick == 4:
+				assert_true(interior.view(&"visitor").explored.is_empty())
+				if defer_registration:
+					assert_true(room.world.register_realm(interior))
+				var arrival := room.kernel.actor_snapshot(Hero)
+				arrival.id = &"visitor"
+				arrival.owner = arrival.id
+				arrival.realm = layout.realm
+				var entry := layout.center(WorldTopology.ENTRY)
+				assert_true(room.kernel.add_actor(arrival))
+				assert_true(interior.geometry().add_circle(arrival.id, 0, entry, 4, WorldActivity.ACTORS))
+				assert_true(room.world.track_player(arrival.id))
+				assert_true(interior.observe_seat(arrival.id, arrival.realm, entry))
+				assert_eq(interior.view(arrival.id).visible.size(), 1)
+				assert_true(interior.view(Hero).visible.is_empty())
+			assert_not_null(room.world.advance(tick))
+			trace.append([room.world.snapshot(), interior.view(&"visitor"), interior.view(Hero)])
+		assert_lt(room.kernel.actor_snapshot(Hero).hp.amount.compare(Quantity.from_count(20)), 0)
+		if defer_registration:
+			assert_eq(trace, reference)
+		else:
+			reference = trace
+
+
 func test_windup_preserves_its_attack_center_when_the_target_evades() -> void:
 	for evades: bool in [false, true]:
 		var room := Room.new()
