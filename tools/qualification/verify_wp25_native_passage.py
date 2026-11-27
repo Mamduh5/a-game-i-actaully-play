@@ -1,6 +1,7 @@
 """Verify a scoped passage with two separate Windows Dev release processes."""
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -12,15 +13,14 @@ from verify_wp06_link import ephemeral_port, launch, peer_env, wait_for_host
 from verify_wp06_session import enroll, keygen, receipt, stop
 
 
-def passage_facts(path):
-    marker = "WP25_NATIVE "
+def passage_facts(path, marker="WP25_NATIVE "):
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if line.startswith(marker):
             return json.loads(line[len(marker):])
-    raise RuntimeError(f"Missing passage receipt in {path.name}")
+    raise RuntimeError(f"Missing {marker.strip()} receipt in {path.name}")
 
 
-def run_peers(exe, evidence, secrets, fingerprint, gateway):
+def run_peers(exe, evidence, secrets, fingerprint, gateway, world, rendered):
     host, guest = secrets / "host", secrets / "guest"
     port = ephemeral_port()
     offered, ready = host / "offered", host / "ready"
@@ -29,13 +29,18 @@ def run_peers(exe, evidence, secrets, fingerprint, gateway):
     children = []
     try:
         host_env, guest_env = (dict(peer_env(role / "run"), AGIP_WP06_BIND="127.0.0.1") for role in (host, guest))
+        if world:
+            for role, environment in (("host", host_env), ("guest", guest_env)):
+                captures = evidence / f"{role}-scope"
+                captures.mkdir()
+                environment["AGIP_WP18_CAPTURE"] = str(captures)
         server = launch([exe], host_log, host_env, "host", port, host / "host.crt", host / "host.key",
-                        host / "guest.pub", offered, ready, "paired")
+                        host / "guest.pub", offered, ready, "paired", rendered=rendered)
         children.append(server)
         wait_for_host(server, ready)
         shutil.copyfile(offered, copied)
         visitor = launch([exe], guest_log, guest_env, "guest", port, guest, fingerprint,
-                         guest / "guest.key", copied, "-", "paired")
+                         guest / "guest.key", copied, "-", "paired", rendered=rendered)
         children.append(visitor)
         exits = [child.wait(timeout=10) for child in children]
     finally:
@@ -54,21 +59,42 @@ def run_peers(exe, evidence, secrets, fingerprint, gateway):
         expected_guest = {"arrival_realm": "silent_garden", "visible": ["guest"],
                           "party": {"guest": "living", "host": "living"},
                           "arrival_cell_seen": True, "movement_ack": 2}
+        if world:
+            expected_guest["visible"].append("spawn/7:arrival/1")
     passed = (exits == [0, 0] and host_session["passed"] and guest_session["passed"]
               and host_session["admitted"] == 1 and host_session["departures"] == 1
               and host_session["lost"] == host_session["rejected"] == 0
               and all(item["host_drain_site"] for item in host_session["diagnostics"])
               and not guest_session["diagnostics"] and host_facts == expected_host and guest_facts == expected_guest)
-    return {"passed": passed, "exits": exits, "host": host_facts, "guest": guest_facts,
-            "native_sessions": [host_session, guest_session]}
+    result = {"passed": passed, "exits": exits, "host": host_facts, "guest": guest_facts,
+              "native_sessions": [host_session, guest_session]}
+    if world:
+        host_world, guest_world = (passage_facts(path, "WP18_SPLIT ") for path in (host_log, guest_log))
+        trace = evidence / "host-scope" / "world.json"
+        result["world"] = {"host": host_world, "guest": guest_world}
+        result["passed"] = (passed and host_world["arrived_with_resident"] and host_world["spawned_at_arrival"]
+                            and host_world["host_filtered"] and host_world["archive_unviewed"]
+                            and host_world["draws"] == 1 and guest_world["resident_hp"] == 20
+                            and guest_world["resident_hidden_before_entry"] and guest_world["archive_hidden"]
+                            and host_world["resident_x"] == guest_world["resident_x"]
+                            and host_world["faction_kills"] == [["archive/legion", 1, "archive/wildborn"]]
+                            and hashlib.sha256(trace.read_bytes()).hexdigest() == host_world["digest"]
+                            and (not rendered or all((evidence / f"{role}-scope" / "view.png").is_file()
+                                                     for role in ("host", "guest"))))
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("exe", type=Path)
     parser.add_argument("evidence", type=Path)
-    parser.add_argument("--gateway", action="store_true")
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--gateway", action="store_true")
+    target.add_argument("--world", action="store_true")
+    parser.add_argument("--rendered", action="store_true")
     options = parser.parse_args()
+    if options.rendered and not options.world:
+        parser.error("--rendered requires --world")
     exe, evidence = options.exe.resolve(strict=True), options.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="agip-wp25-passage-") as directory:
@@ -77,7 +103,7 @@ def main():
             keygen(exe, secrets / role, evidence, role)
         shutil.copyfile(secrets / "guest" / "guest.pub", secrets / "host" / "guest.pub")
         fingerprint = enroll(exe, secrets, evidence)
-        result = run_peers(exe, evidence, secrets, fingerprint, options.gateway)
+        result = run_peers(exe, evidence, secrets, fingerprint, options.gateway, options.world, options.rendered)
     body = json.dumps(result, indent=2, sort_keys=True)
     (evidence / "receipt.json").write_text(body + "\n", encoding="utf-8")
     print(body)

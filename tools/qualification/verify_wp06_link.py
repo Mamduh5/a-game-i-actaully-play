@@ -30,9 +30,10 @@ def ephemeral_port(address=ADDRESS):
         return listener.getsockname()[1]
 
 
-def launch(command, log, environment, *args):
+def launch(command, log, environment, *args, rendered=False):
+    display = ["--resolution", "960x540"] if rendered else ["--headless"]
     return subprocess.Popen(
-        [*command, "--headless", "--verbose", "--max-fps", "120", "--log-file", log, "--", *map(str, args)],
+        [*command, *display, "--verbose", "--max-fps", "120", "--log-file", log, "--", *map(str, args)],
         env=environment, creationflags=subprocess.CREATE_NO_WINDOW,
     )
 

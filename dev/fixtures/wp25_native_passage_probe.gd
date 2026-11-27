@@ -14,6 +14,8 @@ const Queued := RunAuthority.Admission.QUEUED
 
 class PassageAuthority extends RunAuthority:
 	var party: RunParty
+	var activity: WorldActivity
+	var world_frame: WorldActivity.Frame
 	var clicks: Array[RunIntent] = []
 	var valid := true
 
@@ -27,7 +29,11 @@ class PassageAuthority extends RunAuthority:
 				clicks.append(intent)
 			else:
 				valid = valid and party.apply_input(intent.seat_id, intent.command)
-		valid = valid and party.step_movement(GUEST, SPEED, 1.0 / 60.0) != null and party.close_tick(tick)
+		valid = valid and party.step_movement(GUEST, SPEED, 1.0 / 60.0) != null
+		if valid and activity != null:
+			world_frame = activity.advance(tick, self, Callable(), party.observe_combat)
+			valid = world_frame != null
+		valid = valid and party.close_tick(tick)
 		return []
 
 var _authority := PassageAuthority.new()
@@ -181,17 +187,31 @@ func _publish_scope() -> bool:
 	scope.seat = GUEST
 	scope.realm = baseline.realm
 	scope.actors = {HOST: true, GUEST: true}
+	var actors := _seat_actors(now)
+	var encounter := _arrival_fighters(scope, actors, state.tick)
+	var view_bytes := RecipientView.pack(scope, _world_epoch, _baseline, state.tick, 1, "0", _party.status_ids(),
+		actors, [], _rooms.get(scope.realm), ReplicationMessage.MAX_BODY, &"", {}, encounter)
+	return _send(Kinds.BASELINE, baseline.pack()) and _send(Kinds.VIEW, view_bytes)
+
+
+func _arrival_fighters(_scope: RecipientView.Scope, _actors: Array[RecipientView.Actor], _tick: int) -> StarterEncounter.View:
+	return null
+
+
+func _seat_actors(now: CombatInstant) -> Array[RecipientView.Actor]:
 	var actors: Array[RecipientView.Actor] = []
 	for seat: StringName in _party.initialized_seats():
 		var view := _party.view(seat, now)
-		var actor := RecipientView.Actor.new()
-		actor.id = seat
-		actor.realm = view.realm
-		actor.position = view.position
-		actors.append(actor)
-	var view_bytes := RecipientView.pack(scope, _world_epoch, _baseline, state.tick, 1, "0", _party.status_ids(),
-		actors, [], _rooms.get(scope.realm))
-	return _send(Kinds.BASELINE, baseline.pack()) and _send(Kinds.VIEW, view_bytes)
+		actors.append(_actor(seat, view.realm, view.position))
+	return actors
+
+
+static func _actor(id: StringName, realm: StringName, at: RealmSweep.Point) -> RecipientView.Actor:
+	var actor := RecipientView.Actor.new()
+	actor.id = id
+	actor.realm = realm
+	actor.position = at
+	return actor
 
 
 func _snapshot() -> MovementSnapshot:
