@@ -10,6 +10,7 @@ var tick: int
 var sequence: int
 var action: StringName
 var command: PlayerCommand
+var reliable := false
 
 
 func _init(
@@ -33,17 +34,23 @@ func _init(
 
 
 func copy() -> RunIntent:
-	return RunIntent.new(run_id, epoch, realm_id, seat_id, tick, sequence, action, command)
+	var result := RunIntent.new(run_id, epoch, realm_id, seat_id, tick, sequence, action, command)
+	result.reliable = reliable
+	return result
 
 
 func receipt() -> Dictionary:
 	var facts := {"realm": realm_id, "seat": seat_id, "sequence": sequence, "action": action}
+	if reliable:
+		facts["reliable"] = true
 	if command != null:
 		facts["point"] = [command.x, command.y]
 	return facts
 
 
 func valid_payload() -> bool:
+	if reliable and action != PlayerCommand.INTERACT:
+		return false
 	if action in PlayerCommand.ACTIONS:
 		return command != null and command.action == action and command.valid()
 	return command == null

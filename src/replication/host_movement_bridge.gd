@@ -22,6 +22,11 @@ class BoundInteraction:
 	var command: PlayerCommand
 
 var _seats: Dictionary[int, Binding] = {}
+var _interaction_authority: RunAuthority
+
+
+func _init(interaction_authority: RunAuthority = null) -> void:
+	_interaction_authority = interaction_authority
 
 
 ## Install from the host owner after acknowledged admission or a new baseline.
@@ -45,6 +50,8 @@ func bind(native_seat: int, connection: int, generation: int, run: StringName, e
 	scope.realm = realm
 	scope.seat = seat
 	scope.baseline = baseline
+	if old != null and old.active:
+		_retire_interactions(old)
 	_seats[native_seat] = scope
 	return true
 
@@ -53,8 +60,9 @@ func bind(native_seat: int, connection: int, generation: int, run: StringName, e
 ## may reuse its connection ordinal, so loss also identifies the generation.
 func unbind(native_seat: int, connection: int, generation: int) -> void:
 	var scope: Binding = _seats.get(native_seat)
-	if scope != null and scope.connection == connection and scope.generation == generation:
+	if scope != null and scope.active and scope.connection == connection and scope.generation == generation:
 		scope.active = false
+		_retire_interactions(scope)
 
 
 func submit(authority: RunAuthority, received: NativeSessionHost.Command) -> RunAuthority.Admission:
@@ -78,6 +86,18 @@ func submit(authority: RunAuthority, received: NativeSessionHost.Command) -> Run
 	return authority.submit(scope.seat, intent)
 
 
+func submit_interaction(received: NativeSessionHost.Command) -> RunAuthority.Admission:
+	if _interaction_authority == null:
+		return RunAuthority.Admission.INACTIVE
+	var clicked := read_interaction(received)
+	if clicked == null:
+		return RunAuthority.Admission.UNSUPPORTED_ACTION
+	var intent := RunIntent.new(clicked.run, clicked.epoch, clicked.realm, clicked.seat,
+		_interaction_authority.next_tick(), clicked.sequence, clicked.command.action, clicked.command)
+	intent.reliable = true
+	return _interaction_authority.submit(clicked.seat, intent)
+
+
 ## Pass only a scoped reliable click to the authoritative interaction owner.
 ## Its native sequence belongs to the reliable stream.
 func read_interaction(received: NativeSessionHost.Command) -> BoundInteraction:
@@ -99,6 +119,11 @@ func read_interaction(received: NativeSessionHost.Command) -> BoundInteraction:
 	clicked.sequence = received.frame.sequence
 	clicked.command = message.command
 	return clicked
+
+
+func _retire_interactions(scope: Binding) -> void:
+	if _interaction_authority != null:
+		_interaction_authority.retire_reliable_interactions(scope.run, scope.epoch, scope.seat, scope.realm)
 
 
 func _bound_scope(received: NativeSessionHost.Command) -> Binding:

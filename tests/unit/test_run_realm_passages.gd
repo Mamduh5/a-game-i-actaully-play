@@ -9,14 +9,18 @@ class TravelAuthority extends RunAuthority:
 	var party: RunParty
 	var activity: WorldActivity
 	var closed_party := false
+	var interactions: Array[RunIntent] = []
 
 	func _supports_action(action: StringName) -> bool:
 		return action in [PlayerCommand.INTERACT, PlayerCommand.MOVE_TO]
 
 	func _resolve_tick(tick: int, accepted: Array[RunIntent], _streams: RunRandom) -> Array[Dictionary]:
+		interactions.clear()
 		for intent: RunIntent in accepted:
 			if intent.action == PlayerCommand.MOVE_TO:
 				party.apply_input(intent.seat_id, intent.command)
+			elif intent.action == PlayerCommand.INTERACT:
+				interactions.append(intent)
 		for seat: StringName in party.initialized_seats():
 			party.step_movement(seat, 6000.0, 1.0 / 60.0)
 		closed_party = (activity == null or activity.advance(tick) != null) and party.close_tick(tick)
@@ -130,6 +134,104 @@ class Route:
 
 	static func offset(center: RealmSweep.Point, x: float, y: float) -> RealmSweep.Point:
 		return RealmSweep.Point.new(center.x + x, center.y + y)
+
+
+func test_native_click_closes_with_equal_sequence_movement_and_enters_only_its_seat() -> void:
+	var realm := WorldTopology.OPTIONAL_REALMS[0]
+	var route := Route.new(realm)
+	assert_true(route.begin())
+	var bridge := HostMovementBridge.new(route.authority)
+	assert_true(bridge.bind(1, 10, 1, route.setup.run_id, 1, Source, Guest, 1))
+	var click := _native_click(route.handle, 10, 1, 1)
+	var step := Route.offset(route.handle, 5, -8)
+	var move := _native_move(step, 10, 1, 1)
+	assert_eq(bridge.submit_interaction(click), Admission.QUEUED)
+	assert_eq(bridge.submit_interaction(click), Admission.DUPLICATE)
+	assert_eq(bridge.submit(route.authority, move), Admission.QUEUED)
+	assert_true(route.authority.close_tick())
+	assert_true(route.authority.closed_party)
+	var receipts: Array = route.authority.closed_result()["accepted"]
+	assert_eq(receipts.size(), 2)
+	assert_false(receipts[0].has("reliable"))
+	assert_true(receipts[1]["reliable"])
+	assert_eq(bridge.submit_interaction(click), Admission.STALE_SEQUENCE)
+	assert_eq(route.authority.checkpoint()["sequences"][Guest], 1)
+	assert_eq(route.party.view(Guest, CombatInstant.at_tick(1)).position.x, step.x)
+	assert_true(route.passages.interact(route.authority.interactions[0]))
+	assert_false(route.passages.interact(route.authority.interactions[0]))
+	assert_eq(route.party.view(Host, CombatInstant.at_tick(1)).realm, Source)
+	assert_eq(route.party.view(Guest, CombatInstant.at_tick(1)).realm, realm)
+	assert_eq(bridge.submit_interaction(_native_click(route.handle, 10, 1, 2)), Admission.WRONG_REALM)
+	assert_eq(bridge.submit(route.authority, _native_move(step, 10, 1, 2)), Admission.WRONG_REALM)
+	assert_true(bridge.bind(1, 10, 1, route.setup.run_id, 1, realm, Guest, 2))
+	assert_ne(bridge.submit_interaction(_native_click(route.handle, 10, 1, 2)), Admission.QUEUED)
+	assert_eq(bridge.submit(route.authority, _native_move(step, 10, 1, 2)), Admission.WRONG_REALM)
+
+
+func test_rebinding_or_detaching_retires_pending_reliable_clicks_and_preserves_movement_frontier() -> void:
+	var route := Route.new(WorldTopology.OPTIONAL_REALMS[0])
+	assert_true(route.begin())
+	var bridge := HostMovementBridge.new(route.authority)
+	assert_true(bridge.bind(1, 10, 1, route.setup.run_id, 1, Source, Guest, 1))
+	assert_eq(bridge.submit_interaction(_native_click(route.handle, 10, 1, 70)), Admission.QUEUED)
+	assert_eq(bridge.submit(route.authority, _native_move(route.handle, 10, 1, 2)), Admission.QUEUED)
+	assert_true(route.authority.close_tick())
+	assert_eq(route.authority.interactions.size(), 1)
+	assert_eq(bridge.submit_interaction(_native_click(route.handle, 10, 1, 71)), Admission.QUEUED)
+	assert_true(bridge.bind(1, 11, 1, route.setup.run_id, 1, Source, Guest, 2))
+	bridge.unbind(1, 10, 1)
+	assert_ne(bridge.submit_interaction(_native_click(route.handle, 10, 1, 72)), Admission.QUEUED)
+	assert_eq(bridge.submit_interaction(_native_click(route.handle, 11, 2, 1)), Admission.QUEUED)
+	assert_eq(bridge.submit(route.authority, _native_move(route.handle, 11, 2, 2)), Admission.STALE_SEQUENCE)
+	assert_true(route.authority.close_tick())
+	assert_eq(route.authority.interactions.size(), 1)
+	assert_eq(route.authority.interactions[0].sequence, 1)
+	assert_eq(bridge.submit_interaction(_native_click(route.handle, 11, 2, 2)), Admission.QUEUED)
+	bridge.unbind(1, 11, 1)
+	assert_true(route.authority.close_tick())
+	assert_true(route.authority.interactions.is_empty())
+	assert_eq(route.authority.checkpoint()["sequences"][Guest], 2)
+
+
+func test_reliable_and_sequenced_inputs_share_the_open_seat_quota() -> void:
+	var route := Route.new(WorldTopology.OPTIONAL_REALMS[0])
+	assert_true(route.begin())
+	var bridge := HostMovementBridge.new(route.authority)
+	assert_true(bridge.bind(1, 10, 1, route.setup.run_id, 1, Source, Guest, 1))
+	assert_eq(bridge.submit(route.authority, _native_move(route.handle, 10, 1, 1)), Admission.QUEUED)
+	var limit := RunAuthority.MAX_OPEN_INTENTS_PER_SEAT
+	for sequence: int in range(1, limit):
+		assert_eq(bridge.submit_interaction(_native_click(route.handle, 10, 1, sequence)), Admission.QUEUED)
+	assert_eq(bridge.submit_interaction(_native_click(route.handle, 10, 1, limit)), Admission.QUEUE_FULL)
+	assert_true(route.authority.close_tick())
+	assert_eq(route.authority.closed_result()["overflowed"], [Guest])
+	assert_true(route.authority.closed_result()["accepted"].is_empty())
+	assert_eq(route.authority.checkpoint()["sequences"][Guest], 0)
+	assert_eq(bridge.submit(route.authority, _native_move(route.handle, 10, 1, 2)), Admission.QUEUED)
+	assert_eq(bridge.submit_interaction(_native_click(route.handle, 10, 1, limit + 1)), Admission.QUEUED)
+
+
+static func _native_click(at: RealmSweep.Point, connection: int, baseline: int, sequence: int) -> NativeSessionHost.Command:
+	var click := PlayerCommand.new(PlayerCommand.INTERACT, at.x, at.y)
+	return _native_packet(ReplicationMessage.Kind.INTERACTION, RealmInteractionFrame.pack(1, baseline, click),
+		connection, sequence)
+
+
+static func _native_move(at: RealmSweep.Point, connection: int, baseline: int, sequence: int) -> NativeSessionHost.Command:
+	var move := PlayerCommand.new(PlayerCommand.MOVE_TO, at.x, at.y)
+	return _native_packet(ReplicationMessage.Kind.MOVEMENT, MovementFrame.pack(1, baseline, sequence, move),
+		connection, sequence)
+
+
+static func _native_packet(kind: ReplicationMessage.Kind, payload: PackedByteArray, connection: int,
+		sequence: int) -> NativeSessionHost.Command:
+	var lane := ReplicationMessage.transport_kind(kind)
+	var result := NativeSessionHost.Command.new()
+	result.connection = connection
+	result.seat = 1
+	result.frame = NativeSessionFrame.read(NativeSessionFrame.pack(lane, 1, sequence,
+		ReplicationMessage.pack(kind, payload)), NativeSessionFrame.channel(lane))
+	return result
 
 
 func test_each_optional_realm_has_an_intentional_round_trip_and_keeps_party_clock() -> void:

@@ -12,11 +12,18 @@ const CHECKPOINT_VERSION := 1
 const MAX_OPEN_INTENTS_PER_SEAT := 64
 const MAX_TICK := 9223372036854775806
 
+class InputStream:
+	var through: int
+	var pending: Dictionary[int, RunIntent] = {}
+
+class SeatInputs:
+	var primary := InputStream.new()
+	var reliable := InputStream.new()
+	var overflowed := false
+
 var _identity: Dictionary = {}
 var _realms: Dictionary[StringName, StringName] = {}
-var _last_sequences: Dictionary[StringName, int] = {}
-var _pending: Dictionary[StringName, Dictionary] = {}
-var _overflowed: Dictionary[StringName, bool] = {}
+var _inputs: Dictionary[StringName, SeatInputs] = {}
 var _random: RunRandom
 var _closed_tick: int
 var _observation: Dictionary = {}
@@ -105,13 +112,22 @@ func transfer_seat(intent: RunIntent, party: RunParty, source: RealmGeometry, de
 	var seat := intent.seat_id
 	if not party.transfer_living(seat, _closed_tick, source, destination, at):
 		return false
-	for sequence: int in _pending[seat]:
-		_last_sequences[seat] = maxi(_last_sequences[seat], sequence)
-	_pending[seat].clear()
-	_overflowed.erase(seat)
+	var inputs := _inputs[seat]
+	for sequence: int in inputs.primary.pending:
+		inputs.primary.through = maxi(inputs.primary.through, sequence)
+	inputs.primary.pending.clear()
+	inputs.reliable = InputStream.new()
+	inputs.overflowed = false
 	_realms[seat] = destination.realm_id
 	_observation["outcomes"].append({"seat": seat, "realm_entered": destination.realm_id})
 	return true
+
+
+## The trusted adapter retires the reliable stream when its binding ends.
+## Movement keeps its existing watermark through connection and scope changes.
+func retire_reliable_interactions(run: StringName, epoch: int, seat: StringName, realm: StringName) -> void:
+	if belongs_to(run, epoch) and _realms.get(seat) == realm:
+		_inputs[seat].reliable = InputStream.new()
 
 
 ## The binding is supplied by the adapter. The intent alone cannot nominate its sender.
@@ -128,27 +144,29 @@ func submit(bound_seat: StringName, intent: RunIntent) -> Admission:
 		return Admission.WRONG_REALM
 	if intent.tick != next_tick():
 		return Admission.WRONG_TICK
-	if intent.sequence <= _last_sequences[bound_seat]:
+	var inputs := _inputs[bound_seat]
+	var stream := inputs.reliable if intent.reliable else inputs.primary
+	if intent.sequence <= stream.through:
 		return Admission.STALE_SEQUENCE
 	if not _supports_action(intent.action) or not intent.valid_payload():
 		return Admission.UNSUPPORTED_ACTION
 
-	var seat_intents: Dictionary = _pending[bound_seat]
-	if _overflowed.has(bound_seat):
+	if inputs.overflowed:
 		return Admission.QUEUE_FULL
-	if seat_intents.has(intent.sequence):
-		var previous: RunIntent = seat_intents[intent.sequence]
+	if stream.pending.has(intent.sequence):
+		var previous := stream.pending[intent.sequence]
 		if previous != null and previous.matches_payload(intent):
 			return Admission.DUPLICATE
 		# Neither of two conflicting envelopes can win by arriving first.
-		seat_intents[intent.sequence] = null
+		stream.pending[intent.sequence] = null
 		return Admission.CONFLICT
-	if seat_intents.size() >= MAX_OPEN_INTENTS_PER_SEAT:
+	if inputs.primary.pending.size() + inputs.reliable.pending.size() >= MAX_OPEN_INTENTS_PER_SEAT:
 		# Reject this seat's whole batch. Arrival order cannot select the survivors.
-		_overflowed[bound_seat] = true
-		seat_intents.clear()
+		inputs.overflowed = true
+		inputs.primary.pending.clear()
+		inputs.reliable.pending.clear()
 		return Admission.QUEUE_FULL
-	seat_intents[intent.sequence] = intent.copy()
+	stream.pending[intent.sequence] = intent.copy()
 	return Admission.QUEUED
 
 
@@ -160,20 +178,26 @@ func close_tick() -> bool:
 	var conflicts: Array[Dictionary] = []
 	var overflowed: Array[StringName] = []
 	for seat: StringName in _realms:
-		if _overflowed.has(seat):
+		var inputs := _inputs[seat]
+		if inputs.overflowed:
 			overflowed.append(seat)
-		var seat_intents: Dictionary = _pending[seat]
-		var sequences: Array = seat_intents.keys()
-		sequences.sort()
-		for sequence: int in sequences:
-			var intent: RunIntent = seat_intents[sequence]
-			if intent == null:
-				conflicts.append({"seat": seat, "sequence": sequence})
-			else:
-				accepted.append(intent)
-			_last_sequences[seat] = sequence
-		seat_intents.clear()
-	_overflowed.clear()
+			inputs.overflowed = false
+		# The two streams keep independent sequence domains. Movement resolves
+		# first and reliable interactions retain their own admitted order.
+		for stream: InputStream in [inputs.primary, inputs.reliable]:
+			var sequences := stream.pending.keys()
+			sequences.sort()
+			for sequence: int in sequences:
+				var intent := stream.pending[sequence]
+				if intent == null:
+					var conflict := {"seat": seat, "sequence": sequence}
+					if stream == inputs.reliable:
+						conflict["reliable"] = true
+					conflicts.append(conflict)
+				else:
+					accepted.append(intent)
+				stream.through = sequence
+			stream.pending.clear()
 
 	var receipts: Array[Dictionary] = []
 	for intent: RunIntent in accepted:
@@ -196,12 +220,15 @@ func closed_result() -> Dictionary:
 func checkpoint() -> Dictionary:
 	if _identity.is_empty() or _quitting:
 		return {}
+	var sequences: Dictionary[StringName, int] = {}
+	for seat: StringName in _inputs:
+		sequences[seat] = _inputs[seat].primary.through
 	var saved := {
 		"version": CHECKPOINT_VERSION,
 		"engine": Engine.get_version_info()["hash"],
 		"identity": _identity.duplicate(true),
 		"tick": _closed_tick,
-		"sequences": _last_sequences.duplicate(),
+		"sequences": sequences,
 		"random": _random.checkpoint(),
 	}
 	if _realms != _identity["initial_realms"]:
@@ -249,8 +276,9 @@ func _install(setup: RunSetup, random: RunRandom, tick: int, sequences: Dictiona
 	_random = random
 	_closed_tick = tick
 	for seat: StringName in _realms:
-		_last_sequences[seat] = sequences.get(seat, 0)
-		_pending[seat] = {}
+		var inputs := SeatInputs.new()
+		inputs.primary.through = sequences.get(seat, 0)
+		_inputs[seat] = inputs
 	_publish([], [], [], [])
 
 
