@@ -483,6 +483,8 @@ Life Harvest and Siphon Pulse may coexist and are absorbed under shortest-remain
 
 Primal Instinct and Close Call may both activate when their separate evasion conditions are satisfied. Knock-up, stun and airborne eligibility remain distinct. Using a Sword does not interrupt Vault-compatible movement; every ordinary weapon retains independent attack orientation.
 
+**C04 provisional Vault under OWNER-T04/O20.** Aim the pointer to set the Vault direction. The baseline commit moves up to 64 units with a 14-step travel window and a four-second base recovery. A sealed surface clips the path. An explicitly low solid can be crossed when the path ends at a clear landing. Tune the travel and recovery fields in StarterCombatRules after owner playtesting. [C04 evidence](records/C04.md#acrobat-vault-review-handoff)
+
 ### H03. The Conductor - starter
 <a id="catalog-h03"></a>
 
