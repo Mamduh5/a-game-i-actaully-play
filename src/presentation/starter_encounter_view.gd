@@ -129,11 +129,19 @@ func _draw_fighter(unit: StarterEncounter.Fighter, selected: bool) -> void:
 	_diamond(at, unit.radius * 0.55, Color("#3d514c") if not unit.enemy else Color("#744f48"))
 	if selected:
 		draw_arc(at, unit.radius + 3.0, 0, TAU, 32, INK, 1.4, true)
-	var hp := float(unit.hp.native_at_scale(0))
-	var maximum := float(unit.maximum.native_at_scale(0))
+	var fraction := _health_fraction(unit.hp, unit.maximum)
 	var label := Rect2(at - Vector2(unit.radius, unit.radius + 8.0), Vector2(unit.radius * 2.0, 3.0))
 	draw_rect(label, Color("#202d2c"))
-	draw_rect(Rect2(label.position, Vector2(label.size.x * clampf(hp / maxf(maximum, 1.0), 0, 1), 3.0)), color)
+	draw_rect(Rect2(label.position, Vector2(label.size.x * fraction, 3.0)), color)
+
+
+static func _health_fraction(hp: Quantity, maximum: Quantity) -> float:
+	if hp.sign_value <= 0 or maximum.sign_value <= 0:
+		return 0.0
+	if hp.compare(maximum) >= 0:
+		return 1.0
+	var bounds := Quantity.outward_ratio(hp, maximum, 4)
+	return float(bounds[0].native_at_scale(4)) / 10000.0 if not bounds.is_empty() else 0.0
 
 
 func _diamond(at: Vector2, radius: float, color: Color) -> void:

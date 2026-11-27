@@ -21,6 +21,8 @@ const VAULT := &"H02.vault"
 const CLOSE_CALL := &"H02.close_call"
 const GRAVITY_WEAVER := &"H05"
 const SINGULARITY := &"H05.singularity"
+const BLOODBOUND := &"H07"
+const CRIMSON_OFFERING := &"H07.crimson_offering"
 const CONDUCTOR := &"H03"
 const HARMONIC_BURST := &"H03.harmonic_burst"
 
@@ -49,6 +51,12 @@ const HARMONIC_BURST := &"H03.harmonic_burst"
 @export var gravity_damage: int = 22
 @export var gravity_delay: int = 24
 @export var gravity_cooldown: int = 420
+@export var blood_pact_basis_points: int = 4000
+@export var crimson_cost_basis_points: int = 2500
+@export var crimson_cap_basis_points: int = 3000
+@export var crimson_hp_for_cap: int = 30
+@export var crimson_duration: int = 180
+@export var crimson_cooldown: int = 360
 @export var harmonic_reach: float = 96.0
 @export var harmonic_damage: int = 18
 @export var harmonic_cooldown: int = 240
@@ -83,6 +91,10 @@ func is_valid_for(catalog: DefinitionCatalog) -> bool:
 			or not is_finite(gravity_pull * gravity_force_scale) or not is_finite(gravity_push * gravity_force_scale)
 			or gravity_damage <= 0 or gravity_delay <= 0 or gravity_delay > RunAuthority.MAX_TICK - 10
 			or gravity_cooldown < gravity_delay
+			or blood_pact_basis_points <= 0 or blood_pact_basis_points > RunPreparation.BASIS_POINTS
+			or crimson_cost_basis_points <= 0 or crimson_cost_basis_points >= RunPreparation.BASIS_POINTS
+			or crimson_cap_basis_points <= 0 or crimson_cap_basis_points > RunPreparation.BASIS_POINTS
+			or crimson_hp_for_cap <= 0 or crimson_duration <= 0 or crimson_cooldown < crimson_duration
 			or not is_finite(force_distance) or force_distance <= 0.0
 			or not is_finite(lightning_reach) or lightning_reach <= 0.0 or lightning_damage <= 0
 			or bleed_damage <= 0 or bleed_capacity <= 0 or bleed_period <= 0 or bleed_duration < bleed_period or rupture_per_stack <= 0

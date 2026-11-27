@@ -36,10 +36,13 @@ var _rules: StarterCombatRules
 var _weapon: StarterWeapon
 var _damage_multiplier: Quantity
 var _weapon_rate: Quantity
-var _close_call_rate: Quantity
-var _acrobat_recovery: CombatCadenceProgress
-var _acrobat_rate_tick: int
-var _close_call_through: int
+var _boosted_weapon_rate: Quantity
+var _weapon_recovery: CombatCadenceProgress
+var _weapon_rate_tick: int
+var _boosted_through: int
+var _pending_offering: String
+var _crimson_bonus: Quantity
+var _offering_fault: bool
 var _hero: StringName
 var _force_equipped: bool
 var _lightning_equipped: bool
@@ -82,16 +85,18 @@ static func create(rules: StarterCombatRules, catalog: DefinitionCatalog, prepar
 	if damage_bonus != 0:
 		result._damage_multiplier = Quantity.from_count(RunPreparation.BASIS_POINTS + damage_bonus, 4)
 	var frequency := preparation.upgrade_basis_points(&"automatic_attack_frequency")
-	if preparation.hero == StarterCombatRules.ACROBAT:
+	if preparation.hero in [StarterCombatRules.ACROBAT, StarterCombatRules.BLOODBOUND]:
 		var rate := RunPreparation.BASIS_POINTS + frequency
 		result._weapon_rate = Quantity.from_count(rate, 4)
-		result._close_call_rate = Quantity.from_count(rate + rules.close_call_basis_points, 4)
+		if preparation.hero == StarterCombatRules.ACROBAT:
+			result._boosted_weapon_rate = Quantity.from_count(rate + rules.close_call_basis_points, 4)
 	else:
 		result._weapon.cooldown_ticks = RunPreparation.rate_period(weapon.cooldown_ticks, frequency)
 	var recovery := preparation.upgrade_basis_points(&"manual_cooldown_recovery")
 	result._rules.siphon_cooldown = RunPreparation.rate_period(rules.siphon_cooldown, recovery)
 	result._rules.vault_cooldown = RunPreparation.rate_period(rules.vault_cooldown, recovery)
 	result._rules.gravity_cooldown = RunPreparation.rate_period(rules.gravity_cooldown, recovery)
+	result._rules.crimson_cooldown = RunPreparation.rate_period(rules.crimson_cooldown, recovery)
 	result._rules.harmonic_cooldown = RunPreparation.rate_period(rules.harmonic_cooldown, recovery)
 	result._rules.fracture_cooldown = RunPreparation.rate_period(rules.fracture_cooldown, recovery)
 	result._hero = preparation.hero
@@ -117,7 +122,7 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		return Attempt.REJECTED
 	if not _advance_weapon_rate(tick):
 		return Attempt.FAULT
-	if _acrobat_recovery != null or not source.cooldown_ready(WEAPON_COOLDOWN, CombatInstant.at_tick(tick)):
+	if _weapon_recovery != null or not source.cooldown_ready(WEAPON_COOLDOWN, CombatInstant.at_tick(tick)):
 		return Attempt.REJECTED
 	var id := targeting.attack_target(start, _weapon.reach, _settled_candidates(candidates))
 	if id.is_empty():
@@ -129,6 +134,16 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 	if _weapon_rate != null:
 		action.cooldown = &""
 		action.cooldown_ticks = 0
+	if _hero == StarterCombatRules.BLOODBOUND:
+		var blood_pact := _blood_pact_bonus(source)
+		if blood_pact == null:
+			return Attempt.FAULT
+		bonuses = bonuses.duplicate()
+		var blood := QuantityFormula.BonusCategory.new()
+		blood.values.append(blood_pact)
+		if _crimson_bonus != null and tick <= _boosted_through:
+			blood.values.append(_crimson_bonus)
+		bonuses.append(blood)
 	action.components[0].categories = bonuses
 	action.activation_costs = costs
 	if _hero == StarterCombatRules.CHRONOMANCER:
@@ -166,28 +181,28 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 	if result == Attempt.COMMITTED:
 		targeting.commit_attack_target(id)
 		if _weapon_rate != null:
-			_acrobat_recovery = CombatCadenceProgress.create(_weapon.cooldown_ticks)
-			_acrobat_rate_tick = tick
+			_weapon_recovery = CombatCadenceProgress.create(_weapon.cooldown_ticks)
+			_weapon_rate_tick = tick
 	return result
 
 
 ## Account for each interval at its active rate. Each new paid activation
 ## starts a fresh weapon cooldown after the previous one became eligible.
 func _advance_weapon_rate(tick: int) -> bool:
-	if _acrobat_recovery == null or tick == _acrobat_rate_tick:
+	if _weapon_recovery == null or tick == _weapon_rate_tick:
 		return true
-	if tick < _acrobat_rate_tick:
+	if tick < _weapon_rate_tick:
 		return false
-	var boosted := clampi(_close_call_through - _acrobat_rate_tick, 0, tick - _acrobat_rate_tick)
-	var normal := tick - _acrobat_rate_tick - boosted
-	var cycles := _acrobat_recovery.advance(boosted, _close_call_rate) if boosted > 0 else 0
+	var boosted := clampi(_boosted_through - _weapon_rate_tick, 0, tick - _weapon_rate_tick)
+	var normal := tick - _weapon_rate_tick - boosted
+	var cycles := _weapon_recovery.advance(boosted, _boosted_weapon_rate) if boosted > 0 else 0
 	if cycles == 0 and normal > 0:
-		cycles = _acrobat_recovery.advance(normal, _weapon_rate)
+		cycles = _weapon_recovery.advance(normal, _weapon_rate)
 	if cycles < 0:
 		return false
 	if cycles > 0:
-		_acrobat_recovery = null
-	_acrobat_rate_tick = tick
+		_weapon_recovery = null
+	_weapon_rate_tick = tick
 	return true
 
 
@@ -195,18 +210,36 @@ func record_close_call(tick: int) -> bool:
 	if (_hero != StarterCombatRules.ACROBAT or tick != _last_tick
 			or tick >= RunAuthority.MAX_TICK or not _advance_weapon_rate(tick)):
 		return false
-	_close_call_through = tick + mini(_rules.close_call_duration, RunAuthority.MAX_TICK - tick)
+	_boosted_through = tick + mini(_rules.close_call_duration, RunAuthority.MAX_TICK - tick)
 	return true
 
 
 func movement_multiplier(tick: int) -> float:
-	if _close_call_through == 0 or tick > _close_call_through:
+	if _hero != StarterCombatRules.ACROBAT or _boosted_through == 0 or tick > _boosted_through:
 		return 1.0
 	return 1.0 + float(_rules.close_call_basis_points) / RunPreparation.BASIS_POINTS
 
 
 func _force_strength(authored: float) -> float:
 	return authored * _rules.gravity_force_scale if _hero == StarterCombatRules.GRAVITY_WEAVER else authored
+
+
+func _blood_pact_bonus(source: CombatantState) -> Quantity:
+	var missing := source.max_hp.subtract(source.hp.amount)
+	return _bounded_blood_bonus(missing, source.max_hp, _rules.blood_pact_basis_points)
+
+
+static func _bounded_blood_bonus(amount: Quantity, cap_hp: Quantity, basis_points: int) -> Quantity:
+	if amount == null:
+		return null
+	var cap := Quantity.from_count(basis_points, 4)
+	if amount.compare(cap_hp) >= 0:
+		return cap
+	if amount.sign_value <= 0:
+		return Quantity.from_count(0)
+	var scaled := amount.multiply(cap)
+	var bounds := Quantity.outward_ratio(scaled, cap_hp, 4) if scaled != null else []
+	return bounds[0] if not bounds.is_empty() else null
 
 
 func _settled_candidates(candidates: Array[PlayerTargeting.Candidate]) -> Array[PlayerTargeting.Candidate]:
@@ -243,6 +276,8 @@ func try_manual(tick: int, selected: RealmSweep.Point = null) -> Attempt:
 		return _place_fracture(tick, source, center, selected)
 	if _hero == StarterCombatRules.GRAVITY_WEAVER:
 		return _place_gravity(tick, source, center, selected)
+	if _hero == StarterCombatRules.BLOODBOUND:
+		return _offer_blood(tick, source)
 	if (_hero != StarterCombatRules.UNDYING or tick > RunAuthority.MAX_TICK - _rules.siphon_lifetime
 			or not source.cooldown_ready(StarterCombatRules.SIPHON, CombatInstant.at_tick(tick))):
 		return Attempt.REJECTED
@@ -256,6 +291,42 @@ func try_manual(tick: int, selected: RealmSweep.Point = null) -> Attempt:
 	if result == Attempt.COMMITTED:
 		_effects.append(_ring(StarterCombatRules.SIPHON, center, _rules.siphon_radius, tick, tick + 10))
 	return result
+
+
+func _offer_blood(tick: int, source: CombatantState) -> Attempt:
+	var id := StarterCombatRules.CRIMSON_OFFERING
+	if (not _pending_offering.is_empty() or tick <= _boosted_through
+			or tick > RunAuthority.MAX_TICK - maxi(_rules.crimson_duration, _rules.crimson_cooldown)
+			or not source.cooldown_ready(id, CombatInstant.at_tick(tick))):
+		return Attempt.REJECTED
+	var action := _action(source, tick, 1, id, 0, _rules.crimson_cooldown, CombatAction.Damage.PHYSICAL)
+	action.components.clear()
+	action.hp_cost = source.max_hp.multiply(Quantity.from_count(_rules.crimson_cost_basis_points, 4))
+	if action.hp_cost == null or action.hp_cost.sign_value <= 0:
+		return Attempt.FAULT
+	_pending_offering = _kernel.commit(action)
+	if _pending_offering.is_empty():
+		return Attempt.REJECTED
+	return Attempt.COMMITTED if _kernel.finish_delivery(_pending_offering) else Attempt.FAULT
+
+
+func _observe_offering(group: CombatKernel.WaveResult) -> void:
+	if _pending_offering.is_empty():
+		return
+	for paid: CombatKernel.ActivationReceipt in group.activations:
+		if paid.source != _actor or paid.origin.occurrence_key() != _pending_offering:
+			continue
+		_pending_offering = ""
+		if paid.outcome != CombatKernel.ActivationOutcome.PAID:
+			return
+		_crimson_bonus = _bounded_blood_bonus(paid.hp_paid, Quantity.from_count(_rules.crimson_hp_for_cap),
+			_rules.crimson_cap_basis_points)
+		if _crimson_bonus == null:
+			_offering_fault = true
+		elif _crimson_bonus.sign_value > 0:
+			_boosted_weapon_rate = _weapon_rate.add(_crimson_bonus)
+			_boosted_through = group.due.tick + _rules.crimson_duration
+		return
 
 
 ## The movement owner certifies the Vault route before paying this commitment.
@@ -400,6 +471,7 @@ func observe_closed_group(group: CombatKernel.WaveResult) -> void:
 			and _last_observed_group.order_against(group.due) != RealmCircleTime.Order.BEFORE)):
 		return
 	_last_observed_group = group.due
+	_observe_offering(group)
 	for hit: CombatKernel.Hit in group.hits:
 		if hit.source == _actor and hit.wake_duration > 0:
 			var motion := hit.displacement
@@ -435,7 +507,7 @@ func observe_closed_group(group: CombatKernel.WaveResult) -> void:
 ## A run supplies the settled poses and planned obstacle motion at this
 ## boundary. An arrow can admit a hit within the following sub-tick interval.
 func advance(tick: int) -> bool:
-	if not _open_tick(tick) or not _advance_weapon_rate(tick) or not _decay(tick):
+	if _offering_fault or not _open_tick(tick) or not _advance_weapon_rate(tick) or not _decay(tick):
 		return false
 	if _fracture != null and _fracture.ends <= tick:
 		_fracture = null
@@ -499,10 +571,12 @@ func cues() -> Array[Cue]:
 	var visible: Array[Cue] = []
 	if _gravity != null:
 		visible.append(_copy_cue(_gravity.cue))
-	if _close_call_through > 0 and _close_call_through > _last_tick:
+	if _boosted_through > 0 and _boosted_through > _last_tick:
 		var at := _geometry.circle_center(_actor, 0)
-		if at != null:
-			visible.append(_ring(StarterCombatRules.CLOSE_CALL, at, 19.0, _last_tick, _close_call_through))
+		var source := _kernel.actor_vitals(_actor)
+		if at != null and source != null and source.hp.sign_value > 0:
+			var id := StarterCombatRules.CLOSE_CALL if _hero == StarterCombatRules.ACROBAT else StarterCombatRules.CRIMSON_OFFERING
+			visible.append(_ring(id, at, 19.0, _last_tick, _boosted_through))
 	if _hero == StarterCombatRules.CHRONOMANCER:
 		for echo: CombatKernel.EchoCue in _kernel.echo_cues(_actor, _geometry.realm_id):
 			visible.append(_ring(StarterCombatRules.TEMPORAL_ECHO, echo.center, echo.radius, echo.due, echo.due))

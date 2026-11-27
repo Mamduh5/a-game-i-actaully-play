@@ -99,7 +99,8 @@ class Arena:
 		kernel.advance_survival(now)
 		return results
 
-	func swing_from(source_id: StringName, target_id: StringName, amount: int, tick: int, hostile: bool = true) -> bool:
+	func swing_from(source_id: StringName, target_id: StringName, amount: int, tick: int, hostile: bool = true,
+			grant: CombatAction.BarrierGrant = null, restore: Quantity = null) -> bool:
 		var actor := kernel.actor_snapshot(source_id)
 		var action := CombatAction.new()
 		action.source = source_id
@@ -113,6 +114,8 @@ class Arena:
 		var part := CombatAction.Component.new()
 		part.base = Quantity.from_count(amount)
 		action.components.append(part)
+		action.barrier_for_source = grant
+		action.restore_source = restore
 		var held := kernel.commit(action)
 		if held.is_empty():
 			return false
@@ -133,6 +136,77 @@ class Arena:
 			if barrier.id == id:
 				return barrier
 		return null
+
+
+func test_crimson_payment_bypasses_barriers_and_lethal_payment_does_not_empower() -> void:
+	var id := StarterCombatRules.CRIMSON_OFFERING
+	for lethal: bool in [false, true]:
+		var arena := Arena.new(&"W01", &"H07", false, &"", &"", {&"H07": true})
+		assert_false(&"H07" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.HERO, {}))
+		assert_true(arena.add(&"foe", 40, 0, 500))
+		assert_true(arena.kernel.set_defense(HERO, 1, CombatAction.Damage.PHYSICAL, CombatantState.Defense.new()))
+		if lethal:
+			assert_true(arena.swing_from(&"foe", HERO, 75, 1))
+		assert_true(arena.combat.advance(1))
+		arena.settle(1)
+		var ward := CombatAction.BarrierGrant.new()
+		ward.id = &"ward"
+		ward.capacity = Quantity.from_count(60)
+		ward.mask = CombatAction.Damage.PHYSICAL | CombatAction.Damage.MAGICAL
+		assert_true(arena.swing_from(HERO, &"foe", 0, 2, true, ward))
+		assert_true(arena.combat.advance(2))
+		arena.settle(2)
+		assert_eq(arena.combat.try_manual(3), Committed)
+		assert_eq(arena.combat.try_manual(3), StarterCombat.Attempt.REJECTED)
+		assert_eq(arena.hp(HERO).native_at_scale(0), 25 if lethal else 100)
+		assert_true(arena.combat.advance(3))
+		var closed := arena.kernel.resolve_next(CombatInstant.at_tick(3))
+		assert_eq(closed.activations.size(), 1)
+		assert_eq(closed.activations[0].outcome, CombatKernel.ActivationOutcome.LETHAL if lethal else CombatKernel.ActivationOutcome.PAID)
+		assert_eq(closed.activations[0].hp_paid.native_at_scale(0), 25)
+		assert_true(closed.hits.is_empty())
+		arena.combat.observe_closed_group(closed)
+		assert_eq(arena.hp(HERO).native_at_scale(0), 0 if lethal else 75)
+		assert_eq(arena.layer(&"ward").pool.amount.native_at_scale(0), 60)
+		assert_eq(arena.combat.cues().size(), 0 if lethal else 1)
+		assert_eq(arena.combat.try_manual(4), StarterCombat.Attempt.REJECTED)
+		assert_false(arena.kernel.actor_snapshot(HERO).cooldown_ready(id, CombatInstant.at_tick(362)))
+		assert_true(arena.kernel.actor_snapshot(HERO).cooldown_ready(id, CombatInstant.at_tick(363)))
+		if lethal:
+			assert_eq(arena.attack(4), StarterCombat.Attempt.REJECTED)
+
+
+func test_blood_pact_reads_healed_hp_and_crimson_cadence_keeps_accrued_progress() -> void:
+	var arena := Arena.new(&"W01", &"H07", false, &"", &"", {&"H07": true})
+	assert_true(arena.add(&"foe", 40, 0, 500))
+	assert_true(arena.kernel.set_defense(HERO, 1, CombatAction.Damage.PHYSICAL, CombatantState.Defense.new()))
+	var commitments: Array[int] = []
+	var damage: Array[int] = []
+	for tick: int in range(1, 198):
+		if tick == 2:
+			assert_true(arena.swing_from(&"foe", HERO, 60, tick))
+		if tick == 11:
+			assert_eq(arena.combat.try_manual(tick), Committed)
+		if tick == 60:
+			var ward := CombatAction.BarrierGrant.new()
+			ward.id = &"ward"
+			ward.capacity = Quantity.from_count(60)
+			ward.mask = CombatAction.Damage.PHYSICAL
+			assert_true(arena.swing_from(HERO, &"foe", 0, tick, true, ward, Quantity.from_count(40)))
+		if arena.attack(tick) == Committed:
+			commitments.append(tick)
+		assert_true(arena.combat.advance(tick))
+		for hit: CombatKernel.Hit in arena.settle(tick):
+			if hit.family == &"W01":
+				damage.append(hit.components[0].hp_removed.native_at_scale(1))
+		if tick == 11 or tick == 60:
+			assert_eq(arena.hp(HERO).native_at_scale(0), 15 if tick == 11 else 55)
+			assert_true(arena.combat.cues().any(func(cue: StarterCombat.Cue) -> bool:
+				return cue.id == StarterCombatRules.CRIMSON_OFFERING))
+	assert_eq(commitments, [1, 51, 99, 147, 196])
+	assert_eq(damage, [200, 318, 286, 286, 236])
+	assert_eq(arena.layer(&"ward").pool.amount.native_at_scale(0), 60)
+	assert_eq(arena.combat.movement_multiplier(60), 1.0)
 
 
 func test_fracture_compresses_only_the_owners_sigil_inside_the_selected_field() -> void:

@@ -141,6 +141,7 @@ func _prepare_seat(id: StringName, build: Build, revision: StringName) -> bool:
 		StarterCombatRules.CONDUCTOR: seat.manual = StarterCombatRules.HARMONIC_BURST
 		StarterCombatRules.CHRONOMANCER: seat.manual = StarterCombatRules.TIME_FRACTURE
 		StarterCombatRules.GRAVITY_WEAVER: seat.manual = StarterCombatRules.SINGULARITY
+		StarterCombatRules.BLOODBOUND: seat.manual = StarterCombatRules.CRIMSON_OFFERING
 		_: return false
 	var foes := WorldActivity.ACTORS
 	var walls := WorldExploration.BLOCKER

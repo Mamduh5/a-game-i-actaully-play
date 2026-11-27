@@ -111,7 +111,25 @@ func test_peer_encounter_snapshot_preserves_closed_health_and_omits_covered_crea
 	assert_null(replica.encounter_view(SEAT, 1))
 
 
-static func _encounter(start_x: float) -> StarterEncounter:
+func test_bloodbound_publishes_paid_health_and_crimson_cue_in_scoped_view() -> void:
+	var encounter := _encounter(90.0, &"H07")
+	assert_not_null(encounter)
+	assert_eq(_submit(encounter, 1, PlayerCommand.new(PlayerCommand.MANUAL, 155, 128)), RunAuthority.Admission.QUEUED)
+	assert_true(encounter.close_tick())
+	var state := encounter.movement_state(SEAT, 1, 2)
+	var source := encounter.view_for(SEAT)
+	var body := RecipientView.pack_encounter(source, state, REALM, encounter.party_statuses(), null)
+	var replica := GuestReplica.new()
+	assert_true(replica.install_scope(REALM, state))
+	assert_eq(replica.receive_frame(_view_frame(body, ReplicationMessage.Kind.VIEW_STATE)), GuestReplica.Acceptance.APPLIED)
+	var view := replica.encounter_view(SEAT, 1)
+	assert_not_null(view)
+	assert_eq(view.player.hp.native_at_scale(0), 75)
+	assert_false(view.manual_ready)
+	assert_true(view.cues.any(func(cue: StarterCombat.Cue) -> bool: return cue.id == StarterCombatRules.CRIMSON_OFFERING))
+
+
+static func _encounter(start_x: float, hero: StringName = &"H01") -> StarterEncounter:
 	var bundle: CatalogBundle = load("res://src/catalog/starter_roster.tres")
 	var catalog := bundle.compile()
 	var slots: Array[StringName] = []
@@ -127,7 +145,7 @@ static func _encounter(start_x: float) -> StarterEncounter:
 	setup.challenge_id = &"test"
 	setup.initial_realms = {SEAT: REALM}
 	var build := StarterEncounter.Build.new()
-	build.preparation = RunPreparation.select(catalog, &"H01", &"W01", [&"", &""], slots, {})
+	build.preparation = RunPreparation.select(catalog, hero, &"W01", [&"", &""], slots, {hero: true})
 	build.powers = RunRewardQueue.begin(build.preparation, RunRandom.new(setup.seed), SEAT)
 	build.start = RealmSweep.Point.new(start_x, 128.0)
 	build.maximum_hp = Quantity.from_count(100)

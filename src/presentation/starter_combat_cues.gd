@@ -36,6 +36,7 @@ func _draw() -> void:
 			StarterCombatRules.TEMPORAL_ECHO: _circle(center, cue.reach, Color("#f2d5ff"), false)
 			StarterCombatRules.CLOSE_CALL: draw_arc(center, cue.reach, 0.0, TAU, 48, SIPHON, 2.0, true)
 			StarterCombatRules.SINGULARITY: _circle(center, cue.reach, Color("#d8a4ee"), _tick >= cue.impact)
+			StarterCombatRules.CRIMSON_OFFERING: draw_arc(center, cue.reach, 0.0, TAU, 48, Color("#ef8d99"), 2.0, true)
 			&"RP02.blood_wake":
 				var end := center + Vector2(cue.heading.x, cue.heading.y) * cue.reach
 				var ink := Color("#e78491")
