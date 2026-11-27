@@ -316,6 +316,8 @@ Use a stable key comprising the original issuer's persistent public identity, un
 
 **WP23 live defeat and WP25 PR04 are integrated on `dev` at `911070d`.** The encounter retains the resolved terminal tick until ordinary account flush and issuer marker close both succeed. An adapter can display the previous committed view while `has_unpublished_tick()` reports the wait, then retry `close_tick()` and project the newly published result. Input acknowledgement advances at publication. The recovery checkpoint is unavailable while the tick is held. The reconciled interaction boundary preserves the terminal earnings fence and PR04 payload validation. [Integrated verification](records/DEV-INTEGRATION-911070d.md)
 
+**WP23 active encounter wait at `3f47dab`, pending independent review.** An admitted tick can wait at world entry or inside combat when the ordinary earnings deadline is reached. The same `close_tick()` retries the retained world and combat cursors after storage service clears the fence. The prior observation and acknowledgement stay public until the retained tick closes. [Review handoff](records/WP23.md#active-encounter-storage-review-handoff)
+
 <a id="tds-storage"></a>
 
 ### Transaction storage and fault boundaries (F-03, NF-02)
