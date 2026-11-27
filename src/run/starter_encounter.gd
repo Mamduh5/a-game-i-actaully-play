@@ -4,6 +4,7 @@ extends RunAuthority
 
 const PLAYER_BODY := 4
 const SIGHT := 420.0
+const BASIS_POINTS := 10000
 const TUNING: StarterCombatRules = preload("res://src/catalog/starter_combat.tres")
 
 class Build:
@@ -11,6 +12,8 @@ class Build:
 	var powers: RunRewardQueue
 	var start: RealmSweep.Point
 	var maximum_hp: Quantity
+	var physical_defense := Quantity.from_count(0)
+	var magical_defense := Quantity.from_count(0)
 
 class Seat:
 	var weapon: StarterWeapon
@@ -18,6 +21,7 @@ class Seat:
 	var targeting := PlayerTargeting.new()
 	var selected: StringName
 	var combat: StarterCombat
+	var speed: float
 	var familiar: SketchFamiliar
 	var mines: RunicMines
 	var lance: SpectralLance
@@ -110,18 +114,24 @@ func _prepare_seat(id: StringName, build: Build, revision: StringName) -> bool:
 	if placement == null or not placement.contacts.is_empty() or not placement.unresolved.is_empty():
 		return false
 	var actor := CombatantState.new()
+	var prep := build.preparation
 	actor.id = id
 	actor.owner = id
 	actor.life = 1
 	actor.provenance = CombatOrigin.Provenance.SEAT
 	actor.realm = _geometry.realm_id
-	actor.max_hp = build.maximum_hp
+	actor.max_hp = _entry_amount(prep, &"maximum_hp", build.maximum_hp)
+	actor.physical.rating = _entry_amount(prep, &"physical_defense", build.physical_defense)
+	actor.magical.rating = _entry_amount(prep, &"magical_defense", build.magical_defense)
+	if actor.max_hp == null or actor.physical.rating == null or actor.magical.rating == null:
+		return false
 	actor.hp = QuantityLayerLedger.Pool.new(actor.max_hp, QuantityErrorBounds.new())
 	if (not TUNING.prepare_hero(actor, build.preparation) or not _kernel.add_actor(actor)
 			or not _geometry.add_circle(id, 0, build.start, WorldExploration.STARTER_RADIUS, PLAYER_BODY)
 			or not _activity.track_player(id)):
 		return false
 	var seat := Seat.new()
+	seat.speed = PlayerControlState.REFERENCE_SPEED * (1.0 + float(prep.upgrade_basis_points(&"movement")) / BASIS_POINTS)
 	seat.weapon = TUNING.weapon_for(build.preparation.weapon)
 	match build.preparation.hero:
 		StarterCombatRules.UNDYING: seat.manual = StarterCombatRules.SIPHON
@@ -141,6 +151,13 @@ func _prepare_seat(id: StringName, build: Build, revision: StringName) -> bool:
 		return false
 	_seats[id] = seat
 	return true
+
+
+static func _entry_amount(prep: RunPreparation, stat: StringName, authored: Quantity) -> Quantity:
+	if authored == null or authored.sign_value < 0:
+		return null
+	var bonus := prep.upgrade_basis_points(stat)
+	return authored.multiply(Quantity.from_count(BASIS_POINTS + bonus, 4)) if bonus != 0 else authored
 
 
 func place_enemy(id: StringName, rules: WorldEnemy.Rules, at: RealmSweep.Point) -> bool:
@@ -173,7 +190,7 @@ func movement_state(seat: StringName, baseline: int, serial: int) -> MovementSna
 	state.acknowledged = movement_acknowledgement(seat)
 	state.position = member.position
 	state.movement = _party.movement_input(seat)
-	state.speed = PlayerControlState.REFERENCE_SPEED
+	state.speed = _seats[seat].speed
 	state.radius = _geometry.circle_radius(seat, 0)
 	state.permits_prediction = _party.can_control(seat)
 	return state
@@ -211,7 +228,7 @@ func _play(tick: int, accepted: Array[RunIntent], outcomes: Array[Dictionary]) -
 			_party.apply_input(intent.seat_id, intent.command)
 	var targets: Dictionary[StringName, Array] = {}
 	for id: StringName in _seats:
-		var at := _party.step_movement(id, PlayerControlState.REFERENCE_SPEED, 1.0 / 60.0)
+		var at := _party.step_movement(id, _seats[id].speed, 1.0 / 60.0)
 		if at == null:
 			return false
 		targets[id] = _targets(at)

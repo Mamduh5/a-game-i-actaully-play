@@ -146,6 +146,105 @@ func test_preparation_freezes_confirmed_personal_upgrades_and_recovers_the_earli
 	assert_eq(bob.prepare(&"H02", &"W02", [&"", &""], _empty_candidates()).upgrade_basis_points(&"movement"), 0)
 
 
+func test_encounter_uses_frozen_profile_vitals_and_the_same_speed_for_host_and_prediction() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var offers := _offers()
+	offers.append(_offer(&"maximum_hp", 1, ProfileShop.COMMON, 3, 250))
+	offers.append(_offer(&"physical_defense", 1, ProfileShop.COMMON, 3, 2500))
+	offers.append(_offer(&"magical_defense", 1, ProfileShop.COMMON, 3, 1000))
+	var shop := ProfileShop.open(_alice, _catalog, "rules-v1", offers)
+	assert_eq(_fund(_alice, "stats-common", ProfileShop.COMMON, 30), STATUS.COMMITTED)
+	assert_eq(_fund(_alice, "stats-rare", ProfileShop.RARE, 2), STATUS.COMMITTED)
+	for stat: StringName in [&"movement", &"maximum_hp", &"physical_defense", &"magical_defense"]:
+		assert_eq(shop.buy("paid/%s" % stat, stat, 1).status, STATUS.COMMITTED)
+	var earlier := shop.prepare(&"H01", &"W01", [&"", &""], _empty_candidates()).checkpoint()
+	assert_eq(shop.buy("faster-next-run", &"movement", 2).status, STATUS.COMMITTED)
+	assert_eq(shop.prepare(&"H03", &"W01", [&"", &""], _empty_candidates()).upgrade_basis_points(&"movement"), 1000)
+	var store := ProfileStore.new()
+	assert_eq(store.open("bob", _scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var fresh := ProfileShop.open(store, _catalog, "rules-v1", offers).prepare(&"H03", &"W01", [&"", &""], _empty_candidates())
+	var frozen := RunPreparation.reopen(_catalog, earlier)
+	for physical: bool in [true, false]:
+		var setup := RunSetup.new()
+		setup.role = RunSetup.Role.HOST
+		setup.run_id = &"entry-stats"
+		setup.epoch = 1
+		setup.seed = 3207
+		setup.authority_id = &"alice"
+		setup.rules_revision = &"rules-v1"
+		setup.catalog_revision = _catalog.revision
+		setup.challenge_id = &"normal"
+		setup.initial_realms = {&"alice": WorldTopology.OVERWORLD, &"bob": WorldTopology.OVERWORLD}
+		var floor := WorldExploration.create(WorldTopology.generate(setup.seed), [&"alice", &"bob"])
+		var builds: Dictionary[StringName, StarterEncounter.Build] = {
+			&"alice": _stat_build(frozen, &"alice", 64.0),
+			&"bob": _stat_build(fresh, &"bob", 170.0),
+		}
+		var encounter := StarterEncounter.assemble(setup, &"alice", floor, builds)
+		assert_not_null(encounter)
+		if encounter == null:
+			continue
+		var alice_rules := _stat_foe(physical, 60 if physical else 61)
+		var bob_rules := _stat_foe(not physical, 60 if physical else 70)
+		assert_true(encounter.place_enemy(&"alice-target", alice_rules, RealmSweep.Point.new(110, 64)))
+		assert_true(encounter.place_enemy(&"bob-target", bob_rules, RealmSweep.Point.new(110, 170)))
+		assert_eq(encounter.view_for(&"alice").player.maximum.native_at_scale(1), 1025)
+		assert_eq(encounter.view_for(&"alice").player.hp.native_at_scale(1), 1025)
+		assert_eq(encounter.view_for(&"bob").player.maximum.native_at_scale(0), 100)
+		for tick: int in 5:
+			assert_true(encounter.close_tick())
+		assert_eq(encounter.view_for(&"alice").player.hp.native_at_scale(1), 625 if physical else 525)
+		assert_eq(encounter.view_for(&"bob").player.hp.native_at_scale(0), 50)
+		assert_eq(encounter.movement_state(&"alice", 1, 6).speed, 105.0)
+		assert_eq(encounter.movement_state(&"bob", 1, 6).speed, 100.0)
+		var guest_prediction := GuestMovement.new()
+		var prior := encounter.movement_state(&"alice", 1, 6)
+		assert_eq(guest_prediction.install_baseline(WorldTopology.OVERWORLD, prior, []), GuestMovement.Acceptance.APPLIED)
+		var move := PlayerCommand.new(PlayerCommand.MOVE_AXES, 1.0)
+		assert_false(guest_prediction.issue(move).is_empty())
+		assert_true(guest_prediction.advance())
+		for seat: StringName in [&"alice", &"bob"]:
+			var input := RunIntent.new(setup.run_id, 1, WorldTopology.OVERWORLD, seat, 6, 1, move.action, move)
+			assert_eq(encounter.submit(seat, input), RunAuthority.Admission.QUEUED)
+		assert_true(encounter.close_tick())
+		var alice := encounter.movement_state(&"alice", 1, 7)
+		var bob := encounter.movement_state(&"bob", 1, 7)
+		assert_almost_eq(alice.position.x, 51.75, 0.00001)
+		assert_almost_eq(alice.position.x, guest_prediction.position().x, 0.00001)
+		assert_almost_eq(bob.position.x, 50.0 + 100.0 / 60.0, 0.00001)
+		assert_eq(guest_prediction.receive(alice), GuestMovement.Acceptance.APPLIED)
+	assert_true(store.close())
+
+
+static func _stat_build(preparation: RunPreparation, seat: StringName, y: float) -> StarterEncounter.Build:
+	var build := StarterEncounter.Build.new()
+	build.preparation = preparation
+	build.powers = RunRewardQueue.begin(preparation, RunRandom.new(3207), seat)
+	build.start = RealmSweep.Point.new(50, y)
+	build.maximum_hp = Quantity.from_count(100)
+	build.physical_defense = Quantity.from_count(40)
+	build.magical_defense = Quantity.from_count(20)
+	return build
+
+
+static func _stat_foe(physical: bool, damage: int) -> WorldEnemy.Rules:
+	var rules := WorldEnemy.Rules.new()
+	rules.faction = &"fixture"
+	rules.foes = [WorldEnemy.PARTY]
+	rules.family = &"fixture/stat-witness"
+	rules.hp = Quantity.from_count(1000)
+	rules.damage = Quantity.from_count(damage)
+	rules.damage_kind = CombatAction.Damage.PHYSICAL if physical else CombatAction.Damage.MAGICAL
+	rules.radius = 10.0
+	rules.sight = 120.0
+	rules.attack_range = 65.0
+	rules.attack_radius = 18.0
+	rules.windup_ticks = 4
+	rules.recovery_ticks = 120
+	return rules
+
+
 func test_signed_discoveries_survive_reopen_and_unlock_only_the_original_recipient() -> void:
 	if not OS.has_feature("windows"):
 		return
