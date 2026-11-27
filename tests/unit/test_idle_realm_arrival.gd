@@ -110,6 +110,90 @@ func test_authored_spawn_precedes_first_entry_even_without_a_viewer() -> void:
 		assert_eq(activity.snapshot().rng.has(&"world-spawn/hall_resident"), route == active)
 
 
+func test_split_hall_retains_started_trial_and_unviewed_resident_across_collapse() -> void:
+	var eager := _split_hall_trace(false)
+	var deferred := _split_hall_trace(true)
+	assert_false(eager.is_empty())
+	assert_eq(deferred, eager)
+
+
+func _split_hall_trace(defer_hall: bool) -> Array[Dictionary]:
+	var route := Route.new(HALL)
+	assert_true(route.begin())
+	var activity := _world_for(route)
+	if not defer_hall:
+		assert_true(activity.register_realm(route.inner))
+	var initial := COLLAPSE - 5
+	route.authority._closed_tick = initial
+	route.party._tick = initial
+	activity._tick = initial
+	var arrival := route.inner.module_center(WorldTopology.ENTRY)
+	var trial := RunRealmTrial.declare(route.party, route.inner, arrival, 30.0, true, false)
+	assert_not_null(trial)
+	assert_true(route.submit(route.input(HOST, PlayerCommand.MOVE_TO, Route.offset(route.handle, -12, 0))))
+	var trace: Array[Dictionary] = [_snapshot(route, activity)]
+	if defer_hall:
+		assert_true(activity.register_realm(route.inner))
+	assert_true(_enter_hall(route, GUEST))
+	assert_eq(activity.snapshot().actors[HOST][0], OUTSIDE)
+	assert_eq(activity.snapshot().actors[GUEST][0], HALL)
+	trace.append(_snapshot(route, activity))
+	assert_true(route.authority.close_tick())
+	var activation := route.input(GUEST, PlayerCommand.INTERACT, arrival)
+	assert_eq(activation.tick, COLLAPSE - 1)
+	assert_true(route.submit(activation))
+	assert_eq(route.authority.interactions[0].receipt(), activation.receipt())
+	assert_true(trial.start(GUEST, CombatInstant.at_tick(activation.tick)))
+	assert_true(_enter_hall(route, HOST))
+	assert_eq(route.party.closed_tick, COLLAPSE)
+	assert_eq(trial.observe(CombatInstant.at_tick(COLLAPSE)), RunRealmTrial.Observation.RETAINED)
+	trace.append(_snapshot(route, activity))
+	assert_true(_leave_hall(route, GUEST))
+	assert_eq(trial.observe(CombatInstant.at_tick(route.party.closed_tick)), RunRealmTrial.Observation.RETAINED)
+	assert_eq(trial.phase, RunRealmTrial.Phase.ACTIVE)
+	assert_true(route.inner.view(GUEST).visible.is_empty())
+	assert_false(route.inner.view(HOST).visible.is_empty())
+	trace.append(_snapshot(route, activity))
+	assert_true(_leave_hall(route, HOST))
+	assert_eq(trial.observe(CombatInstant.at_tick(route.party.closed_tick)), RunRealmTrial.Observation.RESET)
+	assert_eq(trial.phase, RunRealmTrial.Phase.DORMANT)
+	for seat: StringName in [HOST, GUEST]:
+		assert_true(route.inner.view(seat).visible.is_empty())
+		assert_eq(activity.snapshot().actors[seat][0], OUTSIDE)
+	var spawn_tick := route.authority.next_tick()
+	var site := _spawn_site(HALL, &"hall_resident", Route.offset(arrival, 40, 0), spawn_tick)
+	assert_true(activity.schedule_spawn(site))
+	assert_true(route.authority.close_tick())
+	assert_true(route.authority.closed_party)
+	var resident := StringName("spawn/13:hall_resident/%d" % spawn_tick)
+	var offscreen := activity.snapshot()
+	assert_eq(offscreen.actors[resident][0], HALL)
+	assert_eq(offscreen.rng[&"world-spawn/hall_resident"][1], 1)
+	trace.append(_snapshot(route, activity))
+	assert_true(_enter_hall(route, GUEST))
+	var returned := activity.snapshot()
+	assert_eq(returned.actors[resident], offscreen.actors[resident])
+	assert_eq(returned.rng[&"world-spawn/hall_resident"][1], 1)
+	var retry := route.input(GUEST, PlayerCommand.INTERACT, arrival)
+	assert_true(route.submit(retry))
+	assert_false(trial.start(GUEST, CombatInstant.at_tick(retry.tick)))
+	assert_eq(trial.phase, RunRealmTrial.Phase.DORMANT)
+	trace.append(_snapshot(route, activity))
+	return trace
+
+
+static func _enter_hall(route: Route, seat: StringName) -> bool:
+	var enter := route.input(seat, PlayerCommand.INTERACT, route.handle)
+	return route.submit(enter) and route.passages.interact(enter)
+
+
+static func _leave_hall(route: Route, seat: StringName) -> bool:
+	if not route.walk_to_exit(seat):
+		return false
+	var leave := route.input(seat, PlayerCommand.INTERACT, route.inner.module_center(WorldTopology.RETURN_EXIT))
+	return route.submit(leave) and route.passages.interact(leave)
+
+
 func _world_for(route: Route) -> WorldActivity:
 	var activity := WorldActivity.new(route.kernel, Route.Seed)
 	assert_true(activity.register_realm(route.outer))
