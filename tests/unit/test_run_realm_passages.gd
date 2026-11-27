@@ -8,6 +8,7 @@ const Admission := RunAuthority.Admission
 class TravelAuthority extends RunAuthority:
 	var party: RunParty
 	var activity: WorldActivity
+	var world_frame: WorldActivity.Frame
 	var closed_party := false
 	var interactions: Array[RunIntent] = []
 
@@ -23,7 +24,8 @@ class TravelAuthority extends RunAuthority:
 				interactions.append(intent)
 		for seat: StringName in party.initialized_seats():
 			party.step_movement(seat, 6000.0, 1.0 / 60.0)
-		closed_party = (activity == null or activity.advance(tick) != null) and party.close_tick(tick)
+		world_frame = activity.advance(tick) if activity != null else null
+		closed_party = (activity == null or world_frame != null) and party.close_tick(tick)
 		return []
 
 class Route:
@@ -516,3 +518,83 @@ func test_first_entry_and_return_observe_the_same_already_active_optional_world(
 	assert_eq(resumed.actors[Guest][0], &"inverted_archive")
 	assert_eq(resumed.rng[&"world-spawn/archive"][1], 1)
 	assert_eq(resumed.tick, route.authority.next_tick() - 1)
+
+
+func test_committed_realm_effect_settles_after_the_last_viewer_departs() -> void:
+	var realm := &"silent_garden"
+	var target := &"resident"
+	var family := &"fixture/delayed-ground-hit"
+	var reference: Array = []
+	for departs: bool in [false, true]:
+		var route := Route.new(realm)
+		assert_true(route.begin())
+		var activity := WorldActivity.new(route.kernel, Route.Seed)
+		assert_true(activity.register_realm(route.outer))
+		assert_true(activity.register_realm(route.inner))
+		assert_true(activity.track_player(Host))
+		assert_true(activity.track_player(Guest))
+		route.authority.activity = activity
+		var entry := route.input(Guest, PlayerCommand.INTERACT, route.handle)
+		assert_true(route.submit(entry))
+		assert_true(route.passages.interact(entry))
+		assert_true(route.walk_to_exit(Guest))
+		var exit := route.inner.module_center(WorldTopology.RETURN_EXIT)
+		var impact := Route.offset(exit, 16.0, 0.0)
+		var resident := WorldEnemy.Rules.new()
+		resident.faction = &"garden"
+		resident.family = &"fixture"
+		resident.hp = Quantity.from_count(20)
+		resident.damage = Quantity.from_count(1)
+		resident.radius = 4.0
+		resident.sight = 20.0
+		resident.attack_range = 4.0
+		resident.attack_radius = 4.0
+		resident.windup_ticks = 1
+		resident.recovery_ticks = 1
+		assert_true(activity.introduce_enemy(target, realm, resident, impact))
+		var committed := route.authority.next_tick()
+		var due := committed + 3
+		var action := CombatAction.new()
+		action.source = Guest
+		action.source_life = 1
+		action.family = family
+		action.origin = CombatOrigin.new()
+		action.origin.owner = Guest
+		action.origin.activation = 1
+		action.origin.committed_at = CombatInstant.at_tick(committed)
+		var damage := CombatAction.Component.new()
+		damage.base = Quantity.from_count(4)
+		action.components = [damage]
+		var delivery := CombatDelivery.activate(route.kernel, action, realm)
+		assert_not_null(delivery)
+		var coverage := route.inner.geometry().certify_circle_snapshot(realm, impact, 0.0, WorldActivity.ACTORS)
+		assert_eq(coverage.contacts.size(), 1)
+		assert_eq(delivery.admit(due, coverage.contacts[0], 1, true), CombatDelivery.Result.ADMITTED)
+		assert_true(delivery.finish())
+		if departs:
+			var leave := route.input(Guest, PlayerCommand.INTERACT, exit)
+			assert_true(route.submit(leave))
+			assert_true(route.passages.interact(leave))
+		else:
+			assert_true(route.authority.close_tick())
+		assert_eq(route.inner.view(Guest).visible.is_empty(), departs)
+		assert_true(route.inner.view(Host).visible.is_empty())
+		var posted: Array = []
+		for tick: int in range(committed + 1, due + 1):
+			assert_true(route.authority.close_tick())
+			assert_true(route.authority.closed_party)
+			var state := route.kernel.actor_snapshot(target)
+			assert_eq(state.hp.amount.native_at_scale(0), 16 if tick == due else 20)
+			for wave: CombatKernel.WaveResult in route.authority.world_frame.combat:
+				for hit: CombatKernel.Hit in wave.hits:
+					posted.append([tick, hit.family, hit.target, hit.origin.owner, hit.origin.provenance])
+		assert_eq(posted, [[due, family, target, Guest, CombatOrigin.Provenance.SEAT]])
+		var closed: Array = activity.snapshot().actors[target]
+		if departs:
+			var reenter := route.input(Guest, PlayerCommand.INTERACT, route.handle)
+			assert_true(route.submit(reenter))
+			assert_true(route.passages.interact(reenter))
+			assert_eq(activity.snapshot().actors[target], closed)
+			assert_eq(closed, reference)
+		else:
+			reference = closed
