@@ -542,6 +542,8 @@ Summon damage belongs to the player, and only explicitly compatible runes/powers
 
 **Discovery:** accept and fulfill a qualifying HP-sacrifice covenant offered by the Nameless Stranger. Exact HP-cost formula, duration and cooldown are provisional, not the illustrative 80%-to-55% example.
 
+**C05 provisional Bloodbound tuning under OWNER-T04/O20.** Blood Pact rises linearly with missing actual HP, up to the 40% reference. Crimson Offering spends 25% of maximum HP. A surviving paid offer gives three seconds of weapon damage and automatic weapon frequency, with a 360-tick base recovery. The boost scales linearly from zero to 30% as actual payment rises from zero to 30 HP. Damage bonuses from Blood Pact and Empowerment add within one category. Read and round each bonus down to the nearest basis point at its applicable sampling boundary. Adjust the cost, coefficient, cap and timers in StarterCombatRules after owner playtesting. [C05 evidence](records/C05.md#bloodbound-starter-combat-review-handoff)
+
 ### H08. The Alchemist - unlockable
 <a id="catalog-h08"></a>
 
