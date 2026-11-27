@@ -204,15 +204,16 @@ func _exercise_active_wait() -> void:
 		return
 	var view := _encounter.view_for(SEAT)
 	var closed := _encounter.closed_result()
+	var later_pending: int = _ordinary.pending_amount().native_at_scale(0)
+	var issued: int = _store.balance(_account).native_at_scale(0)
 	_stage.display(view)
-	_caption.text = "Play resumed  ·  Earnings saved"
+	_caption.text = ("Play resumed  ·  %d saved, %d pending" % [issued, later_pending] if _gameplay_earned
+		else "Play resumed  ·  Earnings saved")
 	await _snap("resumed.png")
 	var common: bool = (not view.defeated and view.tick == 3 and _encounter.movement_acknowledgement(SEAT) == 2
 		and closed.accepted.size() == 2 and closed.outcomes.size() == (4 if _gameplay_earned else 3)
 		and is_equal_approx(view.player.at.x, 62.0 + 100.0 / 60.0)
 		and view.player.hp.native_at_scale(0) == (70 if _gameplay_earned else 84))
-	var later_pending: int = _ordinary.pending_amount().native_at_scale(0)
-	var issued: int = _store.balance(_account).native_at_scale(0)
 	var correct_award: bool = (view.cleared and view.barrier.native_at_scale(0) == 20 and later_pending == 11
 		and _ordinary.oldest_eligible_usec() == OrdinaryCurrency.MAX_AGE_USEC and issued == 7)
 	if _gameplay_earned:

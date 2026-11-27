@@ -9,6 +9,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+mouse_filter = 2
 script = ExtResource("1_main")
 
 [node name="Paper" type="ColorRect" parent="." unique_id=1859009664]
@@ -49,3 +50,58 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.3, 0.29, 0.27, 1)
 text = "build identity"
 horizontal_alignment = 1
+
+[node name="ProfileEntry" type="VBoxContainer" parent="Layout"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ProfileChoice" type="HBoxContainer" parent="Layout/ProfileEntry"]
+unique_name_in_owner = true
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 10
+
+[node name="ProfileName" type="LineEdit" parent="Layout/ProfileEntry/ProfileChoice"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(228, 42)
+layout_mode = 2
+placeholder_text = "Profile ID"
+text = "player"
+
+[node name="OpenProfile" type="Button" parent="Layout/ProfileEntry/ProfileChoice"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(148, 42)
+layout_mode = 2
+text = "Open profile"
+
+[node name="RunChoice" type="HBoxContainer" parent="Layout/ProfileEntry"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 10
+
+[node name="HeroChoice" type="OptionButton" parent="Layout/ProfileEntry/RunChoice"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(192, 42)
+layout_mode = 2
+
+[node name="WeaponChoice" type="OptionButton" parent="Layout/ProfileEntry/RunChoice"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(152, 42)
+layout_mode = 2
+
+[node name="StartSolo" type="Button" parent="Layout/ProfileEntry/RunChoice"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(112, 42)
+layout_mode = 2
+text = "Start solo"
+
+[node name="ProfileStatus" type="Label" parent="Layout/ProfileEntry"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.25, 0.24, 0.22, 1)
+horizontal_alignment = 1
+autowrap_mode = 2

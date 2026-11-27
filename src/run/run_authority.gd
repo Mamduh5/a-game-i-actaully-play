@@ -88,7 +88,7 @@ func _attach_ordinary_currency_batch(accounts: Array[OrdinaryCurrency]) -> bool:
 		return false
 	var combined := _ordinary_currency.duplicate()
 	for earnings: OrdinaryCurrency in accounts:
-		if (earnings == null or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"])
+		if (earnings == null or not earnings.belongs_to(_identity["run"], _identity["rules"], _identity["catalog"], _identity["role"])
 				or (_ordinary_session != null and not _ordinary_session.tracks(earnings))):
 			return false
 		for existing: OrdinaryCurrency in combined:

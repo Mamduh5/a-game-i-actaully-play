@@ -415,6 +415,35 @@ func test_important_issue_waits_for_its_recipient_currency_flush() -> void:
 	assert_true(store.close())
 
 
+func test_solo_local_currency_reopens_same_claim_and_cannot_bind_to_a_host_run() -> void:
+	if not OS.has_feature("windows"):
+		return
+	var scratch := DirAccess.create_temp("agip-local-ordinary")
+	var store := ProfileStore.new()
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var setup := _setup()
+	var account := OrdinaryCurrency.begin_local(store, setup, ProfileShop.COMMON)
+	assert_not_null(account)
+	assert_false(_authority(RunSetup.Role.HOST).attach_ordinary_currency(account))
+	assert_true(_authority().attach_ordinary_currency(account))
+	assert_eq(account.accrue("original-spawn", Quantity.from_count(6)), Add.QUEUED)
+	assert_true(account.flush())
+	assert_eq(store.balance(ProfileShop.COMMON).native_at_scale(0), 6)
+	assert_eq(store.checkpoint()["generation"], 1)
+	assert_true(store.pending_grants().is_empty())
+	assert_true(store.close())
+	assert_eq(store.open("alice", scratch.get_current_dir()), ProfileStore.OpenResult.OPENED)
+	var replay := OrdinaryCurrency.begin_local(store, setup, ProfileShop.COMMON)
+	assert_eq(replay.accrue("original-spawn", Quantity.from_count(6)), Add.QUEUED)
+	assert_true(replay.flush())
+	assert_eq(store.balance(ProfileShop.COMMON).native_at_scale(0), 6)
+	assert_eq(store.checkpoint()["generation"], 1)
+	assert_true(store.pending_grants().is_empty())
+	setup.role = RunSetup.Role.HOST
+	assert_null(OrdinaryCurrency.begin_local(store, setup, ProfileShop.COMMON))
+	assert_true(store.close())
+
+
 func _binding(profile: String, recipient: CryptoKey) -> ProfileGrant.Binding:
 	var result := ProfileGrant.Binding.new()
 	result.run = "ordinary-run"
@@ -427,6 +456,12 @@ func _binding(profile: String, recipient: CryptoKey) -> ProfileGrant.Binding:
 
 
 static func _authority(role: RunSetup.Role = RunSetup.Role.SOLO) -> RunAuthority:
+	var setup := _setup(role)
+	var authority := RunAuthority.new()
+	return authority if authority.start(setup, &"host") else null
+
+
+static func _setup(role: RunSetup.Role = RunSetup.Role.SOLO) -> RunSetup:
 	var setup := RunSetup.new()
 	setup.role = role
 	setup.run_id = &"ordinary-run"
@@ -436,5 +471,4 @@ static func _authority(role: RunSetup.Role = RunSetup.Role.SOLO) -> RunAuthority
 	setup.authority_id = &"host"
 	setup.challenge_id = &"normal"
 	setup.initial_realms = {&"host": &"overworld"}
-	var authority := RunAuthority.new()
-	return authority if authority.start(setup, &"host") else null
+	return setup

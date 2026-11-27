@@ -55,25 +55,46 @@ static func begin(store: ProfileStore, binding: ProfileGrant.Binding, issuer: Cr
 		var saved := store.grant_binding(paired.run, paired.recipient)
 		if saved == null or saved.fields() != paired.fields():
 			return null
+	var tracker := _initialize(store, account, paired.fields(), clock)
+	tracker._binding = paired
+	tracker._signer = issuer
+	return tracker
+
+
+## A solo issuer applies only to its own opened profile. The persistent
+## profile identity supplies its source scope, with no transferable grant.
+static func begin_local(store: ProfileStore, setup: RunSetup, account: String,
+		clock: Callable = Callable()) -> OrdinaryCurrency:
+	if (store == null or store.identity().is_empty() or setup == null or setup.role != RunSetup.Role.SOLO
+			or not setup.is_valid_for(setup.authority_id) or not ProfileGrant.valid_field(String(setup.run_id))
+			or not ProfileGrant.valid_field(String(setup.rules_revision)) or not ProfileGrant.valid_field(String(setup.catalog_revision))
+			or not ProfileGrant.valid_field(account) or not account.begins_with("currency/")):
+		return null
+	var profile_id := store.identity()
+	var public_identity := "local/" + JSON.stringify(["profile", profile_id]).sha256_text()
+	var facts: Array[String] = [String(setup.run_id), String(setup.rules_revision), String(setup.catalog_revision),
+		profile_id, public_identity, public_identity]
+	return _initialize(store, account, facts, clock)
+
+
+static func _initialize(store: ProfileStore, account: String, facts: Array[String], clock: Callable) -> OrdinaryCurrency:
 	var tracker := OrdinaryCurrency.new()
 	tracker._store = store
-	tracker._binding = paired
 	tracker._issuer_profile = store.identity()
-	tracker._signer = issuer
 	tracker._account = account
-	tracker._facts_scope = paired.fields()
-	tracker._scope = [paired.run, paired.recipient, tracker._facts_scope[4], account]
+	tracker._facts_scope = facts
+	tracker._scope = [facts[0], facts[3], facts[4], account]
 	tracker._clock = clock
 	return tracker
 
 
-func belongs_to(run: StringName, rules: StringName, catalog: StringName) -> bool:
-	return (_binding != null and _binding.run == String(run)
-		and _binding.rules == String(rules) and _binding.catalog == String(catalog))
+func belongs_to(run: StringName, rules: StringName, catalog: StringName, role: RunSetup.Role) -> bool:
+	return (_facts_scope.size() == 6 and (_binding != null or role == RunSetup.Role.SOLO)
+		and _facts_scope[0] == String(run) and _facts_scope[1] == String(rules) and _facts_scope[2] == String(catalog))
 
 
 func recipient() -> String:
-	return _binding.recipient
+	return _facts_scope[3] if _facts_scope.size() == 6 else ""
 
 
 func account() -> String:
@@ -85,7 +106,7 @@ func issued_by(store: ProfileStore) -> bool:
 
 
 func is_local_recipient() -> bool:
-	return _binding != null and _binding.recipient == _issuer_profile
+	return not _issuer_profile.is_empty() and recipient() == _issuer_profile
 
 
 func shares_issuer_with(other: OrdinaryCurrency) -> bool:
@@ -293,9 +314,9 @@ func _draft(entries: Array[Earning], total: Quantity) -> Batch:
 		batch.occurrences.append(earned.occurrence)
 	ids.sort()
 	var occurrence := "ordinary/" + JSON.stringify(ids).sha256_text()
-	mutation.rules = _binding.rules
-	mutation.catalog = _binding.catalog
-	if _binding.recipient == _store.identity():
+	mutation.rules = _facts_scope[1]
+	mutation.catalog = _facts_scope[2]
+	if is_local_recipient():
 		mutation.id = occurrence
 		mutation.deltas[_account] = total
 	else:
