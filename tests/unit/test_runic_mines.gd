@@ -65,6 +65,31 @@ func test_compression_advances_arming_without_a_charge_wait() -> void:
 	assert_eq(arena.hp(&"waiter").native_at_scale(0), 84)
 
 
+func test_committed_mine_after_owner_death_admits_exact_expiry_and_rejects_later_crossing() -> void:
+	for exact: bool in [true, false]:
+		var arena := Arena.new(&"W01")
+		assert_true(arena.add(&"entrant", 60, 0, 100))
+		assert_true(arena.add(&"survivor", 100, 30, 100, 4))
+		var mines := RunicMines.create(HERO, FamiliarTest._earn(arena, 1, &"P03"), arena.kernel, arena.geometry, 1, 2)
+		var hit_ticks: Array[int] = []
+		for tick: int in range(1, 154):
+			if tick == 16:
+				assert_true(arena.swing_from(&"entrant", HERO, 250, tick))
+			if tick == 151:
+				if exact:
+					assert_true(arena.move(&"entrant", 15, 0))
+				else:
+					assert_true(arena.geometry.stage_circle_motion(&"entrant", 0, RealmSweep.Point.new(0, 0)))
+			assert_true(mines.advance(tick))
+			for hit: CombatKernel.Hit in arena.settle(tick):
+				if hit.family == &"P03":
+					assert_eq(hit.origin.owner, HERO)
+					hit_ticks.append(tick)
+		assert_eq(hit_ticks, [151] if exact else [])
+		assert_eq(arena.hp(&"entrant").native_at_scale(0), 84 if exact else 100)
+		assert_true(mines.positions().is_empty())
+
+
 func test_mine_survives_when_an_earlier_root_kills_the_only_expected_entrant() -> void:
 	var arena := Arena.new(&"W01")
 	assert_true(arena.add(&"entrant", -30, 0, 10))
