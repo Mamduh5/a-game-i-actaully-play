@@ -273,6 +273,9 @@ var _terminal: Terminal
 var _physical_mitigation := Quantity.from_count(100)
 var _magical_mitigation := Quantity.from_count(100)
 
+var terminal: Terminal:
+	get: return _terminal
+
 
 func add_actor(actor: CombatantState) -> bool:
 	if (not _accepting() or actor == null or not actor.is_valid() or _actors.has(actor.id)

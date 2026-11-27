@@ -195,6 +195,19 @@ func circle_category(entity: StringName, slot: int) -> int:
 	return shape.category if shape != null and shape.center != null else 0
 
 
+## Detached outlines for the renderer. The caller clips them to its own view.
+func segments(mask: int) -> Array[RealmOutline.Edge]:
+	var result: Array[RealmOutline.Edge] = []
+	for shape: Shape in _shapes.values():
+		if shape.edge == null or (shape.category & mask) == 0:
+			continue
+		var edge := RealmOutline.Edge.new()
+		edge.first = RealmSweep.Point.new(shape.edge.first.x, shape.edge.first.y)
+		edge.last = RealmSweep.Point.new(shape.edge.last.x, shape.edge.last.y)
+		result.append(edge)
+	return result
+
+
 func change_category(entity: StringName, slot: int, category: int) -> bool:
 	var shape: Shape = _shapes.get(RealmSpatialIndex.shape_key(entity, slot))
 	if shape == null or shape.fixed or category <= 0:

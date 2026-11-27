@@ -32,6 +32,7 @@ var _enemies: Dictionary[StringName, WorldEnemy] = {}
 var _players: Dictionary[StringName, bool] = {}
 var _sites: Dictionary[StringName, Schedule] = {}
 var _defeated_lives: Dictionary[StringName, int] = {}
+var _actor_mask := ACTORS
 var _frame: Frame
 var _decisions_opened := false
 var _tick: int
@@ -62,9 +63,13 @@ func track_player(id: StringName) -> bool:
 	if actor == null or actor.provenance != CombatOrigin.Provenance.SEAT or not actor.controller.is_empty():
 		return false
 	var realm: WorldExploration = _realms.get(actor.realm)
-	if realm == null or realm.geometry().circle_center(id, 0) == null:
+	if realm == null:
+		return false
+	var category := realm.geometry().circle_category(id, 0)
+	if category <= 0 or (category & WorldExploration.BLOCKER) != 0:
 		return false
 	_players[id] = true
+	_actor_mask |= category
 	return true
 
 
@@ -112,7 +117,8 @@ func schedule_spawn(site: SpawnSite) -> bool:
 
 ## A caller retains its open input cursor across a storage wait. Resume with
 ## the same tick to avoid redoing decisions, releases and spawn opportunities.
-func advance(tick: int, authority: RunAuthority = null) -> Frame:
+func advance(tick: int, authority: RunAuthority = null, play: Callable = Callable(),
+		settled: Callable = Callable()) -> Frame:
 	if (_kernel == null or _kernel.arena_started() or not _fault.is_empty() or tick != _tick + 1 or tick > RunAuthority.MAX_TICK
 			or _terminal != CombatKernel.Terminal.ACTIVE
 			or (authority != null and not authority.can_open_earning_group())):
@@ -122,10 +128,13 @@ func advance(tick: int, authority: RunAuthority = null) -> Frame:
 		_frame = Frame.new()
 		_frame.tick = tick
 	if not _decisions_opened:
-		if not _drain(now, authority, false):
+		if not _drain(now, authority, false, settled):
 			return null
 		if _frame.terminal != CombatKernel.Terminal.ACTIVE:
 			return _finish_frame(tick)
+		if play.is_valid() and not play.call():
+			_fault = &"player_turn"
+			return null
 		_spawn_due(tick)
 		var likeness := _subjects()
 		var ids := _sorted(_enemies.keys())
@@ -142,11 +151,11 @@ func advance(tick: int, authority: RunAuthority = null) -> Frame:
 		for id: StringName in due:
 			var place: WorldEnemy.Subject = likeness.get(id)
 			if place == null or not _enemies[id].release(_realms[place.realm].geometry(),
-					likeness, tick, WorldExploration.BLOCKER, ACTORS):
+					likeness, tick, WorldExploration.BLOCKER, _actor_mask):
 				_fault = &"world_delivery"
 				return null
 		_decisions_opened = true
-	if not _drain(now, authority, true):
+	if not _drain(now, authority, true, settled):
 		return null
 	var expiry := _kernel.advance_survival(now)
 	if expiry.result == CombatKernel.Result.INTERRUPTED:
@@ -166,7 +175,7 @@ func _finish_frame(tick: int) -> Frame:
 	return result
 
 
-func _drain(now: CombatInstant, authority: RunAuthority, inclusive: bool) -> bool:
+func _drain(now: CombatInstant, authority: RunAuthority, inclusive: bool, settled: Callable) -> bool:
 	while true:
 		var due := _kernel.next_due()
 		if due == null:
@@ -188,8 +197,11 @@ func _drain(now: CombatInstant, authority: RunAuthority, inclusive: bool) -> boo
 				for hit: CombatKernel.Hit in closed.eliminations:
 					if _enemies.has(hit.target):
 						_defeated_lives[hit.target] = hit.target_life
-				if closed.terminal != CombatKernel.Terminal.ACTIVE:
-					_frame.terminal = closed.terminal
+				if settled.is_valid() and not settled.call(closed):
+					_fault = &"combat_observer"
+					return false
+				if _kernel.terminal != CombatKernel.Terminal.ACTIVE:
+					_frame.terminal = _kernel.terminal
 					return true
 			CombatKernel.Result.WAITING, CombatKernel.Result.IDLE:
 				return true
@@ -205,6 +217,17 @@ func _drain(now: CombatInstant, authority: RunAuthority, inclusive: bool) -> boo
 
 func fault() -> StringName:
 	return _fault
+
+
+func threats(realm: StringName) -> Array[WorldEnemy.Threat]:
+	var result: Array[WorldEnemy.Threat] = []
+	for id: StringName in _sorted(_enemies.keys()):
+		var actor := _kernel.actor_vitals(id)
+		if actor != null and actor.realm == realm:
+			var threat := _enemies[id].threat()
+			if threat != null:
+				result.append(threat)
+	return result
 
 
 ## Host evidence image. A peer must receive a realm-filtered projection.
@@ -254,7 +277,7 @@ func _spawn(id: StringName, realm: StringName, rules: WorldEnemy.Rules, at: Real
 			or not rules.is_valid() or not _realms.has(realm) or _realms[realm].module_at(at).is_empty()):
 		return false
 	var geometry := _realms[realm].geometry()
-	var room := geometry.certify_circle_snapshot(realm, at, rules.radius, WorldExploration.BLOCKER | ACTORS)
+	var room := geometry.certify_circle_snapshot(realm, at, rules.radius, WorldExploration.BLOCKER | _actor_mask)
 	if room == null or not room.unresolved.is_empty():
 		return false
 	for contact: RealmGeometry.Contact in room.contacts:

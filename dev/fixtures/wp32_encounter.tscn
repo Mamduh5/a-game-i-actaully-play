@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://dev/fixtures/wp32_encounter.gd" id="1_encounter"]
+
+[node name="EncounterFixture" type="Node2D"]
+script = ExtResource("1_encounter")

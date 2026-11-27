@@ -9,15 +9,19 @@ const MANUAL := &"wp14_manual"
 const MOVEMENT: Array[StringName] = [LEFT, RIGHT, UP, DOWN]
 
 var _view: Viewport
+var _movement: Array[StringName]
+var _notify_pointer: bool
 var _held: Dictionary[StringName, bool] = {}
 
 
-func _init(viewport: Viewport) -> void:
+func _init(viewport: Viewport, movement: Array[StringName] = MOVEMENT, notify_pointer: bool = true) -> void:
 	_view = viewport
+	_movement = movement.duplicate()
+	_notify_pointer = notify_pointer
 
 
 func apply(command: Dictionary) -> bool:
-	if command.size() != 4:
+	if command.size() != 4 or _movement.size() != 4:
 		return false
 	var x: Variant = command.get("horizontal")
 	var y: Variant = command.get("vertical")
@@ -30,8 +34,8 @@ func apply(command: Dictionary) -> bool:
 			or not rect.has_point(Vector2(click[0], click[1]))):
 		return false
 	var next: Array[bool] = [x == -1, x == 1, y == -1, y == 1]
-	for index: int in MOVEMENT.size():
-		var action: StringName = MOVEMENT[index]
+	for index: int in _movement.size():
+		var action := _movement[index]
 		if bool(_held.get(action, false)) != next[index]:
 			_push_key(action, next[index])
 			_held[action] = next[index]
@@ -59,7 +63,8 @@ func _push_key(action: StringName, pressed: bool) -> void:
 
 
 func _push_click(point: Vector2) -> void:
-	_view.notify_mouse_entered()
+	if _notify_pointer:
+		_view.notify_mouse_entered()
 	var motion := InputEventMouseMotion.new()
 	motion.position = point
 	motion.global_position = point

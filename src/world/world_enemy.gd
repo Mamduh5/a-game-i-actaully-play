@@ -68,6 +68,12 @@ class Strike:
 	var center: RealmSweep.Point
 	var due: int
 
+class Threat:
+	var center: RealmSweep.Point
+	var radius: float
+	var start_tick: int
+	var impact_tick: int
+
 var _id: StringName
 var _rules: Rules
 var _pursuit: StringName
@@ -123,6 +129,17 @@ func decide(kernel: CombatKernel, room: WorldExploration, settled: Dictionary[St
 
 func release_due(tick: int) -> bool:
 	return _attack != null and _attack.due <= tick
+
+
+func threat() -> Threat:
+	if _attack == null:
+		return null
+	var warning := Threat.new()
+	warning.center = PlayerControlState.copy_point(_attack.center)
+	warning.radius = _rules.attack_radius
+	warning.start_tick = _attack.due - _rules.windup_ticks
+	warning.impact_tick = _attack.due
+	return warning
 
 
 func release(geometry: RealmGeometry, subjects: Dictionary[StringName, Subject],
