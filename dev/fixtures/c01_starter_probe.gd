@@ -8,6 +8,9 @@ const Foe := 1
 const Wall := 2
 const Ally := 4
 const POWER_CASES := ["familiar", "mines", "lance", "tether"]
+const SPEAR_CASES := ["spear-clear", "spear-blocked"]
+const SPEAR_WALL_TOP := Vector2(408, 327)
+const SPEAR_WALL_BOTTOM := Vector2(408, 433)
 
 class Rules extends RunAuthority:
 	var geometry := RealmGeometry.new(Realm)
@@ -43,6 +46,9 @@ class Rules extends RunAuthority:
 		slots.fill(&"")
 		var hero := StarterCombatRules.CONDUCTOR if which.begins_with("conductor") else StarterCombatRules.UNDYING
 		var unlocked: Dictionary[StringName, bool] = {}
+		if which in SPEAR_CASES:
+			weapon = &"W04"
+			unlocked[weapon] = true
 		if which == "tether":
 			unlocked[&"P14"] = true
 			slots[0] = &"P14"
@@ -102,6 +108,16 @@ class Rules extends RunAuthority:
 		if combat == null or not start(setup, Player):
 			return false
 		match which:
+			"spear-clear", "spear-blocked":
+				if not (_enemy(&"front", 378, 380, 100) and _enemy(&"rear", 443, 380, 100)
+						and _enemy(&"flank", 415, 409, 100, false)):
+					return false
+				if which == "spear-clear":
+					return true
+				var edge := RealmOutline.Edge.new()
+				edge.first = RealmSweep.Point.new(SPEAR_WALL_TOP.x, SPEAR_WALL_TOP.y)
+				edge.last = RealmSweep.Point.new(SPEAR_WALL_BOTTOM.x, SPEAR_WALL_BOTTOM.y)
+				return geometry.add_segment(&"fixture/shield", 0, edge, Wall, false)
 			"tether":
 				return (tether != null and _enemy(&"first", 400, 380, 200) and _enemy(&"last", 520, 380, 200)
 					and _enemy(&"visitor", 460, 390, 200, false))
@@ -270,6 +286,14 @@ class Rules extends RunAuthority:
 		if not passed:
 			return false
 		match scenario:
+			"spear-clear", "spear-blocked":
+				var expected := [[8, "W04", "front", false]]
+				if scenario == "spear-clear":
+					expected.append([8, "W04", "rear", false])
+				return (launches == 1 and trace == expected and player.x == 355.0
+					and kernel.actor_snapshot(&"front").hp.amount.native_at_scale(0) == 80
+					and kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0) == (80 if scenario == "spear-clear" else 100)
+					and kernel.actor_snapshot(&"flank").hp.amount.native_at_scale(0) == 100)
 			"tether":
 				return (trace == [[16, "P14", "first", false], [16, "P14", "last", false],
 					[16, "P14", "visitor", false], [46, "P14", "first", false], [46, "P14", "last", false]]
@@ -407,6 +431,10 @@ func _physics_process(_delta: float) -> void:
 		_hud.text = "Spectral Lance\nEdge HP %d   Rear HP %s" % [
 			_rules.kernel.actor_snapshot(&"edge").hp.amount.native_at_scale(0),
 			rear_label]
+	elif _case in SPEAR_CASES:
+		_hud.text = "Spear\nFront HP %d   Rear HP %d" % [
+			_rules.kernel.actor_snapshot(&"front").hp.amount.native_at_scale(0),
+			_rules.kernel.actor_snapshot(&"rear").hp.amount.native_at_scale(0)]
 	elif _case == "tether":
 		_hud.text = "Arcane Tether\nEndpoint HP %d   Visitor HP %d" % [
 			_rules.kernel.actor_snapshot(&"first").hp.amount.native_at_scale(0),
@@ -426,7 +454,8 @@ func _physics_process(_delta: float) -> void:
 	var capture_ticks: Array = {"sword": [10], "bow": [16], "bow-miss": [21],
 			"sigil": [20, 34], "undying": [18], "conductor": [18], "conductor-charged": [12, 244], "storm-relay": [17],
 			"bleed": [190], "wake": [80, 85, 100], "rupture": [10], "familiar": [2, 24], "fracture": [15, 23],
-			"mines": [6, 18, 38], "lance": [3, 10], "tether": [18, 33, 48]}[_case]
+			"mines": [6, 18, 38], "lance": [3, 10], "tether": [18, 33, 48],
+			"spear-clear": [9], "spear-blocked": [9]}[_case]
 	var extra_capture := _rules.prepared and ((_case == "familiar" and tick == 50) or (_case == "lance" and tick == 59))
 	if not _capture_dir.is_empty() and (tick in capture_ticks or extra_capture):
 		RenderingServer.frame_post_draw.connect(_capture.bind(tick), CONNECT_ONE_SHOT)
@@ -436,6 +465,8 @@ func _physics_process(_delta: float) -> void:
 		var pose := _rules.geometry.circle_center(Player, 0)
 		var facts := [_case, _rules.trace, snappedf(pose.y, 0.001), _rules.launches, _rules.manual,
 			_rules.layer_units(StarterCombatRules.HARVEST), _rules.layer_units(StarterCombatRules.SIPHON)]
+		if _case in SPEAR_CASES:
+			facts.append(snappedf(pose.x, 0.001))
 		var serial := JSON.stringify(facts)
 		print("C01 passed=%s hash=%s facts=%s" % [good, serial.sha256_text(), serial])
 		if _rules.prepared:
@@ -460,6 +491,13 @@ func _drive_visible_inputs(tick: int) -> void:
 			var move := InputEventMouseButton.new()
 			move.button_index = MOUSE_BUTTON_RIGHT
 			move.position = Vector2(320, 330)
+			move.pressed = pressed
+			get_viewport().push_input(move, true)
+	if _case in SPEAR_CASES and tick == 1:
+		for pressed: bool in [true, false]:
+			var move := InputEventMouseButton.new()
+			move.button_index = MOUSE_BUTTON_RIGHT
+			move.position = Vector2(355, 380)
 			move.pressed = pressed
 			get_viewport().push_input(move, true)
 	if _case == "sword" and tick in [1, 31]:
@@ -487,6 +525,8 @@ func _draw() -> void:
 	var player := _rules.geometry.circle_center(Player, 0)
 	if player == null:
 		return
+	if _case == "spear-blocked":
+		draw_line(SPEAR_WALL_TOP, SPEAR_WALL_BOTTOM, Color("#bdafa3"), 6, true)
 	if _rules.tether != null:
 		var segment := _rules.tether.visible_segment()
 		if segment.size() == 2:

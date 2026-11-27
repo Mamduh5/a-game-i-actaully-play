@@ -168,7 +168,7 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 			action.wake_duration = _rules.wake_duration
 			action.wake_damage = _rules.wake_damage
 		var force := _force_strength(_rules.force_distance)
-		if _weapon.delivery == StarterWeapon.Delivery.ARROW:
+		if _weapon.delivery in [StarterWeapon.Delivery.ARROW, StarterWeapon.Delivery.THRUST]:
 			action.displacement = RealmSweep.Point.new(heading.x * force, heading.y * force)
 		else:
 			action.push_center = aim if _weapon.delivery == StarterWeapon.Delivery.SIGIL else start
@@ -178,6 +178,7 @@ func try_weapon(tick: int, targeting: PlayerTargeting, candidates: Array[PlayerT
 		StarterWeapon.Delivery.CLEAVE: result = _cleave(action, tick, start, heading)
 		StarterWeapon.Delivery.ARROW: result = _launch_arrow(action, start, heading)
 		StarterWeapon.Delivery.SIGIL: result = _place_sigil(action, tick, start, aim)
+		StarterWeapon.Delivery.THRUST: result = _thrust(action, tick, start, heading)
 	if result == Attempt.COMMITTED:
 		targeting.commit_attack_target(id)
 		if _weapon_rate != null:
@@ -644,6 +645,25 @@ func _launch_arrow(action: CombatAction, center: RealmSweep.Point, heading: Real
 	arrow.remaining = _weapon.reach
 	_arrows.append(arrow)
 	return Attempt.COMMITTED
+
+
+func _thrust(action: CombatAction, tick: int, center: RealmSweep.Point, heading: RealmSweep.Point) -> Attempt:
+	var radius := _weapon.thrust_width * 0.5
+	var first := _offset(center, heading, radius)
+	var tip := _offset(center, heading, _weapon.reach - radius)
+	var path := _geometry.certify_capsule_snapshot(_geometry.realm_id, first, tip, radius, _targets, _blockers, _actor)
+	if path == null:
+		return Attempt.FAULT
+	var result := _instant_delivery(action, tick, path.contacts)
+	if result == Attempt.COMMITTED:
+		var reach := _weapon.reach
+		if path.blocker != null:
+			reach = lerpf(_weapon.thrust_width, _weapon.reach, path.blocker.proof.earliest)
+		var cue := _ring(&"W04", center, reach, tick, tick + 9)
+		cue.heading = heading
+		cue.radius = radius
+		_effects.append(cue)
+	return result
 
 
 func _place_sigil(action: CombatAction, tick: int, source: RealmSweep.Point, center: RealmSweep.Point) -> Attempt:

@@ -78,6 +78,15 @@ targeting = 3
 eligibility = 1
 source_family = &"W03"
 
+[sub_resource type="Resource" id="Entry_W04"]
+script = ExtResource("2_entry")
+id = &"W04"
+kind = 1
+lifetime = 1
+targeting = 3
+eligibility = 3
+source_family = &"W04"
+
 [sub_resource type="Resource" id="Entry_R01"]
 script = ExtResource("2_entry")
 id = &"R01"
@@ -235,8 +244,8 @@ ranks = Array[StringName]([&"rank_1", &"rank_2", &"elastic_conduit", &"rank_4", 
 [resource]
 resource_name = "Starter roster"
 script = ExtResource("1_bundle")
-revision = &"V42.6-R1-starter-5"
-entries = Array[ExtResource("2_entry")]([SubResource("Entry_H01"), SubResource("Entry_H02"), SubResource("Entry_H03"), SubResource("Entry_H04"), SubResource("Entry_H05"), SubResource("Entry_H07"), SubResource("Entry_W01"), SubResource("Entry_W02"), SubResource("Entry_W03"), SubResource("Entry_R01"), SubResource("Entry_R02"), SubResource("Entry_R03"), SubResource("Entry_P01"), SubResource("Entry_P02"), SubResource("Entry_P03"), SubResource("Entry_P04"), SubResource("Entry_P05"), SubResource("Entry_P06"), SubResource("Entry_P07"), SubResource("Entry_P08"), SubResource("Entry_P09"), SubResource("Entry_P10"), SubResource("Entry_P11"), SubResource("Entry_P12"), SubResource("Entry_P14")])
+revision = &"V42.6-R1-starter-6"
+entries = Array[ExtResource("2_entry")]([SubResource("Entry_H01"), SubResource("Entry_H02"), SubResource("Entry_H03"), SubResource("Entry_H04"), SubResource("Entry_H05"), SubResource("Entry_H07"), SubResource("Entry_W01"), SubResource("Entry_W02"), SubResource("Entry_W03"), SubResource("Entry_W04"), SubResource("Entry_R01"), SubResource("Entry_R02"), SubResource("Entry_R03"), SubResource("Entry_P01"), SubResource("Entry_P02"), SubResource("Entry_P03"), SubResource("Entry_P04"), SubResource("Entry_P05"), SubResource("Entry_P06"), SubResource("Entry_P07"), SubResource("Entry_P08"), SubResource("Entry_P09"), SubResource("Entry_P10"), SubResource("Entry_P11"), SubResource("Entry_P12"), SubResource("Entry_P14")])
 display_names = Dictionary[StringName, String]({
 &"H01": "The Undying",
 &"H02": "The Acrobat",
@@ -247,6 +256,7 @@ display_names = Dictionary[StringName, String]({
 &"W01": "Sword",
 &"W02": "Bow",
 &"W03": "Magic Staff",
+&"W04": "Spear",
 &"R01": "Bleed",
 &"R02": "Lightning",
 &"R03": "Force",

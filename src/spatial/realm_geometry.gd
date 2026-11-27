@@ -22,6 +22,7 @@ class SweepCandidates:
 	var revision: int
 	var contacts: Array[Contact] = []
 	var unresolved: Array[Contact] = []
+	var blocker: Contact
 
 class Displacement:
 	var start: RealmSweep.Point
@@ -302,6 +303,39 @@ func certify_frozen_path(realm: StringName, start: RealmSweep.Point, finish: Rea
 	if result != null and result.contacts.size() > 1:
 		result.contacts.sort_custom(_compare_shape_ids)
 	return result
+
+
+## Order contacts along the geometry of one instantaneous strike. Blockers
+## win equal-position ties. Accepted hits all belong to the same instant.
+func certify_capsule_snapshot(realm: StringName, start: RealmSweep.Point, finish: RealmSweep.Point, radius: float,
+		targets: int, blockers: int, except_entity: StringName) -> SweepCandidates:
+	if targets <= 0 or blockers < 0 or (targets & blockers) != 0:
+		return null
+	var path := certify_frozen_path(realm, start, finish, radius, targets | blockers, except_entity)
+	if path == null or not path.unresolved.is_empty():
+		return null
+	var obstructions: Array[Contact] = []
+	for contact: Contact in path.contacts:
+		if (contact.category & blockers) != 0:
+			obstructions.append(contact)
+	if not obstructions.is_empty():
+		path.blocker = _first_blocker(obstructions)
+		if path.blocker == null:
+			return null
+	var hits: Array[Contact] = []
+	var instant := RealmCircleTime.Contact.new(RealmCircleTime.Result.HIT)
+	for contact: Contact in path.contacts:
+		if (contact.category & blockers) != 0:
+			continue
+		if path.blocker != null:
+			match contact.proof.order_against(path.blocker.proof):
+				RealmCircleTime.Order.AFTER, RealmCircleTime.Order.SAME: continue
+				RealmCircleTime.Order.UNRESOLVED: return null
+		contact.proof = instant
+		contact.time = 0.0
+		hits.append(contact)
+	path.contacts = hits
+	return path
 
 
 ## Use the same blocker motion as the certified delivery, restricted to the

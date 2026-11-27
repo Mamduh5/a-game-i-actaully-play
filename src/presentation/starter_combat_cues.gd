@@ -32,6 +32,7 @@ func _draw() -> void:
 					center - axis * 5.0 + axis.orthogonal() * 4.0,
 					center - axis * 5.0 - axis.orthogonal() * 4.0]), ARROW)
 			&"W03": _circle(center, cue.reach, SIGIL, _tick >= cue.impact)
+			&"W04": _thrust(center, cue)
 			StarterCombatRules.TIME_FRACTURE: _circle(center, cue.reach, Color("#8bd9ed"), true)
 			StarterCombatRules.TEMPORAL_ECHO: _circle(center, cue.reach, Color("#f2d5ff"), false)
 			StarterCombatRules.CLOSE_CALL: draw_arc(center, cue.reach, 0.0, TAU, 48, SIPHON, 2.0, true)
@@ -67,6 +68,19 @@ func _fan(center: Vector2, cue: StarterCombat.Cue) -> void:
 	draw_line(center, polygon[1], SWORD, 2.0, true)
 	draw_line(center, polygon[-1], SWORD, 2.0, true)
 	draw_arc(center, cue.reach, minimum, maximum, 24, SWORD, 3.0, true)
+
+
+func _thrust(center: Vector2, cue: StarterCombat.Cue) -> void:
+	var axis := Vector2(cue.heading.x, cue.heading.y)
+	var start := center + axis * cue.radius
+	var end := center + axis * (cue.reach - cue.radius)
+	var side := axis.orthogonal() * cue.radius
+	if not _reduce_fill and cue.reach > cue.radius * 2.0:
+		draw_colored_polygon(PackedVector2Array([start - side, end - side, end + side, start + side]), Color(SWORD, 0.24))
+	draw_line(start - side, end - side, SWORD, 2.0, true)
+	draw_line(start + side, end + side, SWORD, 2.0, true)
+	draw_arc(end, cue.radius, side.angle() - PI, side.angle(), 16, SWORD, 2.0, true)
+	draw_arc(start, cue.radius, side.angle(), side.angle() + PI, 16, SWORD, 2.0, true)
 
 
 func _circle(center: Vector2, radius: float, ink: Color, active: bool) -> void:

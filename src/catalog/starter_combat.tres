@@ -30,6 +30,15 @@ reach = 360.0
 delay_ticks = 24
 area_radius = 65.0
 
+[sub_resource type="Resource" id="Spear"]
+script = ExtResource("2_weapon")
+id = &"W04"
+delivery = 3
+damage = 20
+cooldown_ticks = 60
+reach = 125.0
+thrust_width = 22.0
+
 [resource]
 script = ExtResource("1_rules")
-weapons = Array[ExtResource("2_weapon")]([SubResource("Sword"), SubResource("Bow"), SubResource("Staff")])
+weapons = Array[ExtResource("2_weapon")]([SubResource("Sword"), SubResource("Bow"), SubResource("Staff"), SubResource("Spear")])

@@ -209,6 +209,54 @@ func test_blood_pact_reads_healed_hp_and_crimson_cadence_keeps_accrued_progress(
 	assert_eq(arena.combat.movement_multiplier(60), 1.0)
 
 
+func test_spear_hits_settled_capsule_once_per_life_and_yields_to_equal_position_blocker() -> void:
+	for blocked: bool in [false, true]:
+		var arena := Arena.new(&"W04", &"H01", false, &"", &"", {&"W04": true})
+		assert_false(&"W04" in RunPreparation.available(arena.catalog, CatalogEntry.Kind.WEAPON, {}))
+		assert_true(arena.add(&"aim", 45, 0, 100))
+		assert_true(arena.geometry.add_circle(&"aim", 1, RealmSweep.Point.new(54, 1), 3.0, HOSTILE))
+		assert_true(arena.add(&"tangent", 65, 14, 100, HOSTILE, false))
+		assert_true(arena.add(&"wide", 60, 14.01, 100, HOSTILE, false))
+		assert_true(arena.add(&"tie", 83, 0, 100, HOSTILE, false))
+		assert_true(arena.add(&"rear", 118, 0, 100, HOSTILE, false))
+		assert_true(arena.add(&"beyond", 129, 0, 100, HOSTILE, false))
+		assert_true(arena.geometry.stage_circle_motion(&"rear", 0, RealmSweep.Point.new(118, 80)))
+		assert_true(arena.wall(80, -20 if blocked else 20, 40))
+		assert_eq(arena.attack(1, {MANA: Quantity.from_count(3)}), Committed)
+		var closed := arena.kernel.resolve_next(CombatInstant.at_tick(1))
+		assert_eq(closed.due.order_against(CombatInstant.at_tick(1)), RealmCircleTime.Order.SAME)
+		var expected := [&"aim", &"tangent"] if blocked else [&"aim", &"rear", &"tangent", &"tie"]
+		var targets: Array[StringName] = []
+		for hit: CombatKernel.Hit in closed.hits:
+			assert_eq(hit.family, &"W04")
+			assert_eq(hit.components[0].kind, CombatAction.Damage.PHYSICAL)
+			assert_eq(hit.components[0].hp_removed.native_at_scale(0), 20)
+			assert_true(hit.displacement == null)
+			targets.append(hit.target)
+		assert_eq(targets, expected)
+		assert_eq(arena.hp(&"wide").native_at_scale(0), 100)
+		assert_eq(arena.hp(&"beyond").native_at_scale(0), 100)
+		assert_eq(arena.kernel.actor_snapshot(HERO).resources[MANA].native_at_scale(0), 7)
+		assert_almost_eq(arena.combat.cues()[0].reach, 80.0 if blocked else 125.0, 0.00001)
+		assert_eq(arena.combat.cues()[0].radius, 11.0)
+
+
+func test_spear_blocked_commit_pays_once_but_rejected_action_spends_nothing() -> void:
+	var arena := Arena.new(&"W04", &"H01", false, &"", &"", {&"W04": true})
+	assert_eq(arena.attack(1, {MANA: Quantity.from_count(3)}), StarterCombat.Attempt.NO_TARGET)
+	assert_true(arena.add(&"foe", 100, 0, 100))
+	assert_true(arena.wall(60, -25, 25))
+	assert_eq(arena.attack(1, {MANA: Quantity.from_count(11)}), StarterCombat.Attempt.REJECTED)
+	assert_eq(arena.kernel.actor_snapshot(HERO).resources[MANA].native_at_scale(0), 10)
+	assert_eq(arena.attack(1, {MANA: Quantity.from_count(3)}), Committed)
+	assert_eq(arena.kernel.pending_count(), 0)
+	var actor := arena.kernel.actor_snapshot(HERO)
+	assert_eq(actor.resources[MANA].native_at_scale(0), 7)
+	assert_eq(arena.hp(&"foe").native_at_scale(0), 100)
+	assert_false(actor.cooldown_ready(StarterCombat.WEAPON_COOLDOWN, CombatInstant.at_tick(60)))
+	assert_true(actor.cooldown_ready(StarterCombat.WEAPON_COOLDOWN, CombatInstant.at_tick(61)))
+
+
 func test_fracture_compresses_only_the_owners_sigil_inside_the_selected_field() -> void:
 	for inside: bool in [false, true]:
 		var arena := Arena.new(&"W03", &"H04", false, &"", &"", {&"H04": true})
