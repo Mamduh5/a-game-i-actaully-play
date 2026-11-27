@@ -50,3 +50,23 @@
 | `headless/runtime.log` | `c11e6a6b8e373c04ef1eb52a1c610b4134e8f9ba2f029e9439ef73972d3c50d1` |
 | `overlay-eed905e-gut.xml` | `ee3e4248b57dc6a96264e9f5ce6858c803507a3779319b8467fc01383a8c38c8` |
 | `adversarial-probe.log` | `ef61beb6c6ced6172eaaf4cbdf88c60f2a379ec6c571bb4b57ffe25884034672` |
+
+## Writer compatibility retest on af6052f
+
+Codex overlaid the approved C24 object scope from `85a87064deeec57a1092835879a9470e3d5a1104` on a disposable clean `dev` archive of `af6052f523da4b6351bcd7d227b6d369f456b414`. The overlay contained `src/world/objects/`, `tests/unit/test_world_objects.gd` with its UID, and `dev/fixtures/c24_object_probe.{gd,gd.uid,tscn}`. The check covers compatibility with the newer settlement, realm and capsule changes. C24 stays isolated on `work/c24` pending an elongated footprint, authoritative creature impacts and finite pickup consumers.
+
+- Pinned Godot `4.7.stable.official.5b4e0cb0f` with isolated storage and MCP off passed cold import and **375/375 GUT with 16,077 assertions**, including all 14 C24 tests. The 249-file Windows Player pack included the object catalog and field script, passed development-file exclusions and booted in an isolated profile.
+- The disposable Windows Dev collapse fixture preserved the tick 2 warning and the single neutral `collapse_fault` contact on the arriving creature at tick 38. The two modes matched logical receipts. The rendered `960×540` captures are byte-identical to the reviewed C24 capture references. The capture command uses `c24_object_probe.tscn` as the disposable entry scene, `--fixed-fps 60`, and `-- <existing-capture-directory>` in both modes. The verdict line starts `C24_COLLAPSE`.
+- A reviewer can reproduce from the two exact sources with the scoped overlay and repeat the collapse and momentum checks. The original compound-impact verdict remains recorded above. Production integration, C25 and C26 retain their package prerequisites.
+
+| File under `.qa-evidence/C24/composition-af6052f-85a8706/` | SHA-256 |
+|---|---|
+| `c24.tar` | `a531056f3889acf82c3ca055e8307e6e9a50fa422bbee480ef1df5cdb2616e00` |
+| `gut.xml` | `8fc432b297eb838586b842e38eeba3efcc0dda7c1bac09f701dc48d6ccea7dd8` |
+| `player-manifest.txt` | `6506db2848339a94cd699a9b2742413c37f7944926b00b4b7c6baa6904147146` |
+| `player-boot.log` | `150bd02025bc1b327f915c5215b6091ba953106ccfadee74008d89162364a3ff` |
+| `headless/runtime.log` | `a5d6af0c37f010c24889d2fabc44c1cc92b7e452b3ed2a5162c93abe349ddd14` |
+| `rendered/runtime.log` | `a40eb3ec48873718eae3c3b53202b9053a0bc13da25c358140b8b95f5c1a6648` |
+| `rendered/collapse-5.png` | `4cef26181aff1a3c734d81eefc17b9ac582cc85dc04d0f141d5b86dc5e507f01` |
+| `rendered/collapse-33.png` | `3b21703ed84dcd11965c941358bac0724db393e3bc6b16b51175292f996b8c12` |
+| `rendered/collapse-40.png` | `35144d64d5358c5583fce5797cc737015694125e1cf28c9f17236a6dea99d84a` |
